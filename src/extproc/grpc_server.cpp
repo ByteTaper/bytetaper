@@ -435,6 +435,10 @@ public:
                         };
                         apg::run_pipeline(kCompressionStages, 1, filter_state.context);
                     }
+                    if (filter_state.context.response_body_size_known &&
+                        filter_state.context.compression_decision.evaluated) {
+                        filter_state.context.compression_decision_final = true;
+                    }
                     apply_compression_response_headers(filter_state.context, common_response);
                 }
 
@@ -505,7 +509,8 @@ public:
 
                 // Run compression decision pipeline again during body if needed (refines decision
                 // with actual body size)
-                if (filter_state.matched_policy != nullptr) {
+                if (filter_state.matched_policy != nullptr &&
+                    !filter_state.context.compression_decision_final) {
                     if (!filter_state.context.response_body_size_known) {
                         filter_state.context.response_body_len =
                             request.response_body().body().size();

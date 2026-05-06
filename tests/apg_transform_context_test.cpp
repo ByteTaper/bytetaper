@@ -62,4 +62,46 @@ TEST(ApgTransformContextTest, ExplicitAssignmentReadsBackValues) {
     EXPECT_EQ(context.trace_length, 2u);
 }
 
+TEST(ApgTransformContextTest, FinalFlag_DefaultFalse) {
+    const ApgTransformContext context{};
+    EXPECT_FALSE(context.compression_decision_final);
+}
+
+TEST(ApgTransformContextTest, FinalFlag_SetWhenSizeKnownAndEvaluated) {
+    ApgTransformContext context{};
+    context.response_body_size_known = true;
+    context.compression_decision.evaluated = true;
+
+    // Simulation of what happens in ResponseHeaders phase:
+    if (context.response_body_size_known && context.compression_decision.evaluated) {
+        context.compression_decision_final = true;
+    }
+
+    EXPECT_TRUE(context.compression_decision_final);
+}
+
+TEST(ApgTransformContextTest, FinalFlag_NotSetWhenSizeUnknown) {
+    ApgTransformContext context{};
+    context.response_body_size_known = false;
+    context.compression_decision.evaluated = true;
+
+    if (context.response_body_size_known && context.compression_decision.evaluated) {
+        context.compression_decision_final = true;
+    }
+
+    EXPECT_FALSE(context.compression_decision_final);
+}
+
+TEST(ApgTransformContextTest, FinalFlag_NotSetWhenNotEvaluated) {
+    ApgTransformContext context{};
+    context.response_body_size_known = true;
+    context.compression_decision.evaluated = false;
+
+    if (context.response_body_size_known && context.compression_decision.evaluated) {
+        context.compression_decision_final = true;
+    }
+
+    EXPECT_FALSE(context.compression_decision_final);
+}
+
 } // namespace bytetaper::apg

@@ -36,6 +36,18 @@ static bool find_body_header(const envoy::service::ext_proc::v3::ProcessingRespo
     return false;
 }
 
+static bool find_headers_header(const envoy::service::ext_proc::v3::ProcessingResponse& resp,
+                                const std::string& key, const std::string& expected_value) {
+    if (!resp.has_response_headers())
+        return false;
+    for (const auto& m : resp.response_headers().response().header_mutation().set_headers()) {
+        if (m.header().key() == key && m.header().raw_value() == expected_value) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int main() {
     auto policy = make_compression_policy();
 
@@ -161,6 +173,66 @@ int main() {
             return 200;
         if (!find_body_header(r3, "x-bytetaper-compression-reason", "content_type_not_eligible"))
             return 201;
+
+        stream->WritesDone();
+        stream->Finish();
+    }
+
+    // ── Scenario C: Eligible with Content-Length (Header-Only Decision) ──
+    {
+        grpc::ClientContext ctx{};
+        auto stream = stub->Process(&ctx);
+
+        // Request Headers
+        envoy::service::ext_proc::v3::ProcessingRequest req_hdrs{};
+        auto* rh = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
+        rh->set_key(":path");
+        rh->set_raw_value("/api/data");
+        auto* rm = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
+        rm->set_key(":method");
+        rm->set_raw_value("GET");
+        auto* ae = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
+        ae->set_key("accept-encoding");
+        ae->set_raw_value("br, gzip");
+        stream->Write(req_hdrs);
+        envoy::service::ext_proc::v3::ProcessingResponse r1{};
+        stream->Read(&r1);
+
+        // Response Headers with content-length present
+        envoy::service::ext_proc::v3::ProcessingRequest resp_hdrs{};
+        auto* rs = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
+        rs->set_key(":status");
+        rs->set_raw_value("200");
+        auto* ct = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
+        ct->set_key("content-type");
+        ct->set_raw_value("application/json");
+        auto* cl = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
+        cl->set_key("content-length");
+        cl->set_raw_value("1024");
+        stream->Write(resp_hdrs);
+        envoy::service::ext_proc::v3::ProcessingResponse r2{};
+        stream->Read(&r2);
+
+        // Verify that compression candidate and algorithm hint headers are emitted EARLY in
+        // response headers!
+        if (!find_headers_header(r2, "x-bytetaper-compression-candidate", "true"))
+            return 300;
+        if (!find_headers_header(r2, "x-bytetaper-compression-algorithm-hint", "br"))
+            return 301;
+
+        // Response Body
+        envoy::service::ext_proc::v3::ProcessingRequest resp_body{};
+        std::string large_body(1024, 'a');
+        resp_body.mutable_response_body()->set_body(large_body);
+        resp_body.mutable_response_body()->set_end_of_stream(true);
+        stream->Write(resp_body);
+        envoy::service::ext_proc::v3::ProcessingResponse r3{};
+        stream->Read(&r3);
+
+        // Since the decision was final, the body stage must NOT have re-evaluated or written
+        // duplicate compression headers.
+        if (find_body_header(r3, "x-bytetaper-compression-candidate", "true"))
+            return 302;
 
         stream->WritesDone();
         stream->Finish();

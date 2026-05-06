@@ -112,6 +112,7 @@ struct ApgTransformContext {
     compression::ContentEncodingResult response_content_encoding{};
     // --- Compression decision output (written by compression_decision_stage) ---
     CompressionDecisionOutput compression_decision{};
+    bool compression_decision_final = false;
 
     // --- Coalescing decision output (written by coalescing_decision_stage) ---
     coalescing::CoalescingDecision coalescing_decision{};
