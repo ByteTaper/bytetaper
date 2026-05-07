@@ -33,7 +33,7 @@ void registry_init(InFlightRegistry* registry) {
         std::lock_guard<std::mutex> lock(registry->shards[i].mutex);
         for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
             registry->shards[i].slots[j].active = false;
-            registry->shards[i].slots[j].state = InFlightCompletionState::InFlight;
+            registry->shards[i].slots[j].state = CoalescingState::LeaderRunning;
             registry->shards[i].slots[j].shared_response = {};
         }
     }
@@ -58,13 +58,21 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
 
         // Check for existing active entry
         if (slot.active && std::strcmp(slot.key, key) == 0) {
-            // Check if completed and stored
-            if (slot.state == InFlightCompletionState::Stored) {
-                if (now_ms >= slot.completed_at_epoch_ms + wait_window_ms) {
+            if (is_terminal(slot.state)) {
+                if (slot.state == CoalescingState::NotCacheable ||
+                    slot.state == CoalescingState::LeaderFailed ||
+                    slot.state == CoalescingState::TimedOut ||
+                    slot.state == CoalescingState::Cancelled ||
+                    now_ms >= slot.completed_at_epoch_ms + wait_window_ms) {
+
+                    if (slot.state == CoalescingState::ResultReady && slot.waiter_count > 0) {
+                        return { InFlightRole::Reject };
+                    }
                     // treat as new leader
-                    slot.state = InFlightCompletionState::InFlight;
+                    slot.state = CoalescingState::LeaderRunning;
                     slot.shared_response = {};
                     slot.created_at_epoch_ms = now_ms;
+                    slot.completed_at_epoch_ms = 0;
                     slot.waiter_count = 0;
                     slot.active = true;
                     return { InFlightRole::Leader };
@@ -77,23 +85,17 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                 } else {
                     return { InFlightRole::Reject };
                 }
-            } else if (slot.state == InFlightCompletionState::NotCacheable ||
-                       slot.state == InFlightCompletionState::Failed) {
-                // Completed but not cacheable or failed, any subsequent request starts a new leader
-                slot.state = InFlightCompletionState::InFlight;
-                slot.shared_response = {};
-                slot.created_at_epoch_ms = now_ms;
-                slot.waiter_count = 0;
-                slot.active = true;
-                return { InFlightRole::Leader };
             } else {
-                // InFlight
+                // LeaderRunning
                 if (now_ms >= slot.created_at_epoch_ms + wait_window_ms) {
-                    // Treat as new leader
-                    std::strncpy(slot.key, key, sizeof(slot.key) - 1);
-                    slot.created_at_epoch_ms = now_ms;
-                    slot.state = InFlightCompletionState::InFlight;
+                    if (slot.waiter_count > 0) {
+                        return { InFlightRole::Reject };
+                    }
+                    // treat as new leader (leader timed out)
+                    slot.state = CoalescingState::LeaderRunning;
                     slot.shared_response = {};
+                    slot.created_at_epoch_ms = now_ms;
+                    slot.completed_at_epoch_ms = 0;
                     slot.waiter_count = 0;
                     slot.active = true;
                     return { InFlightRole::Leader };
@@ -110,19 +112,38 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
         }
     }
 
-    // Try to find an empty or reusable slot in the shard
+    // Try to find an empty or reusable slot in the shard for a DIFFERENT key
+    InFlightEntry* best_reusable_slot = nullptr;
     for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
         InFlightEntry& slot = shard.slots[j];
         if (!slot.active) {
-            std::strncpy(slot.key, key, sizeof(slot.key) - 1);
-            slot.created_at_epoch_ms = now_ms;
-            slot.completed_at_epoch_ms = 0;
-            slot.waiter_count = 0;
-            slot.state = InFlightCompletionState::InFlight;
-            slot.shared_response = {};
-            slot.active = true;
-            return { InFlightRole::Leader };
+            best_reusable_slot = &slot;
+            break;
         }
+
+        if (is_terminal(slot.state) && slot.waiter_count == 0) {
+            if (slot.state == CoalescingState::NotCacheable ||
+                slot.state == CoalescingState::LeaderFailed ||
+                slot.state == CoalescingState::TimedOut ||
+                slot.state == CoalescingState::Cancelled ||
+                now_ms >= slot.completed_at_epoch_ms + wait_window_ms) {
+
+                best_reusable_slot = &slot;
+                break;
+            }
+        }
+    }
+
+    if (best_reusable_slot != nullptr) {
+        std::strncpy(best_reusable_slot->key, key, sizeof(best_reusable_slot->key) - 1);
+        best_reusable_slot->key[sizeof(best_reusable_slot->key) - 1] = '\0';
+        best_reusable_slot->created_at_epoch_ms = now_ms;
+        best_reusable_slot->completed_at_epoch_ms = 0;
+        best_reusable_slot->waiter_count = 0;
+        best_reusable_slot->state = CoalescingState::LeaderRunning;
+        best_reusable_slot->shared_response = {};
+        best_reusable_slot->active = true;
+        return { InFlightRole::Leader };
     }
 
     // [BT-130-005] Shard full, instantly drop traffic
@@ -137,46 +158,52 @@ bool registry_complete_with_response(InFlightRegistry* registry, const char* key
     }
 
     if (body_len > kCoalescingSharedBodyMaxSize) {
-        return registry_complete_state(registry, key, InFlightCompletionState::NotCacheable,
-                                       now_ms);
+        return registry_complete_state(registry, key, CoalescingState::NotCacheable, now_ms);
     }
 
     std::uint64_t hash = hash_string(key);
     std::size_t shard_idx = hash % kInFlightShards;
     InFlightShard& shard = registry->shards[shard_idx];
 
-    std::lock_guard<std::mutex> lock(shard.mutex);
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(shard.mutex);
 
-    for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
-        InFlightEntry& slot = shard.slots[j];
-        if (slot.active && std::strcmp(slot.key, key) == 0) {
-            slot.state = InFlightCompletionState::Stored;
-            slot.completed_at_epoch_ms = now_ms;
+        for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
+            InFlightEntry& slot = shard.slots[j];
+            if (slot.active && std::strcmp(slot.key, key) == 0) {
+                slot.state = CoalescingState::ResultReady;
+                slot.completed_at_epoch_ms = now_ms;
 
-            slot.shared_response.status_code = status_code;
-            if (content_type != nullptr) {
-                std::strncpy(slot.shared_response.content_type, content_type,
-                             sizeof(slot.shared_response.content_type) - 1);
-                slot.shared_response.content_type[sizeof(slot.shared_response.content_type) - 1] =
-                    '\0';
-            } else {
-                slot.shared_response.content_type[0] = '\0';
+                slot.shared_response.status_code = status_code;
+                if (content_type != nullptr) {
+                    std::strncpy(slot.shared_response.content_type, content_type,
+                                 sizeof(slot.shared_response.content_type) - 1);
+                    slot.shared_response
+                        .content_type[sizeof(slot.shared_response.content_type) - 1] = '\0';
+                } else {
+                    slot.shared_response.content_type[0] = '\0';
+                }
+                if (body != nullptr && body_len > 0) {
+                    std::memcpy(slot.shared_response.body, body, body_len);
+                }
+                slot.shared_response.body_len = body_len;
+                slot.shared_response.ready = true;
+
+                found = true;
+                break;
             }
-            if (body != nullptr && body_len > 0) {
-                std::memcpy(slot.shared_response.body, body, body_len);
-            }
-            slot.shared_response.body_len = body_len;
-            slot.shared_response.ready = true;
-
-            shard.cv.notify_all();
-            return true;
         }
     }
-    return false;
+
+    if (found) {
+        shard.cv.notify_all();
+    }
+    return found;
 }
 
-bool registry_complete_state(InFlightRegistry* registry, const char* key,
-                             InFlightCompletionState state, std::uint64_t now_ms) {
+bool registry_complete_state(InFlightRegistry* registry, const char* key, CoalescingState state,
+                             std::uint64_t now_ms) {
     if (registry == nullptr || key == nullptr) {
         return false;
     }
@@ -185,19 +212,26 @@ bool registry_complete_state(InFlightRegistry* registry, const char* key,
     std::size_t shard_idx = hash % kInFlightShards;
     InFlightShard& shard = registry->shards[shard_idx];
 
-    std::lock_guard<std::mutex> lock(shard.mutex);
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(shard.mutex);
 
-    for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
-        InFlightEntry& slot = shard.slots[j];
-        if (slot.active && std::strcmp(slot.key, key) == 0) {
-            slot.state = state;
-            slot.completed_at_epoch_ms = now_ms;
+        for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
+            InFlightEntry& slot = shard.slots[j];
+            if (slot.active && std::strcmp(slot.key, key) == 0) {
+                slot.state = state;
+                slot.completed_at_epoch_ms = now_ms;
 
-            shard.cv.notify_all();
-            return true;
+                found = true;
+                break;
+            }
         }
     }
-    return false;
+
+    if (found) {
+        shard.cv.notify_all();
+    }
+    return found;
 }
 
 void registry_remove_waiter(InFlightRegistry* registry, const char* key) {
@@ -248,7 +282,7 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
 
     // 2. Already completed?
     if (is_terminal(entry->state)) {
-        if (entry->state == InFlightCompletionState::Stored) {
+        if (entry->state == CoalescingState::ResultReady) {
             if (entry->shared_response.ready) {
                 if (response_out != nullptr) {
                     response_out->status_code = entry->shared_response.status_code;
@@ -261,10 +295,14 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
                 return RegistryWaitResult::SharedResponseReady;
             }
             return RegistryWaitResult::StoredButNoSnapshot;
-        } else if (entry->state == InFlightCompletionState::NotCacheable) {
+        } else if (entry->state == CoalescingState::NotCacheable) {
             return RegistryWaitResult::NotCacheable;
-        } else if (entry->state == InFlightCompletionState::Failed) {
+        } else if (entry->state == CoalescingState::LeaderFailed) {
             return RegistryWaitResult::Failed;
+        } else if (entry->state == CoalescingState::TimedOut) {
+            return RegistryWaitResult::Timeout;
+        } else if (entry->state == CoalescingState::Cancelled) {
+            return RegistryWaitResult::Missing;
         }
     }
 
@@ -283,7 +321,7 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
         return RegistryWaitResult::Missing;
     }
 
-    if (entry->state == InFlightCompletionState::Stored) {
+    if (entry->state == CoalescingState::ResultReady) {
         if (entry->shared_response.ready) {
             if (response_out != nullptr) {
                 response_out->status_code = entry->shared_response.status_code;
@@ -296,10 +334,14 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
             return RegistryWaitResult::SharedResponseReady;
         }
         return RegistryWaitResult::StoredButNoSnapshot;
-    } else if (entry->state == InFlightCompletionState::NotCacheable) {
+    } else if (entry->state == CoalescingState::NotCacheable) {
         return RegistryWaitResult::NotCacheable;
-    } else if (entry->state == InFlightCompletionState::Failed) {
+    } else if (entry->state == CoalescingState::LeaderFailed) {
         return RegistryWaitResult::Failed;
+    } else if (entry->state == CoalescingState::TimedOut) {
+        return RegistryWaitResult::Timeout;
+    } else if (entry->state == CoalescingState::Cancelled) {
+        return RegistryWaitResult::Missing;
     }
 
     return RegistryWaitResult::Missing;

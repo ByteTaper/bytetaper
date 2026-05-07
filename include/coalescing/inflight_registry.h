@@ -31,15 +31,17 @@ struct RegistryRegistrationResult {
  * @brief An entry in the in-flight request registry.
  * Following Orthodox C++ style: plain struct with fixed-size key buffer.
  */
-enum class InFlightCompletionState : std::uint8_t {
-    InFlight = 0,
-    Stored = 1,
-    NotCacheable = 2,
-    Failed = 3,
+enum class CoalescingState : std::uint8_t {
+    LeaderRunning = 0, // replaces InFlight
+    ResultReady = 1,   // replaces Stored (implies shared_response.ready = true)
+    LeaderFailed = 2,  // replaces Failed
+    NotCacheable = 3,  // replaces NotCacheable
+    TimedOut = 4,      // new: leader exceeded its own deadline
+    Cancelled = 5,     // new: entry evicted before leader finished
 };
 
-static bool is_terminal(InFlightCompletionState s) {
-    return s != InFlightCompletionState::InFlight;
+static bool is_terminal(CoalescingState s) {
+    return s != CoalescingState::LeaderRunning;
 }
 
 static constexpr std::size_t kCoalescingSharedBodyMaxSize = 65536;
@@ -70,7 +72,7 @@ struct InFlightEntry {
     std::uint64_t completed_at_epoch_ms = 0;
     std::uint32_t waiter_count = 0;
     bool active = false;
-    InFlightCompletionState state = InFlightCompletionState::InFlight;
+    CoalescingState state = CoalescingState::LeaderRunning;
     InFlightSharedResponse shared_response{};
 };
 
@@ -131,8 +133,8 @@ bool registry_complete_with_response(InFlightRegistry* registry, const char* key
 /**
  * @brief Completes the in-flight entry with a simple terminal state.
  */
-bool registry_complete_state(InFlightRegistry* registry, const char* key,
-                             InFlightCompletionState state, std::uint64_t now_ms);
+bool registry_complete_state(InFlightRegistry* registry, const char* key, CoalescingState state,
+                             std::uint64_t now_ms);
 
 /**
  * @brief Result of a registry wait operation.

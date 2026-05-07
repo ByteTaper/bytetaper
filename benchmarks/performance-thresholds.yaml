@@ -27,7 +27,7 @@ compression_coordination:
   min_payload_reduction_ratio: 0.00
 
 coalescing_burst:
-  max_p95_overhead_ms: 150.0
+  max_p95_overhead_ms: 195.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
 

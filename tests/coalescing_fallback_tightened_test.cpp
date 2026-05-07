@@ -97,7 +97,7 @@ TEST_F(CoalescingFallbackTightenedTest, FinalL1HitSavesFollowerBeforeFallback) {
 
         populate_l1(key);
         coalescing::registry_complete_state(registry.get(), "burst-key",
-                                            coalescing::InFlightCompletionState::Stored,
+                                            coalescing::CoalescingState::ResultReady,
                                             ctx.request_epoch_ms + 50);
     });
 
@@ -158,7 +158,7 @@ TEST_F(CoalescingFallbackTightenedTest, WaiterCountDecrementedOnPostWaitL1Hit) {
 
         populate_l1(key);
         coalescing::registry_complete_state(registry.get(), "burst-key",
-                                            coalescing::InFlightCompletionState::Stored,
+                                            coalescing::CoalescingState::ResultReady,
                                             ctx.request_epoch_ms + 20);
     });
 

@@ -38,6 +38,8 @@ CoalescingDecision evaluate_coalescing_decision(InFlightRegistry* registry,
         decision.action = CoalescingAction::Bypass;
         decision.reason = CoalescingDecisionReason::PolicyDisabled;
         record_coalescing_event(context.metrics, metrics::CoalescingMetricEvent::Bypass);
+        record_upstream_call_reason(context.metrics,
+                                    metrics::UpstreamCallReason::CoalescingDisabled);
         return decision;
     }
 
@@ -47,6 +49,7 @@ CoalescingDecision evaluate_coalescing_decision(InFlightRegistry* registry,
         decision.action = CoalescingAction::Bypass;
         decision.reason = CoalescingDecisionReason::MethodNotGet;
         record_coalescing_event(context.metrics, metrics::CoalescingMetricEvent::Bypass);
+        record_upstream_call_reason(context.metrics, metrics::UpstreamCallReason::Bypass);
         return decision;
     }
 
@@ -56,6 +59,7 @@ CoalescingDecision evaluate_coalescing_decision(InFlightRegistry* registry,
         decision.action = CoalescingAction::Bypass;
         decision.reason = CoalescingDecisionReason::AuthenticatedRequest;
         record_coalescing_event(context.metrics, metrics::CoalescingMetricEvent::Bypass);
+        record_upstream_call_reason(context.metrics, metrics::UpstreamCallReason::Bypass);
         return decision;
     }
 
@@ -64,6 +68,7 @@ CoalescingDecision evaluate_coalescing_decision(InFlightRegistry* registry,
         decision.action = CoalescingAction::Bypass;
         decision.reason = CoalescingDecisionReason::MissingKey;
         record_coalescing_event(context.metrics, metrics::CoalescingMetricEvent::Bypass);
+        record_upstream_call_reason(context.metrics, metrics::UpstreamCallReason::Bypass);
         return decision;
     }
 
@@ -78,6 +83,7 @@ CoalescingDecision evaluate_coalescing_decision(InFlightRegistry* registry,
         decision.action = CoalescingAction::Leader;
         decision.reason = CoalescingDecisionReason::LeaderCreated;
         record_coalescing_event(context.metrics, metrics::CoalescingMetricEvent::Leader);
+        record_upstream_call_reason(context.metrics, metrics::UpstreamCallReason::LeaderFill);
         break;
     case InFlightRole::Follower:
         decision.action = CoalescingAction::Follower;

@@ -43,7 +43,7 @@ TEST(CoalescingEventDrivenWait, FollowerWakesBeforeFullWindowWhenLeaderCompletes
     std::thread leader_thread([&registry]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         coalescing::registry_complete_state(registry.get(), "burst-key",
-                                            coalescing::InFlightCompletionState::Stored, 1050);
+                                            coalescing::CoalescingState::ResultReady, 1050);
     });
 
     // This should block and wake up when the leader completes
@@ -140,7 +140,7 @@ TEST(CoalescingEventDrivenWait, ConcurrencyMultipleFollowersReleased) {
     std::thread leader_thread([&registry]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
         coalescing::registry_complete_state(registry.get(), "shared-key",
-                                            coalescing::InFlightCompletionState::Stored, 1030);
+                                            coalescing::CoalescingState::ResultReady, 1030);
     });
 
     leader_thread.join();
@@ -227,8 +227,7 @@ TEST(CoalescingEventDrivenWait, LeaderNonCacheableCompletionWakesFollower) {
     std::thread leader_thread([&registry]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
         coalescing::registry_complete_state(registry.get(), "non-cache-key",
-                                            coalescing::InFlightCompletionState::NotCacheable,
-                                            1030);
+                                            coalescing::CoalescingState::NotCacheable, 1030);
     });
 
     // Follower waits
