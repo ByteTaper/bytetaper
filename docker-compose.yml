@@ -139,6 +139,16 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+    environment:
+      - BYTETAPER_TRACE_ENABLED
+      - BYTETAPER_TRACE_SCENARIO
+      - BYTETAPER_TRACE_SLOW_MS
+      - BYTETAPER_TRACE_OUTPUT_DIR
+      - BYTETAPER_TRACE_SLOW_TOTAL_MS
+      - BYTETAPER_TRACE_SLOW_GRPC_WRITE_MS
+      - BYTETAPER_TRACE_SLOW_PHASE_MS
+      - BYTETAPER_TRACE_GRPC_WRITE_SLOW_MS
+      - BYTETAPER_TRACE_PHASE_SLOW_MS
     command:
       - /bin/bash
       - -lc
@@ -226,6 +236,16 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+    environment:
+      - BYTETAPER_TRACE_ENABLED
+      - BYTETAPER_TRACE_SCENARIO
+      - BYTETAPER_TRACE_SLOW_MS
+      - BYTETAPER_TRACE_OUTPUT_DIR
+      - BYTETAPER_TRACE_SLOW_TOTAL_MS
+      - BYTETAPER_TRACE_SLOW_GRPC_WRITE_MS
+      - BYTETAPER_TRACE_SLOW_PHASE_MS
+      - BYTETAPER_TRACE_GRPC_WRITE_SLOW_MS
+      - BYTETAPER_TRACE_PHASE_SLOW_MS
     command:
       - /bin/bash
       - -lc
@@ -304,6 +324,16 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+    environment:
+      - BYTETAPER_TRACE_ENABLED
+      - BYTETAPER_TRACE_SCENARIO
+      - BYTETAPER_TRACE_SLOW_MS
+      - BYTETAPER_TRACE_OUTPUT_DIR
+      - BYTETAPER_TRACE_SLOW_TOTAL_MS
+      - BYTETAPER_TRACE_SLOW_GRPC_WRITE_MS
+      - BYTETAPER_TRACE_SLOW_PHASE_MS
+      - BYTETAPER_TRACE_GRPC_WRITE_SLOW_MS
+      - BYTETAPER_TRACE_PHASE_SLOW_MS
     command:
       - /bin/bash
       - -lc
@@ -356,6 +386,16 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+    environment:
+      - BYTETAPER_TRACE_ENABLED
+      - BYTETAPER_TRACE_SCENARIO
+      - BYTETAPER_TRACE_SLOW_MS
+      - BYTETAPER_TRACE_OUTPUT_DIR
+      - BYTETAPER_TRACE_SLOW_TOTAL_MS
+      - BYTETAPER_TRACE_SLOW_GRPC_WRITE_MS
+      - BYTETAPER_TRACE_SLOW_PHASE_MS
+      - BYTETAPER_TRACE_GRPC_WRITE_SLOW_MS
+      - BYTETAPER_TRACE_PHASE_SLOW_MS
     command:
       - /bin/bash
       - -lc
@@ -408,6 +448,16 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+    environment:
+      - BYTETAPER_TRACE_ENABLED
+      - BYTETAPER_TRACE_SCENARIO
+      - BYTETAPER_TRACE_SLOW_MS
+      - BYTETAPER_TRACE_OUTPUT_DIR
+      - BYTETAPER_TRACE_SLOW_TOTAL_MS
+      - BYTETAPER_TRACE_SLOW_GRPC_WRITE_MS
+      - BYTETAPER_TRACE_SLOW_PHASE_MS
+      - BYTETAPER_TRACE_GRPC_WRITE_SLOW_MS
+      - BYTETAPER_TRACE_PHASE_SLOW_MS
     command:
       - /bin/bash
       - -lc
@@ -460,6 +510,16 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+    environment:
+      - BYTETAPER_TRACE_ENABLED
+      - BYTETAPER_TRACE_SCENARIO
+      - BYTETAPER_TRACE_SLOW_MS
+      - BYTETAPER_TRACE_OUTPUT_DIR
+      - BYTETAPER_TRACE_SLOW_TOTAL_MS
+      - BYTETAPER_TRACE_SLOW_GRPC_WRITE_MS
+      - BYTETAPER_TRACE_SLOW_PHASE_MS
+      - BYTETAPER_TRACE_GRPC_WRITE_SLOW_MS
+      - BYTETAPER_TRACE_PHASE_SLOW_MS
     command:
       - /bin/bash
       - -lc
@@ -512,6 +572,16 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+    environment:
+      - BYTETAPER_TRACE_ENABLED
+      - BYTETAPER_TRACE_SCENARIO
+      - BYTETAPER_TRACE_SLOW_MS
+      - BYTETAPER_TRACE_OUTPUT_DIR
+      - BYTETAPER_TRACE_SLOW_TOTAL_MS
+      - BYTETAPER_TRACE_SLOW_GRPC_WRITE_MS
+      - BYTETAPER_TRACE_SLOW_PHASE_MS
+      - BYTETAPER_TRACE_GRPC_WRITE_SLOW_MS
+      - BYTETAPER_TRACE_PHASE_SLOW_MS
     command:
       - /bin/bash
       - -lc

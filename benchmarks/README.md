@@ -42,6 +42,17 @@ docker compose run --rm bytetaper-benchmark ./benchmarks/scenarios/compression_c
 
 # Run Request Coalescing
 docker compose run --rm bytetaper-benchmark ./benchmarks/scenarios/coalescing_burst.sh
+
+# Run with trace enabled
+## 1. Run the benchmark with trace
+BYTETAPER_TRACE_ENABLED=true \
+BYTETAPER_TRACE_SCENARIO="compression_coordination" \
+BYTETAPER_TRACE_SLOW_MS=30 \
+BYTETAPER_TRACE_OUTPUT_DIR="reports/traces" \
+docker-compose run --rm -e CMAKE_BUILD_PARALLEL_LEVEL=1 bytetaper-benchmark ./benchmarks/scenarios/compression_coordination.sh
+
+## 2. Generate report need to tear down
+docker-compose down
 ```
 
 ---

@@ -217,6 +217,10 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
       bytetaper_extproc_proto
   )
 
+  add_library(bytetaper_trace STATIC
+    src/observability/trace.cpp
+  )
+  target_include_directories(bytetaper_trace PUBLIC include)
 
   add_library(bytetaper_extproc_grpc_server STATIC
     src/extproc/grpc_server.cpp
@@ -283,6 +287,7 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
   target_link_libraries(bytetaper_extproc_grpc_server
     PUBLIC
       bytetaper_prometheus_registry
+      bytetaper_trace
     PRIVATE
       bytetaper_extproc_grpc
       RocksDB::RocksDB
@@ -336,6 +341,24 @@ if(BUILD_TESTING)
     add_test(
       NAME apg_transform_context_test
       COMMAND apg_transform_context_test
+    )
+
+    add_executable(trace_test
+      tests/trace_test.cpp
+    )
+    target_include_directories(trace_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(trace_test
+      PRIVATE
+        gtest_main
+        bytetaper_trace
+    )
+
+    add_test(
+      NAME trace_test
+      COMMAND trace_test
     )
 
     add_executable(apg_stage_signature_test

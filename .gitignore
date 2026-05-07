@@ -69,6 +69,7 @@ Thumbs.db
 tmp/
 bin/
 reports/benchmarks/
+reports/traces/
 
 # AGENTS folders
 .agents/

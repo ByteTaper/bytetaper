@@ -14,6 +14,7 @@
 #include "extproc/request_runtime.h"
 #include "field_selection/request_target.h"
 #include "json_transform/content_type.h"
+#include "observability/trace.h"
 #include "policy/route_matcher.h"
 #include "runtime/worker_queue.h"
 #include "safety/fail_open.h"
@@ -62,6 +63,8 @@ struct StreamFilterState {
     stages::CompressionDecisionContext compression_context{};
     char owned_content_type[cache::kCacheContentTypeMaxLen] = {};
     bool compression_decision_final = false;
+
+    observability::TraceRecord trace{};
 };
 
 void add_overwrite_header(envoy::service::ext_proc::v3::CommonResponse* common, const char* key,
@@ -413,8 +416,40 @@ public:
 
         ProcessingStreamStats stream_stats{};
         StreamFilterState filter_state{};
+
+        bool trace_enabled = observability::trace_global_config().enabled;
+        observability::TraceSpanScope root_span{};
+        if (trace_enabled) {
+            const char* scenario_env = std::getenv("BYTETAPER_TRACE_SCENARIO");
+            observability::trace_start_record(
+                &filter_state.trace, scenario_env ? scenario_env : "compression_coordination");
+
+            root_span =
+                observability::trace_start_span(&filter_state.trace, "bytetaper.extproc.stream",
+                                                observability::TraceLatencyClass::ActiveProcessing,
+                                                &filter_state.trace.root_span_id);
+        }
+
         envoy::service::ext_proc::v3::ProcessingRequest request{};
-        while (stream->Read(&request)) {
+        while (true) {
+            observability::TraceSpanScope read_span{};
+            if (trace_enabled) {
+                read_span = observability::trace_start_span(
+                    &filter_state.trace, "bytetaper.grpc.read.wait",
+                    observability::TraceLatencyClass::GrpcReadWait, &root_span.span->span_id);
+            }
+            bool has_message = stream->Read(&request);
+            if (trace_enabled && read_span.span != nullptr) {
+                read_span.end();
+                if (!has_message) {
+                    observability::trace_rename_span(read_span.span,
+                                                     "bytetaper.grpc.read.wait.stream_close");
+                }
+            }
+            if (!has_message) {
+                break;
+            }
+
             if (metrics_registry != nullptr) {
                 metrics::record_stream(metrics_registry, {}); // placeholder for stream count
             }
@@ -423,12 +458,40 @@ public:
                                       request.has_response_body());
             record_request_kind(kind, &stream_stats);
 
+            if (trace_enabled && read_span.span != nullptr) {
+                const char* read_wait_name = (kind == ProcessingRequestKind::RequestHeaders)
+                                                 ? "bytetaper.grpc.read.wait.request_headers"
+                                             : (kind == ProcessingRequestKind::ResponseHeaders)
+                                                 ? "bytetaper.grpc.read.wait.response_headers"
+                                             : (kind == ProcessingRequestKind::ResponseBody)
+                                                 ? "bytetaper.grpc.read.wait.response_body"
+                                                 : "bytetaper.grpc.read.wait.unknown";
+                observability::trace_rename_span(read_span.span, read_wait_name);
+            }
+
             if (kind == ProcessingRequestKind::RequestHeaders) {
                 apply_request_headers_selection(request, &filter_state);
                 filter_state.matched_policy = nullptr;
                 if (policies != nullptr && filter_state.context.raw_path_length > 0) {
                     filter_state.matched_policy = policy::match_route_by_path(
                         policies, policy_count, filter_state.context.raw_path);
+                }
+
+                if (trace_enabled) {
+                    const char* r_id = "default";
+                    if (filter_state.matched_policy != nullptr) {
+                        r_id = filter_state.matched_policy->route_id;
+                    }
+                    observability::trace_set_route(&filter_state.trace, r_id,
+                                                   filter_state.context.raw_path);
+                }
+
+                observability::TraceSpanScope req_hdrs_span{};
+                if (trace_enabled) {
+                    req_hdrs_span = observability::trace_start_span(
+                        &filter_state.trace, "bytetaper.active.request_headers",
+                        observability::TraceLatencyClass::ActiveProcessing,
+                        &root_span.span->span_id);
                 }
 
                 envoy::service::ext_proc::v3::ProcessingResponse response{};
@@ -456,6 +519,15 @@ public:
                         filter_state.context.runtime_metrics = &metrics_registry->runtime_metrics;
                     }
                     filter_state.context.worker_queue = &worker_queue;
+
+                    observability::TraceSpanScope cache_lookup_span{};
+                    if (trace_enabled) {
+                        cache_lookup_span = observability::trace_start_span(
+                            &filter_state.trace, "bytetaper.cache.l1.lookup",
+                            observability::TraceLatencyClass::CacheIo,
+                            &req_hdrs_span.span->span_id);
+                    }
+
                     const auto* route_runtime =
                         find_compiled_route_runtime(route_runtimes, filter_state.matched_policy);
                     if (route_runtime != nullptr) {
@@ -465,11 +537,25 @@ public:
                         apg::run_pipeline(extproc::kLookupStages, extproc::kLookupStageCount,
                                           filter_state.context);
                     }
+
+                    if (trace_enabled) {
+                        cache_lookup_span.end();
+                    }
                 }
 
                 if (bytetaper::extproc::map_cache_hit_to_immediate_response(filter_state.context,
                                                                             &response)) {
+                    observability::TraceSpanScope write_immediate_span{};
+                    if (trace_enabled) {
+                        req_hdrs_span.end();
+                        write_immediate_span = observability::trace_start_span(
+                            &filter_state.trace, "bytetaper.grpc.write.immediate_response",
+                            observability::TraceLatencyClass::GrpcWrite, &root_span.span->span_id);
+                    }
                     stream->Write(response);
+                    if (trace_enabled) {
+                        write_immediate_span.end();
+                    }
                     continue; // skip all further processing for this request
                 }
 
@@ -477,11 +563,32 @@ public:
                 auto* common = request_headers_response->mutable_response();
                 common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
                 apply_pagination_request_headers(filter_state.context, common);
+
+                observability::TraceSpanScope write_req_hdrs_span{};
+                if (trace_enabled) {
+                    req_hdrs_span.end();
+                    write_req_hdrs_span = observability::trace_start_span(
+                        &filter_state.trace, "bytetaper.grpc.write.request_headers",
+                        observability::TraceLatencyClass::GrpcWrite, &root_span.span->span_id);
+                }
+
                 stream->Write(response);
+
+                if (trace_enabled) {
+                    write_req_hdrs_span.end();
+                }
                 continue;
             }
             if (kind == ProcessingRequestKind::ResponseHeaders) {
                 apply_response_content_type(request, &filter_state);
+
+                observability::TraceSpanScope resp_hdrs_span{};
+                if (trace_enabled) {
+                    resp_hdrs_span = observability::trace_start_span(
+                        &filter_state.trace, "bytetaper.active.response_headers",
+                        observability::TraceLatencyClass::ActiveProcessing,
+                        &root_span.span->span_id);
+                }
                 envoy::service::ext_proc::v3::ProcessingResponse response{};
                 auto* response_headers = response.mutable_response_headers();
                 auto* common_response = response_headers->mutable_response();
@@ -524,8 +631,20 @@ public:
                         filter_state.compression_context.compression_metrics =
                             filter_state.context.compression_metrics;
 
+                        observability::TraceSpanScope eval_span{};
+                        if (trace_enabled) {
+                            eval_span = observability::trace_start_span(
+                                &filter_state.trace, "bytetaper.compression.decision",
+                                observability::TraceLatencyClass::ActiveProcessingDetail,
+                                &resp_hdrs_span.span->span_id);
+                        }
+
                         stages::evaluate_compression_decision_fast(
                             filter_state.compression_context);
+
+                        if (trace_enabled) {
+                            eval_span.end();
+                        }
 
                         if (filter_state.compression_context.response_body_size_known &&
                             filter_state.compression_context.compression_decision.evaluated) {
@@ -533,9 +652,21 @@ public:
                         }
 
                         if (filter_state.compression_decision_final) {
+                            observability::TraceSpanScope mutation_span{};
+                            if (trace_enabled) {
+                                mutation_span = observability::trace_start_span(
+                                    &filter_state.trace, "bytetaper.header_mutation",
+                                    observability::TraceLatencyClass::ActiveProcessingDetail,
+                                    &resp_hdrs_span.span->span_id);
+                            }
+
                             apply_compression_decision_headers(
                                 filter_state.compression_context.compression_decision,
                                 common_response);
+
+                            if (trace_enabled) {
+                                mutation_span.end();
+                            }
                         }
                     } else {
                         const auto* route_runtime = find_compiled_route_runtime(
@@ -558,13 +689,47 @@ public:
                 }
 
                 apply_pagination_response_headers(filter_state.context, common_response);
+
+                observability::TraceSpanScope write_resp_hdrs_span{};
+                if (trace_enabled) {
+                    resp_hdrs_span.end();
+                    write_resp_hdrs_span = observability::trace_start_span(
+                        &filter_state.trace, "bytetaper.grpc.write.response_headers",
+                        observability::TraceLatencyClass::GrpcWrite, &root_span.span->span_id);
+                }
+
                 stream->Write(response);
+
+                if (trace_enabled) {
+                    write_resp_hdrs_span.end();
+                }
                 continue;
             }
             if (kind == ProcessingRequestKind::ResponseBody) {
                 if (is_compression_only_route(filter_state)) {
+                    observability::TraceSpanScope resp_body_span{};
+                    if (trace_enabled) {
+                        resp_body_span = observability::trace_start_span(
+                            &filter_state.trace, "bytetaper.active.response_body",
+                            observability::TraceLatencyClass::ActiveProcessing,
+                            &root_span.span->span_id);
+                    }
+
                     if (filter_state.compression_decision_final) {
+                        observability::TraceSpanScope write_continue_span{};
+                        if (trace_enabled) {
+                            resp_body_span.end();
+                            write_continue_span = observability::trace_start_span(
+                                &filter_state.trace, "bytetaper.grpc.write.response_body_continue",
+                                observability::TraceLatencyClass::GrpcWrite,
+                                &root_span.span->span_id);
+                        }
+
                         write_noop_response_body_continue(stream);
+
+                        if (trace_enabled) {
+                            write_continue_span.end();
+                        }
                         continue;
                     }
 
@@ -588,12 +753,42 @@ public:
                     apply_compression_decision_headers(
                         filter_state.compression_context.compression_decision, common);
 
+                    observability::TraceSpanScope write_continue_span{};
+                    if (trace_enabled) {
+                        resp_body_span.end();
+                        write_continue_span = observability::trace_start_span(
+                            &filter_state.trace, "bytetaper.grpc.write.response_body_continue",
+                            observability::TraceLatencyClass::GrpcWrite, &root_span.span->span_id);
+                    }
+
                     stream->Write(response);
+
+                    if (trace_enabled) {
+                        write_continue_span.end();
+                    }
                     continue;
                 }
 
+                observability::TraceSpanScope resp_body_span{};
+                if (trace_enabled) {
+                    resp_body_span = observability::trace_start_span(
+                        &filter_state.trace, "bytetaper.active.response_body",
+                        observability::TraceLatencyClass::ActiveProcessing,
+                        &root_span.span->span_id);
+                }
+
                 if (!route_needs_response_body_processing(filter_state)) {
+                    observability::TraceSpanScope write_continue_span{};
+                    if (trace_enabled) {
+                        resp_body_span.end();
+                        write_continue_span = observability::trace_start_span(
+                            &filter_state.trace, "bytetaper.grpc.write.response_body_continue",
+                            observability::TraceLatencyClass::GrpcWrite, &root_span.span->span_id);
+                    }
                     write_noop_response_body_continue(stream);
+                    if (trace_enabled) {
+                        write_continue_span.end();
+                    }
                     continue;
                 }
 
@@ -647,6 +842,14 @@ public:
 
                         // Execution boundary: hot-path only. See
                         // docs/runtime/RUNTIME_BOUNDARIES.md.
+                        observability::TraceSpanScope cache_store_span{};
+                        if (trace_enabled) {
+                            cache_store_span = observability::trace_start_span(
+                                &filter_state.trace, "bytetaper.cache.store",
+                                observability::TraceLatencyClass::CacheIo,
+                                &resp_body_span.span->span_id);
+                        }
+
                         const auto* route_runtime = find_compiled_route_runtime(
                             route_runtimes, filter_state.matched_policy);
                         if (route_runtime != nullptr) {
@@ -655,6 +858,10 @@ public:
                         } else {
                             apg::run_pipeline(extproc::kStoreStages, extproc::kStoreStageCount,
                                               filter_state.context);
+                        }
+
+                        if (trace_enabled) {
+                            cache_store_span.end();
                         }
                     }
                 }
@@ -687,10 +894,73 @@ public:
                     }
                 }
 
+                observability::TraceSpanScope write_resp_body_span{};
+                if (trace_enabled) {
+                    resp_body_span.end();
+                    write_resp_body_span = observability::trace_start_span(
+                        &filter_state.trace, "bytetaper.grpc.write.response_body",
+                        observability::TraceLatencyClass::GrpcWrite, &root_span.span->span_id);
+                }
+
                 stream->Write(response);
+
+                if (trace_enabled) {
+                    write_resp_body_span.end();
+                }
                 continue;
             }
-            // Non-supported variants are safe no-op.
+        }
+
+        if (trace_enabled && root_span.span != nullptr) {
+            root_span.end();
+            filter_state.trace.total_duration_nano = root_span.span->duration_nano;
+
+            // Set generic information
+            if (is_compression_only_route(filter_state)) {
+                observability::trace_set_compression_info(
+                    &filter_state.trace,
+                    filter_state.compression_context.compression_decision.candidate,
+                    filter_state.compression_decision_final,
+                    filter_state.compression_context.response_body_len,
+                    filter_state.compression_context.response_body_size_known);
+                filter_state.trace.response_status_code =
+                    filter_state.compression_context.response_status_code;
+            } else {
+                observability::trace_set_compression_info(
+                    &filter_state.trace, filter_state.context.compression_decision.candidate,
+                    filter_state.context.compression_decision_final,
+                    filter_state.context.response_body_len,
+                    filter_state.context.response_body_size_known);
+                filter_state.trace.response_status_code = filter_state.context.response_status_code;
+                observability::trace_set_cache_info(&filter_state.trace,
+                                                    filter_state.context.cache_hit);
+
+                // Set coalescing info
+                bool leader = (filter_state.context.coalescing_decision.action ==
+                               bytetaper::coalescing::CoalescingAction::Leader);
+                bool follower = (filter_state.context.coalescing_decision.action ==
+                                 bytetaper::coalescing::CoalescingAction::Follower);
+                observability::trace_set_coalescing_info(&filter_state.trace, leader, follower);
+            }
+
+            // Run classification
+            observability::trace_classify(&filter_state.trace);
+
+            const auto& trace_config = observability::trace_global_config();
+            bool should_save = false;
+
+            if (std::strcmp(trace_config.mode, "all") == 0) {
+                should_save = true;
+            } else if (std::strcmp(trace_config.mode, "slow") == 0) {
+                should_save = observability::trace_is_slow(filter_state.trace, trace_config);
+            } else if (std::strcmp(trace_config.mode, "sampled") == 0) {
+                should_save = observability::trace_is_sampled(trace_config);
+            }
+
+            if (should_save) {
+                observability::trace_push(observability::trace_global_ring(), trace_config,
+                                          filter_state.trace);
+            }
         }
 
         (void) stream_stats;
@@ -729,6 +999,7 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     if (handle == nullptr) {
         return false;
     }
+    observability::trace_init(observability::trace_config_from_env());
     if (handle->impl != nullptr) {
         return false;
     }
@@ -797,6 +1068,10 @@ void stop_grpc_server(GrpcServerHandle* handle) {
         handle->bound_port = 0;
         return;
     }
+
+    observability::trace_flush(observability::trace_global_ring(),
+                               observability::trace_global_config(),
+                               std::getenv("BYTETAPER_TRACE_SCENARIO"));
 
     auto* impl = static_cast<GrpcServerImpl*>(handle->impl);
     if (impl->server) {
