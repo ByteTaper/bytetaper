@@ -7,15 +7,14 @@
 #include "coalescing/coalescing_key.h"
 #include "coalescing/coalescing_safety.h"
 #include "coalescing/inflight_registry.h"
-#include "metrics/coalescing_metrics.h"
 #include "policy/coalescing_policy.h"
 #include "policy/route_policy.h"
 
 #include <string_view>
 
-namespace bytetaper::observability {
-struct TraceRecord;
-} // namespace bytetaper::observability
+namespace bytetaper::metrics {
+struct CoalescingMetrics;
+}
 
 namespace bytetaper::coalescing {
 
@@ -50,15 +49,6 @@ struct CoalescingDecision {
     CoalescingAction action;
     CoalescingDecisionReason reason;
     char key[256] = { 0 };
-
-    // Extra fields for rich telemetry (BT-037F)
-    metrics::UpstreamCallReason upstream_reason = metrics::UpstreamCallReason::Unknown;
-    AttachFailureReason attach_failure_reason = AttachFailureReason::None;
-    CoalescingState state_before = CoalescingState::LeaderRunning;
-    CoalescingState state_after = CoalescingState::LeaderRunning;
-    std::uint64_t key_hash = 0;
-    std::uint32_t group_id = 0;
-    bool terminal_result_join_flag = false;
 };
 
 /**
@@ -71,7 +61,6 @@ struct CoalescingDecisionContext {
     CoalescingKeyInput key_input;
     std::uint64_t now_ms = 0;
     metrics::CoalescingMetrics* metrics = nullptr;
-    observability::TraceRecord* trace = nullptr;
 };
 
 /**

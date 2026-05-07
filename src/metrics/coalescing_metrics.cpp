@@ -49,50 +49,6 @@ void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent e
     case CoalescingMetricEvent::EntryCleanup:
         metrics->entry_cleanup_total.fetch_add(1, std::memory_order_relaxed);
         break;
-    case CoalescingMetricEvent::AttachSuccess:
-        metrics->coalescing_attach_success_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::AttachFailureShardFull:
-        metrics->coalescing_attach_failure_shard_full_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::AttachFailureMaxWaiters:
-        metrics->coalescing_attach_failure_max_waiters_total.fetch_add(1,
-                                                                       std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::AttachFailureStateMismatch:
-        metrics->coalescing_attach_failure_state_mismatch_total.fetch_add(
-            1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::ResultReadyRetention:
-        metrics->coalescing_result_ready_retention_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::CleanupAfterRetention:
-        metrics->coalescing_cleanup_after_retention_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::TerminalResultServed:
-        metrics->coalescing_terminal_result_served_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::Wait:
-        metrics->coalescing_wait_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::Wakeup:
-        metrics->coalescing_wakeup_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::Timeout:
-        metrics->coalescing_timeout_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::LeaderUpstream:
-        metrics->coalescing_leader_upstream_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::LeaderPublish:
-        metrics->coalescing_leader_publish_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::LeaderNotify:
-        metrics->coalescing_leader_notify_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case CoalescingMetricEvent::GroupInvariantFailures:
-        metrics->coalescing_group_invariant_failures_total.fetch_add(1, std::memory_order_relaxed);
-        break;
     }
 }
 
@@ -117,14 +73,6 @@ void record_upstream_call_reason(CoalescingMetrics* metrics, UpstreamCallReason 
         break;
     case UpstreamCallReason::ErrorRecovery:
         metrics->upstream_call_reason_error_recovery_total.fetch_add(1, std::memory_order_relaxed);
-        break;
-    case UpstreamCallReason::NoInflightEntry:
-        metrics->upstream_call_reason_no_inflight_entry_total.fetch_add(1,
-                                                                        std::memory_order_relaxed);
-        break;
-    case UpstreamCallReason::EntryAlreadyTerminal:
-        metrics->upstream_call_reason_entry_already_terminal_total.fetch_add(
-            1, std::memory_order_relaxed);
         break;
     case UpstreamCallReason::Unknown:
         metrics->upstream_call_reason_unknown_total.fetch_add(1, std::memory_order_relaxed);
@@ -204,65 +152,9 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "recovery.\n"
         "# TYPE bytetaper_upstream_call_reason_error_recovery_total counter\n"
         "bytetaper_upstream_call_reason_error_recovery_total %llu\n"
-        "# HELP bytetaper_upstream_call_reason_no_inflight_entry_total Upstream calls due to no "
-        "inflight entry.\n"
-        "# TYPE bytetaper_upstream_call_reason_no_inflight_entry_total counter\n"
-        "bytetaper_upstream_call_reason_no_inflight_entry_total %llu\n"
-        "# HELP bytetaper_upstream_call_reason_entry_already_terminal_total Upstream calls due to "
-        "entry already terminal.\n"
-        "# TYPE bytetaper_upstream_call_reason_entry_already_terminal_total counter\n"
-        "bytetaper_upstream_call_reason_entry_already_terminal_total %llu\n"
         "# HELP bytetaper_upstream_call_reason_unknown_total Upstream calls due to unknown.\n"
         "# TYPE bytetaper_upstream_call_reason_unknown_total counter\n"
-        "bytetaper_upstream_call_reason_unknown_total %llu\n"
-        "# HELP bytetaper_coalescing_attach_success_total Total successful attachments.\n"
-        "# TYPE bytetaper_coalescing_attach_success_total counter\n"
-        "bytetaper_coalescing_attach_success_total %llu\n"
-        "# HELP bytetaper_coalescing_attach_failure_shard_full_total Attach failures because shard "
-        "is full.\n"
-        "# TYPE bytetaper_coalescing_attach_failure_shard_full_total counter\n"
-        "bytetaper_coalescing_attach_failure_shard_full_total %llu\n"
-        "# HELP bytetaper_coalescing_attach_failure_max_waiters_total Attach failures because max "
-        "waiters limit is exceeded.\n"
-        "# TYPE bytetaper_coalescing_attach_failure_max_waiters_total counter\n"
-        "bytetaper_coalescing_attach_failure_max_waiters_total %llu\n"
-        "# HELP bytetaper_coalescing_attach_failure_state_mismatch_total Attach failures due to "
-        "state mismatch.\n"
-        "# TYPE bytetaper_coalescing_attach_failure_state_mismatch_total counter\n"
-        "bytetaper_coalescing_attach_failure_state_mismatch_total %llu\n"
-        "# HELP bytetaper_coalescing_result_ready_retention_total Requests that hit result-ready "
-        "retention.\n"
-        "# TYPE bytetaper_coalescing_result_ready_retention_total counter\n"
-        "bytetaper_coalescing_result_ready_retention_total %llu\n"
-        "# HELP bytetaper_coalescing_cleanup_after_retention_total Cleanups after retention "
-        "expires.\n"
-        "# TYPE bytetaper_coalescing_cleanup_after_retention_total counter\n"
-        "bytetaper_coalescing_cleanup_after_retention_total %llu\n"
-        "# HELP bytetaper_coalescing_terminal_result_served_total Followers served directly from "
-        "result ready.\n"
-        "# TYPE bytetaper_coalescing_terminal_result_served_total counter\n"
-        "bytetaper_coalescing_terminal_result_served_total %llu\n"
-        "# HELP bytetaper_coalescing_wait_total Followers entering wait.\n"
-        "# TYPE bytetaper_coalescing_wait_total counter\n"
-        "bytetaper_coalescing_wait_total %llu\n"
-        "# HELP bytetaper_coalescing_wakeup_total Followers woken up.\n"
-        "# TYPE bytetaper_coalescing_wakeup_total counter\n"
-        "bytetaper_coalescing_wakeup_total %llu\n"
-        "# HELP bytetaper_coalescing_timeout_total Followers that timed out waiting.\n"
-        "# TYPE bytetaper_coalescing_timeout_total counter\n"
-        "bytetaper_coalescing_timeout_total %llu\n"
-        "# HELP bytetaper_coalescing_leader_upstream_total Leaders proceeding upstream.\n"
-        "# TYPE bytetaper_coalescing_leader_upstream_total counter\n"
-        "bytetaper_coalescing_leader_upstream_total %llu\n"
-        "# HELP bytetaper_coalescing_leader_publish_total Leaders publishing results.\n"
-        "# TYPE bytetaper_coalescing_leader_publish_total counter\n"
-        "bytetaper_coalescing_leader_publish_total %llu\n"
-        "# HELP bytetaper_coalescing_leader_notify_total Leaders notifying waiters.\n"
-        "# TYPE bytetaper_coalescing_leader_notify_total counter\n"
-        "bytetaper_coalescing_leader_notify_total %llu\n"
-        "# HELP bytetaper_coalescing_group_invariant_failures_total Group invariant failures.\n"
-        "# TYPE bytetaper_coalescing_group_invariant_failures_total counter\n"
-        "bytetaper_coalescing_group_invariant_failures_total %llu\n",
+        "bytetaper_upstream_call_reason_unknown_total %llu\n",
         (unsigned long long) metrics.leader_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_cache_hit_total.load(std::memory_order_relaxed),
@@ -287,35 +179,7 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
             std::memory_order_relaxed),
         (unsigned long long) metrics.upstream_call_reason_error_recovery_total.load(
             std::memory_order_relaxed),
-        (unsigned long long) metrics.upstream_call_reason_no_inflight_entry_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.upstream_call_reason_entry_already_terminal_total.load(
-            std::memory_order_relaxed),
         (unsigned long long) metrics.upstream_call_reason_unknown_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_attach_success_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_attach_failure_shard_full_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_attach_failure_max_waiters_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_attach_failure_state_mismatch_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_result_ready_retention_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_cleanup_after_retention_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_terminal_result_served_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_wait_total.load(std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_wakeup_total.load(std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_timeout_total.load(std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_leader_upstream_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_leader_publish_total.load(
-            std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_leader_notify_total.load(std::memory_order_relaxed),
-        (unsigned long long) metrics.coalescing_group_invariant_failures_total.load(
             std::memory_order_relaxed));
 
     if (written < 0 || static_cast<std::size_t>(written) >= buf_size) {

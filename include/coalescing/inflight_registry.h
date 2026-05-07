@@ -20,6 +20,17 @@ enum class InFlightRole : std::uint8_t {
     Reject = 2,   // Queue/Shard full, instantly synthesize error response.
 };
 
+/**
+ * @brief Result of a request registration.
+ */
+struct RegistryRegistrationResult {
+    InFlightRole role;
+};
+
+/**
+ * @brief An entry in the in-flight request registry.
+ * Following Orthodox C++ style: plain struct with fixed-size key buffer.
+ */
 enum class CoalescingState : std::uint8_t {
     LeaderRunning = 0, // replaces InFlight
     ResultReady = 1,   // replaces Stored (implies shared_response.ready = true)
@@ -32,26 +43,6 @@ enum class CoalescingState : std::uint8_t {
 static bool is_terminal(CoalescingState s) {
     return s != CoalescingState::LeaderRunning;
 }
-
-enum class AttachFailureReason : std::uint8_t {
-    None = 0,
-    ShardFull = 1,
-    MaxWaitersEnforced = 2,
-    StateMismatch = 3,
-};
-
-/**
- * @brief Result of a request registration.
- */
-struct RegistryRegistrationResult {
-    InFlightRole role;
-    AttachFailureReason attach_failure_reason = AttachFailureReason::None;
-    CoalescingState state_before = CoalescingState::LeaderRunning;
-    CoalescingState state_after = CoalescingState::LeaderRunning;
-    std::uint64_t key_hash = 0;
-    std::uint32_t group_id = 0;
-    bool terminal_result_join_flag = false;
-};
 
 static constexpr std::size_t kCoalescingSharedBodyMaxSize = 65536;
 static constexpr std::size_t kCoalescingContentTypeMaxLen = 64;
@@ -183,16 +174,6 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
  */
 void registry_remove_waiter(InFlightRegistry* registry, const char* key);
 
-} // namespace bytetaper::coalescing
-
-namespace bytetaper::metrics {
-struct CoalescingMetrics;
-}
-
-namespace bytetaper::coalescing {
-void registry_evaluate_group_invariants_and_summary(InFlightRegistry* registry, const char* key,
-                                                    std::uint64_t now_ms,
-                                                    metrics::CoalescingMetrics* metrics);
 } // namespace bytetaper::coalescing
 
 #endif // BYTETAPER_COALESCING_INFLIGHT_REGISTRY_H

@@ -5,7 +5,6 @@
 
 #include "coalescing/inflight_registry.h"
 #include "metrics/coalescing_metrics.h"
-#include "observability/trace.h"
 #include "policy/route_policy.h"
 
 #include <chrono>
@@ -34,20 +33,6 @@ apg::StageOutput coalescing_leader_completion_stage(apg::ApgTransformContext& co
     std::uint64_t now_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
-    observability::TraceSpanScope publish_span{};
-    if (context.trace != nullptr) {
-        publish_span = observability::trace_start_span(
-            context.trace, observability::kSpanCoalescingLeaderPublishResult,
-            observability::TraceLatencyClass::ActiveProcessingDetail, &context.trace->root_span_id);
-    }
-
-    observability::TraceSpanScope notify_span{};
-    if (context.trace != nullptr) {
-        notify_span = observability::trace_start_span(
-            context.trace, observability::kSpanCoalescingLeaderNotifyFollowers,
-            observability::TraceLatencyClass::ActiveProcessingDetail, &context.trace->root_span_id);
-    }
-
     bool success = false;
     if (cacheable) {
         success = coalescing::registry_complete_with_response(
@@ -64,26 +49,13 @@ apg::StageOutput coalescing_leader_completion_stage(apg::ApgTransformContext& co
             coalescing::CoalescingState::LeaderFailed, now_ms);
     }
 
-    notify_span.end();
-    publish_span.end();
-
     if (success) {
         record_coalescing_event(context.coalescing_metrics,
                                 metrics::CoalescingMetricEvent::LeaderResultPublished);
-        record_coalescing_event(context.coalescing_metrics,
-                                metrics::CoalescingMetricEvent::LeaderNotify);
-        if (cacheable) {
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::LeaderPublish);
-        }
     } else {
         record_coalescing_event(context.coalescing_metrics,
                                 metrics::CoalescingMetricEvent::LeaderResultPublishFailed);
     }
-
-    coalescing::registry_evaluate_group_invariants_and_summary(context.coalescing_registry,
-                                                               context.coalescing_decision.key,
-                                                               now_ms, context.coalescing_metrics);
 
     return { apg::StageResult::Continue, cacheable ? "completed-cacheable" : "completed-cleared" };
 }

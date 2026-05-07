@@ -21,21 +21,7 @@ enum class CoalescingMetricEvent : std::uint8_t {
     FollowerServedFromResult,
     FollowerTimeout,
     FollowerFallback,
-    EntryCleanup,
-    AttachSuccess,
-    AttachFailureShardFull,
-    AttachFailureMaxWaiters,
-    AttachFailureStateMismatch,
-    ResultReadyRetention,
-    CleanupAfterRetention,
-    TerminalResultServed,
-    Wait,
-    Wakeup,
-    Timeout,
-    LeaderUpstream,
-    LeaderPublish,
-    LeaderNotify,
-    GroupInvariantFailures
+    EntryCleanup
 };
 
 enum class UpstreamCallReason : std::uint8_t {
@@ -44,9 +30,7 @@ enum class UpstreamCallReason : std::uint8_t {
     Bypass = 2,
     CoalescingDisabled = 3,
     ErrorRecovery = 4,
-    NoInflightEntry = 5,
-    EntryAlreadyTerminal = 6,
-    Unknown = 7,
+    Unknown = 5,
 };
 
 struct CoalescingMetrics {
@@ -70,25 +54,7 @@ struct CoalescingMetrics {
     std::atomic<std::uint64_t> upstream_call_reason_bypass_total{ 0 };
     std::atomic<std::uint64_t> upstream_call_reason_coalescing_disabled_total{ 0 };
     std::atomic<std::uint64_t> upstream_call_reason_error_recovery_total{ 0 };
-    std::atomic<std::uint64_t> upstream_call_reason_no_inflight_entry_total{ 0 };
-    std::atomic<std::uint64_t> upstream_call_reason_entry_already_terminal_total{ 0 };
     std::atomic<std::uint64_t> upstream_call_reason_unknown_total{ 0 };
-
-    // Expanded BT-037F metrics
-    std::atomic<std::uint64_t> coalescing_attach_success_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_attach_failure_shard_full_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_attach_failure_max_waiters_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_attach_failure_state_mismatch_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_result_ready_retention_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_cleanup_after_retention_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_terminal_result_served_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_wait_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_wakeup_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_timeout_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_leader_upstream_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_leader_publish_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_leader_notify_total{ 0 };
-    std::atomic<std::uint64_t> coalescing_group_invariant_failures_total{ 0 };
 };
 
 void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent event);

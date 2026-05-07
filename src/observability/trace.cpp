@@ -189,62 +189,6 @@ void trace_set_coalescing_info(TraceRecord* record, bool leader, bool follower) 
     record->coalescing_follower = follower;
 }
 
-void trace_set_coalescing_context(TraceRecord* record, const char* group_id, const char* key_hash,
-                                  const char* role, const char* decision, const char* attach_result,
-                                  const char* attach_failure_reason, const char* wakeup_reason,
-                                  const char* result_source, const char* upstream_call_reason) {
-    if (record == nullptr)
-        return;
-    record->coalescing_has_context = true;
-    if (group_id != nullptr) {
-        std::strncpy(record->coalescing_group_id, group_id,
-                     sizeof(record->coalescing_group_id) - 1);
-        record->coalescing_group_id[sizeof(record->coalescing_group_id) - 1] = '\0';
-    }
-    if (key_hash != nullptr) {
-        std::strncpy(record->coalescing_key_hash, key_hash,
-                     sizeof(record->coalescing_key_hash) - 1);
-        record->coalescing_key_hash[sizeof(record->coalescing_key_hash) - 1] = '\0';
-    }
-    if (role != nullptr) {
-        std::strncpy(record->coalescing_role, role, sizeof(record->coalescing_role) - 1);
-        record->coalescing_role[sizeof(record->coalescing_role) - 1] = '\0';
-    }
-    if (decision != nullptr) {
-        std::strncpy(record->coalescing_decision, decision,
-                     sizeof(record->coalescing_decision) - 1);
-        record->coalescing_decision[sizeof(record->coalescing_decision) - 1] = '\0';
-    }
-    if (attach_result != nullptr) {
-        std::strncpy(record->coalescing_attach_result, attach_result,
-                     sizeof(record->coalescing_attach_result) - 1);
-        record->coalescing_attach_result[sizeof(record->coalescing_attach_result) - 1] = '\0';
-    }
-    if (attach_failure_reason != nullptr) {
-        std::strncpy(record->coalescing_attach_failure_reason, attach_failure_reason,
-                     sizeof(record->coalescing_attach_failure_reason) - 1);
-        record->coalescing_attach_failure_reason[sizeof(record->coalescing_attach_failure_reason) -
-                                                 1] = '\0';
-    }
-    if (wakeup_reason != nullptr) {
-        std::strncpy(record->coalescing_wakeup_reason, wakeup_reason,
-                     sizeof(record->coalescing_wakeup_reason) - 1);
-        record->coalescing_wakeup_reason[sizeof(record->coalescing_wakeup_reason) - 1] = '\0';
-    }
-    if (result_source != nullptr) {
-        std::strncpy(record->coalescing_result_source, result_source,
-                     sizeof(record->coalescing_result_source) - 1);
-        record->coalescing_result_source[sizeof(record->coalescing_result_source) - 1] = '\0';
-    }
-    if (upstream_call_reason != nullptr) {
-        std::strncpy(record->coalescing_upstream_call_reason, upstream_call_reason,
-                     sizeof(record->coalescing_upstream_call_reason) - 1);
-        record
-            ->coalescing_upstream_call_reason[sizeof(record->coalescing_upstream_call_reason) - 1] =
-            '\0';
-    }
-}
-
 void trace_classify(TraceRecord* record) {
     if (record == nullptr)
         return;
@@ -356,7 +300,7 @@ TraceSpanScope trace_start_span(TraceRecord* record, const char* name,
 }
 
 void TraceSpanScope::end() {
-    if (span == nullptr || span->end_unix_nano != 0)
+    if (span == nullptr)
         return;
     span->end_unix_nano = current_unix_nano();
     if (span->end_unix_nano >= span->start_unix_nano) {
@@ -479,20 +423,6 @@ std::size_t trace_format_jsonl(const TraceRecord& record, char* buf, std::size_t
     spans_buf[spans_offset + 1] = '\0';
     spans_offset += 1;
 
-    char coalescing_buf[1024] = "";
-    if (record.coalescing_has_context) {
-        std::snprintf(
-            coalescing_buf, sizeof(coalescing_buf),
-            ",\"coalescing\":{"
-            "\"group_id\":\"%s\",\"key_hash\":\"%s\",\"role\":\"%s\",\"decision\":\"%s\","
-            "\"attach_result\":\"%s\",\"attach_failure_reason\":\"%s\",\"wakeup_reason\":\"%s\","
-            "\"result_source\":\"%s\",\"upstream_call_reason\":\"%s\"}",
-            record.coalescing_group_id, record.coalescing_key_hash, record.coalescing_role,
-            record.coalescing_decision, record.coalescing_attach_result,
-            record.coalescing_attach_failure_reason, record.coalescing_wakeup_reason,
-            record.coalescing_result_source, record.coalescing_upstream_call_reason);
-    }
-
     int total_len = std::snprintf(
         buf, buf_size,
         "{\"trace_id\":\"%s\",\"root_span_id\":\"%s\",\"scenario\":\"%s\","
@@ -504,7 +434,7 @@ std::size_t trace_format_jsonl(const TraceRecord& record, char* buf, std::size_t
         "nano\":%llu,"
         "\"total_grpc_write_nano\":%llu,\"total_runtime_queue_wait_nano\":%llu,\"total_cache_io_"
         "nano\":%llu,"
-        "\"dominant_latency_class\":\"%s\"%s,\"spans\":%s}\n",
+        "\"dominant_latency_class\":\"%s\",\"spans\":%s}\n",
         record.trace_id.value, record.root_span_id.value, record.scenario, record.route_id,
         record.request_path, record.compression_candidate ? "true" : "false",
         record.compression_decision_final ? "true" : "false", record.cache_hit ? "true" : "false",
@@ -516,7 +446,7 @@ std::size_t trace_format_jsonl(const TraceRecord& record, char* buf, std::size_t
         (unsigned long long) record.total_grpc_write_nano,
         (unsigned long long) record.total_runtime_queue_wait_nano,
         (unsigned long long) record.total_cache_io_nano,
-        trace_latency_class_str(record.dominant_latency_class), coalescing_buf, spans_buf);
+        trace_latency_class_str(record.dominant_latency_class), spans_buf);
 
     if (total_len < 0)
         return 0;
@@ -777,134 +707,6 @@ void trace_flush(TraceRingBuffer* ring, const TraceConfig& config, const char* s
         std::fprintf(md_file, "> Dominant latency class breakdown allows diagnosing performance "
                               "regressions under heavy concurrency.\n");
         std::fclose(md_file);
-    }
-
-    struct CoalescingGroupStats {
-        char group_id[64]{};
-        std::size_t client_requests = 0;
-        std::size_t leaders = 0;
-        std::size_t followers = 0;
-        std::size_t followers_attached = 0;
-        std::size_t followers_served_from_result = 0;
-        std::size_t followers_timeout = 0;
-        std::size_t fallbacks = 0;
-        std::size_t upstream_calls = 0;
-        std::size_t upstream_unknown = 0;
-    };
-
-    std::vector<CoalescingGroupStats> coalescing_groups;
-    for (std::uint32_t i = start_idx; i < end_idx; ++i) {
-        std::size_t ring_idx = i % max_rec;
-        const auto& record = ring->records[ring_idx];
-        if (record.span_count > 0 && record.coalescing_has_context &&
-            record.coalescing_group_id[0] != '\0') {
-            CoalescingGroupStats* grp = nullptr;
-            for (auto& g : coalescing_groups) {
-                if (std::strcmp(g.group_id, record.coalescing_group_id) == 0) {
-                    grp = &g;
-                    break;
-                }
-            }
-            if (grp == nullptr) {
-                CoalescingGroupStats new_g{};
-                std::strncpy(new_g.group_id, record.coalescing_group_id,
-                             sizeof(new_g.group_id) - 1);
-                coalescing_groups.push_back(new_g);
-                grp = &coalescing_groups.back();
-            }
-
-            grp->client_requests++;
-            if (std::strcmp(record.coalescing_role, "leader") == 0) {
-                grp->leaders++;
-            } else if (std::strcmp(record.coalescing_role, "follower") == 0) {
-                grp->followers++;
-            }
-
-            if (std::strcmp(record.coalescing_attach_result, "success") == 0) {
-                grp->followers_attached++;
-            }
-
-            if (std::strcmp(record.coalescing_decision, "follower_consume_result") == 0) {
-                grp->followers_served_from_result++;
-            } else if (std::strcmp(record.coalescing_decision, "follower_timeout_fallback") == 0) {
-                grp->fallbacks++;
-            }
-
-            if (std::strcmp(record.coalescing_wakeup_reason, "timeout") == 0) {
-                grp->followers_timeout++;
-            }
-
-            if (record.coalescing_upstream_call_reason[0] != '\0' &&
-                std::strcmp(record.coalescing_upstream_call_reason, "none") != 0) {
-                grp->upstream_calls++;
-                if (std::strcmp(record.coalescing_upstream_call_reason, "unknown") == 0) {
-                    grp->upstream_unknown++;
-                }
-            }
-        }
-    }
-
-    if (!coalescing_groups.empty()) {
-        char summary_md_path[512];
-        std::snprintf(summary_md_path, sizeof(summary_md_path), "%s/%s_%s.trace_summary.md",
-                      out_dir.c_str(), scen, time_str);
-        std::FILE* s_file = std::fopen(summary_md_path, "w");
-        if (s_file != nullptr) {
-            std::fprintf(s_file, "# 🧪 ByteTaper Coalescing Group-level Trace Summary\n\n");
-            std::fprintf(s_file, "| Group ID | Client Requests | Leaders | Followers | Followers "
-                                 "Attached | Served from Result | Followers Timeout | Fallbacks | "
-                                 "Upstream Calls | Unknown Upstreams | Verdict |\n");
-            std::fprintf(
-                s_file,
-                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n");
-
-            for (const auto& g : coalescing_groups) {
-                bool pass = (g.upstream_calls <= g.leaders) && (g.fallbacks == 0);
-                std::fprintf(s_file,
-                             "| `%s` | `%zu` | `%zu` | `%zu` | `%zu` | `%zu` | `%zu` | `%zu` | "
-                             "`%zu` | `%zu` | **%s** |\n",
-                             g.group_id, g.client_requests, g.leaders, g.followers,
-                             g.followers_attached, g.followers_served_from_result,
-                             g.followers_timeout, g.fallbacks, g.upstream_calls, g.upstream_unknown,
-                             pass ? "PASS" : "FAIL");
-            }
-            std::fprintf(s_file, "\n");
-            std::fprintf(s_file, "## 📝 Detailed Analysis\n\n");
-            for (const auto& g : coalescing_groups) {
-                bool pass = (g.upstream_calls <= g.leaders) && (g.fallbacks == 0);
-                std::fprintf(s_file, "### Group `%s`\n", g.group_id);
-                if (pass) {
-                    std::fprintf(s_file, "- **Verdict**: PASS\n");
-                    std::fprintf(
-                        s_file,
-                        "- **Suppression efficiency**: All client requests were satisfied with at "
-                        "most 1 upstream call per leader and zero fallback timeout failures.\n");
-                } else {
-                    std::fprintf(s_file, "- **Verdict**: FAIL\n");
-                    std::fprintf(s_file, "- **Diagnostics**:\n");
-                    if (g.fallbacks > 0) {
-                        std::fprintf(s_file,
-                                     "  - Detected `%zu` follower fallback timeouts. Followers "
-                                     "timed out before the leader could publish a result.\n",
-                                     g.fallbacks);
-                    }
-                    if (g.upstream_calls > g.leaders) {
-                        std::fprintf(s_file,
-                                     "  - Detected extra upstream calls: `%zu` upstream calls for "
-                                     "`%zu` leaders.\n",
-                                     g.upstream_calls, g.leaders);
-                    }
-                    if (g.upstream_unknown > 0) {
-                        std::fprintf(s_file,
-                                     "  - Detected `%zu` unexplained or untracked upstream "
-                                     "dispatches (upstream_call_reason == unknown).\n",
-                                     g.upstream_unknown);
-                    }
-                }
-                std::fprintf(s_file, "\n");
-            }
-            std::fclose(s_file);
-        }
     }
 }
 

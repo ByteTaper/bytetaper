@@ -98,83 +98,6 @@ void add_bytetaper_report_headers(envoy::service::ext_proc::v3::CommonResponse* 
     add_overwrite_header(common, kCachedResponseHeader, cache_hit ? kTrueValue : kFalseValue);
 }
 
-void add_coalescing_diagnostics_headers(envoy::service::ext_proc::v3::CommonResponse* common,
-                                        const bytetaper::apg::ApgTransformContext& context) {
-    if (common == nullptr) {
-        return;
-    }
-    add_overwrite_header(common, "x-bytetaper-coalescing-group-id",
-                         std::to_string(context.coalescing_group_id));
-    add_overwrite_header(common, "x-bytetaper-coalescing-key-hash",
-                         std::to_string(context.coalescing_key_hash));
-
-    const char* state_before_str = "Unknown";
-    switch (context.coalescing_terminal_state) {
-    case bytetaper::coalescing::CoalescingState::LeaderRunning:
-        state_before_str = "LeaderRunning";
-        break;
-    case bytetaper::coalescing::CoalescingState::ResultReady:
-        state_before_str = "ResultReady";
-        break;
-    case bytetaper::coalescing::CoalescingState::LeaderFailed:
-        state_before_str = "LeaderFailed";
-        break;
-    case bytetaper::coalescing::CoalescingState::NotCacheable:
-        state_before_str = "NotCacheable";
-        break;
-    case bytetaper::coalescing::CoalescingState::TimedOut:
-        state_before_str = "TimedOut";
-        break;
-    case bytetaper::coalescing::CoalescingState::Cancelled:
-        state_before_str = "Cancelled";
-        break;
-    }
-    add_overwrite_header(common, "x-bytetaper-coalescing-state-before", state_before_str);
-
-    const char* state_after_str = "Unknown";
-    switch (context.coalescing_decision.state_after) {
-    case bytetaper::coalescing::CoalescingState::LeaderRunning:
-        state_after_str = "LeaderRunning";
-        break;
-    case bytetaper::coalescing::CoalescingState::ResultReady:
-        state_after_str = "ResultReady";
-        break;
-    case bytetaper::coalescing::CoalescingState::LeaderFailed:
-        state_after_str = "LeaderFailed";
-        break;
-    case bytetaper::coalescing::CoalescingState::NotCacheable:
-        state_after_str = "NotCacheable";
-        break;
-    case bytetaper::coalescing::CoalescingState::TimedOut:
-        state_after_str = "TimedOut";
-        break;
-    case bytetaper::coalescing::CoalescingState::Cancelled:
-        state_after_str = "Cancelled";
-        break;
-    }
-    add_overwrite_header(common, "x-bytetaper-coalescing-state-after", state_after_str);
-
-    const char* failure_str = "None";
-    switch (context.coalescing_attach_failure_reason) {
-    case bytetaper::coalescing::AttachFailureReason::None:
-        failure_str = "None";
-        break;
-    case bytetaper::coalescing::AttachFailureReason::ShardFull:
-        failure_str = "ShardFull";
-        break;
-    case bytetaper::coalescing::AttachFailureReason::MaxWaitersEnforced:
-        failure_str = "MaxWaitersEnforced";
-        break;
-    case bytetaper::coalescing::AttachFailureReason::StateMismatch:
-        failure_str = "StateMismatch";
-        break;
-    }
-    add_overwrite_header(common, "x-bytetaper-coalescing-attach-failure", failure_str);
-
-    add_overwrite_header(common, "x-bytetaper-coalescing-terminal-join",
-                         context.coalescing_terminal_result_join_flag ? "true" : "false");
-}
-
 bool read_header_value(const envoy::config::core::v3::HeaderMap& headers, const char* key,
                        std::string* value_out) {
     if (key == nullptr || value_out == nullptr) {
@@ -599,7 +522,6 @@ public:
                         filter_state.context.runtime_metrics = &metrics_registry->runtime_metrics;
                     }
                     filter_state.context.worker_queue = &worker_queue;
-                    filter_state.context.trace = &filter_state.trace;
 
                     observability::TraceSpanScope cache_lookup_span{};
                     if (trace_enabled) {
@@ -643,20 +565,6 @@ public:
                 auto* request_headers_response = response.mutable_request_headers();
                 auto* common = request_headers_response->mutable_response();
                 common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
-
-                // Record upstream call reason at CONTINUE dispatch boundary (BT-037F)
-                bytetaper::metrics::record_upstream_call_reason(
-                    filter_state.context.coalescing_metrics,
-                    filter_state.context.coalescing_upstream_reason);
-
-                // If it was a leader fill, record leader upstream metric
-                if (filter_state.context.coalescing_decision.action ==
-                    coalescing::CoalescingAction::Leader) {
-                    bytetaper::metrics::record_coalescing_event(
-                        filter_state.context.coalescing_metrics,
-                        bytetaper::metrics::CoalescingMetricEvent::LeaderUpstream);
-                }
-
                 apply_pagination_request_headers(filter_state.context, common);
 
                 observability::TraceSpanScope write_req_hdrs_span{};
@@ -696,7 +604,6 @@ public:
                                                ? filter_state.matched_policy->route_id
                                                : kNoneValue;
                     add_overwrite_header(common_response, kRoutePolicyHeader, route_id);
-                    add_coalescing_diagnostics_headers(common_response, filter_state.context);
                 }
 
                 // Run compression decision pipeline during headers for early signaling (handles
@@ -1041,38 +948,6 @@ public:
 
             // Run classification
             observability::trace_classify(&filter_state.trace);
-
-            if (filter_state.context.coalescing_has_context) {
-                char group_id_buf[64]{};
-                std::snprintf(group_id_buf, sizeof(group_id_buf), "group-%03u",
-                              filter_state.context.coalescing_group_id);
-                char key_hash_buf[32]{};
-                std::snprintf(key_hash_buf, sizeof(key_hash_buf), "%llx",
-                              (unsigned long long) filter_state.context.coalescing_key_hash);
-
-                const char* attach_fail_str = "none";
-                if (filter_state.context.coalescing_attach_failure_reason ==
-                    coalescing::AttachFailureReason::ShardFull) {
-                    attach_fail_str = "shard_full";
-                } else if (filter_state.context.coalescing_attach_failure_reason ==
-                           coalescing::AttachFailureReason::MaxWaitersEnforced) {
-                    attach_fail_str = "max_waiters_exceeded";
-                } else if (filter_state.context.coalescing_attach_failure_reason ==
-                           coalescing::AttachFailureReason::StateMismatch) {
-                    attach_fail_str = "state_mismatch";
-                }
-
-                observability::trace_set_coalescing_context(
-                    &filter_state.trace, group_id_buf, key_hash_buf,
-                    filter_state.context.coalescing_role_str,
-                    filter_state.context.coalescing_decision_str,
-                    filter_state.context.coalescing_attach_result_str, attach_fail_str,
-                    filter_state.context.coalescing_wakeup_reason_str,
-                    filter_state.context.coalescing_result_source != nullptr
-                        ? filter_state.context.coalescing_result_source
-                        : "none",
-                    filter_state.context.coalescing_upstream_call_reason);
-            }
 
             const auto& trace_config = observability::trace_global_config();
             bool should_save = false;
