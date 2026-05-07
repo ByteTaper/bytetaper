@@ -4,7 +4,6 @@
 #include "stages/coalescing_leader_completion_stage.h"
 
 #include "coalescing/inflight_registry.h"
-#include "metrics/coalescing_metrics.h"
 #include "policy/route_policy.h"
 
 #include <chrono>
@@ -33,28 +32,19 @@ apg::StageOutput coalescing_leader_completion_stage(apg::ApgTransformContext& co
     std::uint64_t now_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
-    bool success = false;
     if (cacheable) {
-        success = coalescing::registry_complete_with_response(
+        coalescing::registry_complete_with_response(
             context.coalescing_registry, context.coalescing_decision.key,
             context.response_status_code, context.response_content_type, context.response_body,
             context.response_body_len, now_ms);
     } else if (context.response_status_code >= 200 && context.response_status_code < 300) {
-        success = coalescing::registry_complete_state(
+        coalescing::registry_complete_state(
             context.coalescing_registry, context.coalescing_decision.key,
-            coalescing::CoalescingState::NotCacheable, now_ms);
+            coalescing::InFlightCompletionState::NotCacheable, now_ms);
     } else {
-        success = coalescing::registry_complete_state(
-            context.coalescing_registry, context.coalescing_decision.key,
-            coalescing::CoalescingState::LeaderFailed, now_ms);
-    }
-
-    if (success) {
-        record_coalescing_event(context.coalescing_metrics,
-                                metrics::CoalescingMetricEvent::LeaderResultPublished);
-    } else {
-        record_coalescing_event(context.coalescing_metrics,
-                                metrics::CoalescingMetricEvent::LeaderResultPublishFailed);
+        coalescing::registry_complete_state(context.coalescing_registry,
+                                            context.coalescing_decision.key,
+                                            coalescing::InFlightCompletionState::Failed, now_ms);
     }
 
     return { apg::StageResult::Continue, cacheable ? "completed-cacheable" : "completed-cleared" };

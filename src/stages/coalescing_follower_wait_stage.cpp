@@ -73,10 +73,6 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
                                                 context.coalescing_decision);
             record_coalescing_event(context.coalescing_metrics,
                                     metrics::CoalescingMetricEvent::Fallback);
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::FollowerTimeout);
-            record_upstream_call_reason(context.coalescing_metrics,
-                                        metrics::UpstreamCallReason::FollowerTimeoutFallback);
             return { apg::StageResult::Continue, "pool-queue-full-fallback" };
         }
     } else {
@@ -101,12 +97,10 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
                                            context.coalescing_decision.key);
         record_coalescing_event(context.coalescing_metrics,
                                 metrics::CoalescingMetricEvent::FollowerCacheHit);
-        record_coalescing_event(context.coalescing_metrics,
-                                metrics::CoalescingMetricEvent::FollowerServedFromResult);
         return { apg::StageResult::SkipRemaining, "coalesced-shared-response" };
     }
 
-    // Step 4: L1 check after wait (whether Completed/Stored but no snapshot, Timeout, or Missing)
+    // Step 4: L1 check after wake (whether Completed/Stored but no snapshot, Timeout, or Missing)
     l1_res = l1_cache_lookup_stage(context);
     if (l1_res.result == apg::StageResult::SkipRemaining) {
         if (context.coalescing_registry != nullptr) {
@@ -125,28 +119,15 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
         wait_result == coalescing::RegistryWaitResult::Failed) {
         coalescing::handle_timeout_fallback(context.coalescing_registry,
                                             context.coalescing_decision);
-        if (wait_result == coalescing::RegistryWaitResult::Timeout) {
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::FollowerTimeout);
-        } else {
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::FollowerFallback);
-        }
         record_coalescing_event(context.coalescing_metrics,
                                 metrics::CoalescingMetricEvent::Fallback);
-        record_upstream_call_reason(context.coalescing_metrics,
-                                    metrics::UpstreamCallReason::FollowerTimeoutFallback);
         return { apg::StageResult::Continue, "timeout-fallback" };
     }
 
     // Leader completed but L1 still miss — leader may not have cached, was evicted, or
     // non-cacheable/failed
     coalescing::handle_timeout_fallback(context.coalescing_registry, context.coalescing_decision);
-    record_coalescing_event(context.coalescing_metrics,
-                            metrics::CoalescingMetricEvent::FollowerFallback);
     record_coalescing_event(context.coalescing_metrics, metrics::CoalescingMetricEvent::Fallback);
-    record_upstream_call_reason(context.coalescing_metrics,
-                                metrics::UpstreamCallReason::FollowerTimeoutFallback);
     return { apg::StageResult::Continue, "leader-complete-l1-miss" };
 }
 

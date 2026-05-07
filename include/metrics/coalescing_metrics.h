@@ -15,22 +15,7 @@ enum class CoalescingMetricEvent : std::uint8_t {
     FollowerCacheHit,
     Fallback,
     Bypass,
-    TooManyWaiters,
-    LeaderResultPublished,
-    LeaderResultPublishFailed,
-    FollowerServedFromResult,
-    FollowerTimeout,
-    FollowerFallback,
-    EntryCleanup
-};
-
-enum class UpstreamCallReason : std::uint8_t {
-    LeaderFill = 0,
-    FollowerTimeoutFallback = 1,
-    Bypass = 2,
-    CoalescingDisabled = 3,
-    ErrorRecovery = 4,
-    Unknown = 5,
+    TooManyWaiters
 };
 
 struct CoalescingMetrics {
@@ -40,25 +25,9 @@ struct CoalescingMetrics {
     std::atomic<std::uint64_t> fallback_total{ 0 };
     std::atomic<std::uint64_t> bypass_total{ 0 };
     std::atomic<std::uint64_t> too_many_waiters_total{ 0 };
-
-    std::atomic<std::uint64_t> leader_result_published_total{ 0 };
-    std::atomic<std::uint64_t> leader_result_publish_failed_total{ 0 };
-    std::atomic<std::uint64_t> follower_served_from_result_total{ 0 };
-    std::atomic<std::uint64_t> follower_timeout_total{ 0 };
-    std::atomic<std::uint64_t> follower_fallback_total{ 0 };
-    std::atomic<std::uint64_t> entry_cleanup_total{ 0 };
-
-    // Upstream call reasons
-    std::atomic<std::uint64_t> upstream_call_reason_leader_fill_total{ 0 };
-    std::atomic<std::uint64_t> upstream_call_reason_follower_timeout_total{ 0 };
-    std::atomic<std::uint64_t> upstream_call_reason_bypass_total{ 0 };
-    std::atomic<std::uint64_t> upstream_call_reason_coalescing_disabled_total{ 0 };
-    std::atomic<std::uint64_t> upstream_call_reason_error_recovery_total{ 0 };
-    std::atomic<std::uint64_t> upstream_call_reason_unknown_total{ 0 };
 };
 
 void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent event);
-void record_upstream_call_reason(CoalescingMetrics* metrics, UpstreamCallReason reason);
 
 // Renders all counters as Prometheus text into buf.
 // Returns bytes written (excluding null terminator), or 0 on overflow / null buf.
