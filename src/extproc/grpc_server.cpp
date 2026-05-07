@@ -302,7 +302,7 @@ bool build_filtered_body_response(const envoy::service::ext_proc::v3::Processing
         return false;
     }
 
-    const std::string input_body = request.response_body().body();
+    const std::string& input_body = request.response_body().body();
     if (state.matched_policy != nullptr &&
         policy::exceeds_max_response_bytes(*state.matched_policy, input_body.size())) {
         if (out_reason != nullptr) {
@@ -311,38 +311,43 @@ bool build_filtered_body_response(const envoy::service::ext_proc::v3::Processing
         return false;
     }
 
-    std::string filtered_body;
-    std::size_t saved_bytes = 0;
-
     if (!filtering_active) {
-        filtered_body = input_body;
-    } else {
-        state.context.input_payload_bytes = input_body.size();
-        json_transform::ParsedFlatJsonObject parsed{};
-        const json_transform::FlatJsonParseStatus parse_status =
-            json_transform::parse_flat_json_object(input_body.c_str(), state.response_kind,
-                                                   &parsed);
-
-        std::vector<char> output(input_body.size() + 1, '\0');
-        std::size_t output_length = 0;
-        const json_transform::FlatJsonFilterStatus status =
-            json_transform::transform_flat_json_with_filter_toggle(
-                input_body.c_str(), parse_status, &parsed, state.context, true, output.data(),
-                output.size(), &output_length);
-
-        const safety::FailOpenDecision safety_decision = safety::evaluate_filter_safety(status);
-        if (out_reason != nullptr) {
-            *out_reason = safety_decision.reason;
-        }
-
-        if (!safety_decision.should_mutate) {
-            return false;
-        }
-        filtered_body.assign(output.data(), output_length);
-        saved_bytes = (input_body.size() >= filtered_body.size())
-                          ? (input_body.size() - filtered_body.size())
-                          : 0;
+        auto* body_response = response_out->mutable_response_body();
+        auto* common = body_response->mutable_response();
+        common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
+        add_overwrite_header(common, kContentLengthHeader, std::to_string(input_body.size()));
+        add_bytetaper_report_headers(common, input_body.size(), input_body.size(), 0, 0, false,
+                                     state.context.cache_hit);
+        state.context.output_payload_bytes = input_body.size();
+        return true;
     }
+
+    state.context.input_payload_bytes = input_body.size();
+    json_transform::ParsedFlatJsonObject parsed{};
+    const json_transform::FlatJsonParseStatus parse_status =
+        json_transform::parse_flat_json_object(input_body.c_str(), state.response_kind, &parsed);
+
+    std::vector<char> output(input_body.size() + 1, '\0');
+    std::size_t output_length = 0;
+    const json_transform::FlatJsonFilterStatus status =
+        json_transform::transform_flat_json_with_filter_toggle(
+            input_body.c_str(), parse_status, &parsed, state.context, true, output.data(),
+            output.size(), &output_length);
+
+    const safety::FailOpenDecision safety_decision = safety::evaluate_filter_safety(status);
+    if (out_reason != nullptr) {
+        *out_reason = safety_decision.reason;
+    }
+
+    if (!safety_decision.should_mutate) {
+        return false;
+    }
+    std::string filtered_body;
+    filtered_body.assign(output.data(), output_length);
+    std::size_t saved_bytes = (input_body.size() >= filtered_body.size())
+                                  ? (input_body.size() - filtered_body.size())
+                                  : 0;
+
     auto* body_response = response_out->mutable_response_body();
     auto* common = body_response->mutable_response();
     common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
@@ -538,10 +543,12 @@ public:
                         filter_state.matched_policy->cache.behavior ==
                             policy::CacheBehavior::Store) {
 
-                        const std::string& filtered_body =
-                            response.response_body().response().body_mutation().body();
-                        filter_state.context.response_body = filtered_body.c_str();
-                        filter_state.context.response_body_len = filtered_body.size();
+                        const std::string& body_to_store =
+                            filter_state.has_query_selection
+                                ? response.response_body().response().body_mutation().body()
+                                : request.response_body().body();
+                        filter_state.context.response_body = body_to_store.c_str();
+                        filter_state.context.response_body_len = body_to_store.size();
 
                         // Execution boundary: hot-path only. See
                         // docs/runtime/RUNTIME_BOUNDARIES.md.
