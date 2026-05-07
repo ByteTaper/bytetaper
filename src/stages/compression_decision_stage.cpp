@@ -29,7 +29,7 @@ apg::StageOutput compression_decision_stage(apg::ApgTransformContext& context) {
     input.response_encoding = context.response_content_encoding;
     input.status_code = context.response_status_code;
     input.content_type = context.response_content_type;
-    input.content_type_len = std::strlen(context.response_content_type);
+    input.content_type_len = context.response_content_type_len;
     input.body_len = context.response_body_len;
     input.body_size_known = context.response_body_len > 0;
 

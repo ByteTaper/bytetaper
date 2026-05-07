@@ -176,10 +176,11 @@ void apply_response_content_type(const envoy::service::ext_proc::v3::ProcessingR
     }
 
     if (view.content_type != nullptr) {
-        std::strncpy(state->context.response_content_type, view.content_type,
-                     sizeof(state->context.response_content_type) - 1);
-        state->context.response_content_type[sizeof(state->context.response_content_type) - 1] =
-            '\0';
+        const std::size_t copy_len =
+            std::min(view.content_type_len, sizeof(state->context.response_content_type) - 1);
+        std::memcpy(state->context.response_content_type, view.content_type, copy_len);
+        state->context.response_content_type[copy_len] = '\0';
+        state->context.response_content_type_len = copy_len;
         json_transform::detect_application_json_response(state->context.response_content_type,
                                                          &state->response_kind);
     } else {

@@ -71,6 +71,7 @@ bool map_cache_hit_to_immediate_response(
         std::strncpy(ctx.response_content_type, entry.content_type,
                      sizeof(ctx.response_content_type) - 1);
         ctx.response_content_type[sizeof(ctx.response_content_type) - 1] = '\0';
+        ctx.response_content_type_len = std::strlen(ctx.response_content_type);
         ctx.response_body_len = entry.body_len;
         ctx.response_body_size_known = true;
 
