@@ -1517,6 +1517,29 @@ if(BUILD_TESTING)
       COMMAND compression_decision_test
     )
 
+    add_executable(compression_decision_stage_test
+      tests/compression_decision_stage_test.cpp
+      src/stages/compression_decision_stage.cpp
+      src/compression/compression_decision.cpp
+      src/compression/compression_eligibility.cpp
+      src/compression/compression_size.cpp
+      src/policy/compression_policy.cpp
+      src/metrics/compression_metrics.cpp
+    )
+    target_include_directories(compression_decision_stage_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(compression_decision_stage_test
+      PRIVATE
+        gtest_main
+    )
+
+    add_test(
+      NAME compression_decision_stage_test
+      COMMAND compression_decision_stage_test
+    )
+
     add_executable(pagination_policy_validator_test
       tests/pagination_policy_validator_test.cpp
       src/policy/pagination_policy_validator.cpp

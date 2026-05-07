@@ -27,4 +27,7 @@ void apply_pagination_request_headers(const apg::ApgTransformContext& ctx,
 void apply_compression_response_headers(const apg::ApgTransformContext& ctx,
                                         envoy::service::ext_proc::v3::CommonResponse* common);
 
+void apply_compression_decision_headers(const apg::CompressionDecisionOutput& decision,
+                                        envoy::service::ext_proc::v3::CommonResponse* common);
+
 } // namespace bytetaper::extproc

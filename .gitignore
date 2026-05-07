@@ -68,6 +68,7 @@ Thumbs.db
 .internalx/
 tmp/
 bin/
+reports/benchmarks/
 
 # AGENTS folders
 .agents/

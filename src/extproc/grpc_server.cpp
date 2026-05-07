@@ -57,6 +57,11 @@ struct StreamFilterState {
     bool has_query_selection = false;
     const policy::RoutePolicy* matched_policy = nullptr;
     bool is_non_2xx_response = false;
+
+    // Lightweight compression state for compression-only routes
+    stages::CompressionDecisionContext compression_context{};
+    char owned_content_type[cache::kCacheContentTypeMaxLen] = {};
+    bool compression_decision_final = false;
 };
 
 void add_overwrite_header(envoy::service::ext_proc::v3::CommonResponse* common, const char* key,
@@ -194,6 +199,15 @@ void apply_response_content_type(const envoy::service::ext_proc::v3::ProcessingR
     }
 }
 
+bool is_compression_only_route(const StreamFilterState& state) {
+    if (state.matched_policy == nullptr) {
+        return false;
+    }
+    return state.matched_policy->compression.enabled && !state.has_query_selection &&
+           state.matched_policy->cache.behavior != policy::CacheBehavior::Store &&
+           !state.matched_policy->pagination.enabled && !state.matched_policy->coalescing.enabled;
+}
+
 bool route_needs_response_body_processing(const StreamFilterState& state) {
     if (state.matched_policy == nullptr) {
         return true;
@@ -207,8 +221,14 @@ bool route_needs_response_body_processing(const StreamFilterState& state) {
         return true;
     }
 
-    if (!state.context.compression_decision_final) {
-        return true;
+    if (is_compression_only_route(state)) {
+        if (!state.compression_decision_final) {
+            return true;
+        }
+    } else {
+        if (!state.context.compression_decision_final) {
+            return true;
+        }
     }
 
     return false;
@@ -219,13 +239,8 @@ ReportingHeaderMode reporting_mode_for_route(const StreamFilterState& state) {
         return ReportingHeaderMode::FullDiagnostics;
     }
 
-    const bool compression_only =
-        state.matched_policy->compression.enabled && !state.has_query_selection &&
-        state.matched_policy->cache.behavior != policy::CacheBehavior::Store &&
-        !state.matched_policy->pagination.enabled && !state.matched_policy->coalescing.enabled;
-
-    return compression_only ? ReportingHeaderMode::CompressionOnly
-                            : ReportingHeaderMode::FullDiagnostics;
+    return is_compression_only_route(state) ? ReportingHeaderMode::CompressionOnly
+                                            : ReportingHeaderMode::FullDiagnostics;
 }
 
 bool build_filtered_body_response(const envoy::service::ext_proc::v3::ProcessingRequest& request,
@@ -471,22 +486,59 @@ public:
                 // Run compression decision pipeline during headers for early signaling (handles
                 // HEAD etc)
                 if (filter_state.matched_policy != nullptr) {
-                    const auto* route_runtime =
-                        find_compiled_route_runtime(route_runtimes, filter_state.matched_policy);
-                    if (route_runtime != nullptr) {
-                        apg::run_pipeline(route_runtime->response_stages,
-                                          route_runtime->response_count, filter_state.context);
+                    if (is_compression_only_route(filter_state)) {
+                        filter_state.compression_context.matched_policy =
+                            filter_state.matched_policy;
+                        filter_state.compression_context.client_accept_encoding =
+                            filter_state.context.client_accept_encoding;
+                        filter_state.compression_context.response_content_encoding =
+                            filter_state.context.response_content_encoding;
+                        filter_state.compression_context.response_status_code =
+                            filter_state.context.response_status_code;
+
+                        std::memcpy(filter_state.owned_content_type,
+                                    filter_state.context.response_content_type,
+                                    sizeof(filter_state.owned_content_type));
+                        filter_state.compression_context.response_content_type =
+                            filter_state.owned_content_type;
+                        filter_state.compression_context.response_content_type_len =
+                            filter_state.context.response_content_type_len;
+
+                        filter_state.compression_context.response_body_len =
+                            filter_state.context.response_body_len;
+                        filter_state.compression_context.response_body_size_known =
+                            filter_state.context.response_body_size_known;
+                        filter_state.compression_context.compression_metrics =
+                            filter_state.context.compression_metrics;
+
+                        stages::evaluate_compression_decision_fast(
+                            filter_state.compression_context);
+
+                        if (filter_state.compression_context.response_body_size_known &&
+                            filter_state.compression_context.compression_decision.evaluated) {
+                            filter_state.compression_decision_final = true;
+                        }
+
+                        apply_compression_decision_headers(
+                            filter_state.compression_context.compression_decision, common_response);
                     } else {
-                        static constexpr apg::ApgStage kCompressionStages[] = {
-                            stages::compression_decision_stage
-                        };
-                        apg::run_pipeline(kCompressionStages, 1, filter_state.context);
+                        const auto* route_runtime = find_compiled_route_runtime(
+                            route_runtimes, filter_state.matched_policy);
+                        if (route_runtime != nullptr) {
+                            apg::run_pipeline(route_runtime->response_stages,
+                                              route_runtime->response_count, filter_state.context);
+                        } else {
+                            static constexpr apg::ApgStage kCompressionStages[] = {
+                                stages::compression_decision_stage
+                            };
+                            apg::run_pipeline(kCompressionStages, 1, filter_state.context);
+                        }
+                        if (filter_state.context.response_body_size_known &&
+                            filter_state.context.compression_decision.evaluated) {
+                            filter_state.context.compression_decision_final = true;
+                        }
+                        apply_compression_response_headers(filter_state.context, common_response);
                     }
-                    if (filter_state.context.response_body_size_known &&
-                        filter_state.context.compression_decision.evaluated) {
-                        filter_state.context.compression_decision_final = true;
-                    }
-                    apply_compression_response_headers(filter_state.context, common_response);
                 }
 
                 apply_pagination_response_headers(filter_state.context, common_response);
@@ -494,6 +546,40 @@ public:
                 continue;
             }
             if (kind == ProcessingRequestKind::ResponseBody) {
+                if (is_compression_only_route(filter_state)) {
+                    if (filter_state.compression_decision_final) {
+                        envoy::service::ext_proc::v3::ProcessingResponse response{};
+                        auto* response_body = response.mutable_response_body();
+                        auto* common = response_body->mutable_response();
+                        common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
+                        stream->Write(response);
+                        continue;
+                    }
+
+                    const std::string& input_body = request.response_body().body();
+                    filter_state.compression_context.response_body_len = input_body.size();
+                    filter_state.compression_context.response_body_size_known = true;
+
+                    stages::evaluate_compression_decision_fast(filter_state.compression_context);
+                    filter_state.compression_decision_final = true;
+
+                    envoy::service::ext_proc::v3::ProcessingResponse response{};
+                    auto* response_body = response.mutable_response_body();
+                    auto* common = response_body->mutable_response();
+                    common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
+
+                    // Add content-length header
+                    add_overwrite_header(common, kContentLengthHeader,
+                                         std::to_string(input_body.size()));
+
+                    // Write compression decision headers
+                    apply_compression_decision_headers(
+                        filter_state.compression_context.compression_decision, common);
+
+                    stream->Write(response);
+                    continue;
+                }
+
                 if (!route_needs_response_body_processing(filter_state)) {
                     envoy::service::ext_proc::v3::ProcessingResponse response{};
                     auto* response_body = response.mutable_response_body();

@@ -9,7 +9,7 @@
 
 namespace bytetaper::stages {
 
-apg::StageOutput compression_decision_stage(apg::ApgTransformContext& context) {
+apg::StageOutput evaluate_compression_decision_fast(CompressionDecisionContext& context) {
     if (context.matched_policy == nullptr) {
         return { apg::StageResult::Continue, "no-policy" };
     }
@@ -31,7 +31,7 @@ apg::StageOutput compression_decision_stage(apg::ApgTransformContext& context) {
     input.content_type = context.response_content_type;
     input.content_type_len = context.response_content_type_len;
     input.body_len = context.response_body_len;
-    input.body_size_known = context.response_body_len > 0;
+    input.body_size_known = context.response_body_size_known;
 
     const auto decision = compression::make_compression_decision(input);
 
@@ -85,6 +85,25 @@ apg::StageOutput compression_decision_stage(apg::ApgTransformContext& context) {
              decision.candidate
                  ? "compression-candidate"
                  : compression::compression_skip_reason_to_string(decision.skip_reason) };
+}
+
+apg::StageOutput compression_decision_stage(apg::ApgTransformContext& context) {
+    CompressionDecisionContext fast_ctx{};
+    fast_ctx.matched_policy = context.matched_policy;
+    fast_ctx.client_accept_encoding = context.client_accept_encoding;
+    fast_ctx.response_content_encoding = context.response_content_encoding;
+    fast_ctx.response_status_code = context.response_status_code;
+    fast_ctx.response_content_type = context.response_content_type;
+    fast_ctx.response_content_type_len = context.response_content_type_len;
+    fast_ctx.response_body_len = context.response_body_len;
+    fast_ctx.response_body_size_known = context.response_body_size_known;
+    fast_ctx.compression_decision = context.compression_decision;
+    fast_ctx.compression_metrics = context.compression_metrics;
+
+    const auto output = evaluate_compression_decision_fast(fast_ctx);
+
+    context.compression_decision = fast_ctx.compression_decision;
+    return output;
 }
 
 } // namespace bytetaper::stages

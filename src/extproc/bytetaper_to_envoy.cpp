@@ -124,18 +124,22 @@ void apply_pagination_request_headers(const apg::ApgTransformContext& ctx,
 
 void apply_compression_response_headers(const apg::ApgTransformContext& ctx,
                                         envoy::service::ext_proc::v3::CommonResponse* common) {
-    if (common == nullptr || !ctx.compression_decision.evaluated) {
+    apply_compression_decision_headers(ctx.compression_decision, common);
+}
+
+void apply_compression_decision_headers(const apg::CompressionDecisionOutput& decision,
+                                        envoy::service::ext_proc::v3::CommonResponse* common) {
+    if (common == nullptr || !decision.evaluated) {
         return;
     }
     add_common_header(common, kCompressionCandidateHeader,
-                      ctx.compression_decision.candidate ? kTrueValue : kFalseValue);
-    const char* reason_str =
-        compression::compression_skip_reason_to_string(ctx.compression_decision.skip_reason);
+                      decision.candidate ? kTrueValue : kFalseValue);
+    const char* reason_str = compression::compression_skip_reason_to_string(decision.skip_reason);
     if (reason_str != nullptr) {
         add_common_header(common, kCompressionReasonHeader, reason_str);
     }
-    if (ctx.compression_decision.candidate) {
-        const auto alg = ctx.compression_decision.algorithm_hint;
+    if (decision.candidate) {
+        const auto alg = decision.algorithm_hint;
         const char* alg_str = (alg == policy::CompressionAlgorithm::Brotli) ? "br"
                               : (alg == policy::CompressionAlgorithm::Zstd) ? "zstd"
                               : (alg == policy::CompressionAlgorithm::Gzip) ? "gzip"
