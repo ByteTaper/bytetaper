@@ -58,6 +58,8 @@ struct CoalescingDecision {
     CoalescingState state_after = CoalescingState::LeaderRunning;
     std::uint64_t key_hash = 0;
     std::uint32_t group_id = 0;
+    std::uint64_t lifecycle_generation = 0;
+    std::uint64_t leader_request_id = 0;
     bool terminal_result_join_flag = false;
 };
 
@@ -69,6 +71,7 @@ struct CoalescingDecisionContext {
     policy::HttpMethod method = policy::HttpMethod::Any;
     CoalescingSafetyInput safety_input;
     CoalescingKeyInput key_input;
+    std::uint64_t request_id = 0;
     std::uint64_t now_ms = 0;
     metrics::CoalescingMetrics* metrics = nullptr;
     observability::TraceRecord* trace = nullptr;

@@ -146,6 +146,9 @@ struct ApgTransformContext {
     char coalescing_attach_result_str[32]{};
     char coalescing_wakeup_reason_str[32]{};
     char coalescing_upstream_call_reason[64]{};
+    char coalescing_group_id_str[64]{};
+    char coalescing_lifecycle_generation_str[32]{};
+    char coalescing_leader_request_id_str[32]{};
 
     // --- Trace context (non-owning pointer into StreamFilterState.trace) ---
     observability::TraceRecord* trace = nullptr;

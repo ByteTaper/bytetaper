@@ -192,7 +192,9 @@ void trace_set_coalescing_info(TraceRecord* record, bool leader, bool follower) 
 void trace_set_coalescing_context(TraceRecord* record, const char* group_id, const char* key_hash,
                                   const char* role, const char* decision, const char* attach_result,
                                   const char* attach_failure_reason, const char* wakeup_reason,
-                                  const char* result_source, const char* upstream_call_reason) {
+                                  const char* result_source, const char* upstream_call_reason,
+                                  std::uint64_t lifecycle_generation,
+                                  const char* leader_request_id) {
     if (record == nullptr)
         return;
     record->coalescing_has_context = true;
@@ -241,6 +243,13 @@ void trace_set_coalescing_context(TraceRecord* record, const char* group_id, con
                      sizeof(record->coalescing_upstream_call_reason) - 1);
         record
             ->coalescing_upstream_call_reason[sizeof(record->coalescing_upstream_call_reason) - 1] =
+            '\0';
+    }
+    record->coalescing_lifecycle_generation = lifecycle_generation;
+    if (leader_request_id != nullptr) {
+        std::strncpy(record->coalescing_leader_request_id, leader_request_id,
+                     sizeof(record->coalescing_leader_request_id) - 1);
+        record->coalescing_leader_request_id[sizeof(record->coalescing_leader_request_id) - 1] =
             '\0';
     }
 }
@@ -486,11 +495,14 @@ std::size_t trace_format_jsonl(const TraceRecord& record, char* buf, std::size_t
             ",\"coalescing\":{"
             "\"group_id\":\"%s\",\"key_hash\":\"%s\",\"role\":\"%s\",\"decision\":\"%s\","
             "\"attach_result\":\"%s\",\"attach_failure_reason\":\"%s\",\"wakeup_reason\":\"%s\","
-            "\"result_source\":\"%s\",\"upstream_call_reason\":\"%s\"}",
+            "\"result_source\":\"%s\",\"upstream_call_reason\":\"%s\","
+            "\"lifecycle_generation\":%llu,\"leader_request_id\":\"%s\"}",
             record.coalescing_group_id, record.coalescing_key_hash, record.coalescing_role,
             record.coalescing_decision, record.coalescing_attach_result,
             record.coalescing_attach_failure_reason, record.coalescing_wakeup_reason,
-            record.coalescing_result_source, record.coalescing_upstream_call_reason);
+            record.coalescing_result_source, record.coalescing_upstream_call_reason,
+            static_cast<unsigned long long>(record.coalescing_lifecycle_generation),
+            record.coalescing_leader_request_id);
     }
 
     int total_len = std::snprintf(
@@ -781,15 +793,21 @@ void trace_flush(TraceRingBuffer* ring, const TraceConfig& config, const char* s
 
     struct CoalescingGroupStats {
         char group_id[64]{};
+        std::uint64_t lifecycle_generation = 0;
+        char leader_request_id[32]{};
+        std::uint64_t leader_publish_result_unix_nano = 0;
         std::size_t client_requests = 0;
         std::size_t leaders = 0;
         std::size_t followers = 0;
         std::size_t followers_attached = 0;
         std::size_t followers_served_from_result = 0;
         std::size_t followers_timeout = 0;
+        std::size_t followers_timed_out_before_publish = 0;
+        std::size_t followers_timed_out_after_publish = 0;
         std::size_t fallbacks = 0;
         std::size_t upstream_calls = 0;
         std::size_t upstream_unknown = 0;
+        char failure_reason[64]{};
     };
 
     std::vector<CoalescingGroupStats> coalescing_groups;
@@ -814,8 +832,24 @@ void trace_flush(TraceRingBuffer* ring, const TraceConfig& config, const char* s
             }
 
             grp->client_requests++;
+            if (record.coalescing_lifecycle_generation > 0) {
+                grp->lifecycle_generation = record.coalescing_lifecycle_generation;
+            }
+            if (record.coalescing_leader_request_id[0] != '\0' &&
+                grp->leader_request_id[0] == '\0') {
+                std::strncpy(grp->leader_request_id, record.coalescing_leader_request_id,
+                             sizeof(grp->leader_request_id) - 1);
+                grp->leader_request_id[sizeof(grp->leader_request_id) - 1] = '\0';
+            }
             if (std::strcmp(record.coalescing_role, "leader") == 0) {
                 grp->leaders++;
+                for (std::size_t j = 0; j < record.span_count; ++j) {
+                    const auto& span = record.spans[j];
+                    if (std::strcmp(span.name, kSpanCoalescingLeaderPublishResult) == 0) {
+                        grp->leader_publish_result_unix_nano = span.start_unix_nano;
+                        break;
+                    }
+                }
             } else if (std::strcmp(record.coalescing_role, "follower") == 0) {
                 grp->followers++;
             }
@@ -844,6 +878,44 @@ void trace_flush(TraceRingBuffer* ring, const TraceConfig& config, const char* s
         }
     }
 
+    for (std::uint32_t i = start_idx; i < end_idx; ++i) {
+        std::size_t ring_idx = i % max_rec;
+        const auto& record = ring->records[ring_idx];
+        if (!(record.span_count > 0 && record.coalescing_has_context &&
+              record.coalescing_group_id[0] != '\0' &&
+              std::strcmp(record.coalescing_wakeup_reason, "timeout") == 0)) {
+            continue;
+        }
+
+        CoalescingGroupStats* grp = nullptr;
+        for (auto& g : coalescing_groups) {
+            if (std::strcmp(g.group_id, record.coalescing_group_id) == 0) {
+                grp = &g;
+                break;
+            }
+        }
+        if (grp == nullptr) {
+            continue;
+        }
+
+        std::uint64_t follower_wait_end_unix_nano = 0;
+        for (std::size_t j = 0; j < record.span_count; ++j) {
+            const auto& span = record.spans[j];
+            if (std::strcmp(span.name, kSpanCoalescingFollowerWait) == 0) {
+                follower_wait_end_unix_nano = span.end_unix_nano;
+                break;
+            }
+        }
+
+        if (grp->leader_publish_result_unix_nano == 0 ||
+            (follower_wait_end_unix_nano > 0 &&
+             follower_wait_end_unix_nano < grp->leader_publish_result_unix_nano)) {
+            grp->followers_timed_out_before_publish++;
+        } else {
+            grp->followers_timed_out_after_publish++;
+        }
+    }
+
     if (!coalescing_groups.empty()) {
         char summary_md_path[512];
         std::snprintf(summary_md_path, sizeof(summary_md_path), "%s/%s_%s.trace_summary.md",
@@ -851,22 +923,44 @@ void trace_flush(TraceRingBuffer* ring, const TraceConfig& config, const char* s
         std::FILE* s_file = std::fopen(summary_md_path, "w");
         if (s_file != nullptr) {
             std::fprintf(s_file, "# 🧪 ByteTaper Coalescing Group-level Trace Summary\n\n");
-            std::fprintf(s_file, "| Group ID | Client Requests | Leaders | Followers | Followers "
-                                 "Attached | Served from Result | Followers Timeout | Fallbacks | "
-                                 "Upstream Calls | Unknown Upstreams | Verdict |\n");
+            std::fprintf(s_file,
+                         "| Group ID | Lifecycle Generation | Leader Request ID | Client "
+                         "Requests | Leaders | Followers | Followers Attached | Served from "
+                         "Result | Followers Timeout | Timeouts Before Publish | Timeouts After "
+                         "Publish | Fallbacks | Upstream Calls | Unknown Upstreams | Failure "
+                         "Reason | Verdict |\n");
             std::fprintf(
                 s_file,
-                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n");
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | "
+                ":--- | :--- | :--- | :--- | :--- |\n");
 
-            for (const auto& g : coalescing_groups) {
+            for (auto& g : coalescing_groups) {
+                if (g.upstream_calls > g.leaders) {
+                    std::strncpy(g.failure_reason, "upstream_call_leak",
+                                 sizeof(g.failure_reason) - 1);
+                } else if (g.followers_timed_out_before_publish > 0 &&
+                           g.followers_timed_out_before_publish >=
+                               g.followers_timed_out_after_publish) {
+                    std::strncpy(g.failure_reason, "followers_timeout_before_result_publication",
+                                 sizeof(g.failure_reason) - 1);
+                } else if (g.followers_timed_out_after_publish > 0) {
+                    std::strncpy(g.failure_reason, "followers_timeout_after_result_publication",
+                                 sizeof(g.failure_reason) - 1);
+                } else {
+                    std::strncpy(g.failure_reason, "none", sizeof(g.failure_reason) - 1);
+                }
+
                 bool pass = (g.upstream_calls <= g.leaders) && (g.fallbacks == 0);
                 std::fprintf(s_file,
-                             "| `%s` | `%zu` | `%zu` | `%zu` | `%zu` | `%zu` | `%zu` | `%zu` | "
-                             "`%zu` | `%zu` | **%s** |\n",
-                             g.group_id, g.client_requests, g.leaders, g.followers,
-                             g.followers_attached, g.followers_served_from_result,
-                             g.followers_timeout, g.fallbacks, g.upstream_calls, g.upstream_unknown,
-                             pass ? "PASS" : "FAIL");
+                             "| `%s` | `%llu` | `%s` | `%zu` | `%zu` | `%zu` | `%zu` | `%zu` | "
+                             "`%zu` | `%zu` | `%zu` | `%zu` | `%zu` | `%zu` | `%s` | **%s** |\n",
+                             g.group_id, static_cast<unsigned long long>(g.lifecycle_generation),
+                             g.leader_request_id[0] != '\0' ? g.leader_request_id : "0",
+                             g.client_requests, g.leaders, g.followers, g.followers_attached,
+                             g.followers_served_from_result, g.followers_timeout,
+                             g.followers_timed_out_before_publish,
+                             g.followers_timed_out_after_publish, g.fallbacks, g.upstream_calls,
+                             g.upstream_unknown, g.failure_reason, pass ? "PASS" : "FAIL");
             }
             std::fprintf(s_file, "\n");
             std::fprintf(s_file, "## 📝 Detailed Analysis\n\n");
@@ -899,6 +993,9 @@ void trace_flush(TraceRingBuffer* ring, const TraceConfig& config, const char* s
                                      "  - Detected `%zu` unexplained or untracked upstream "
                                      "dispatches (upstream_call_reason == unknown).\n",
                                      g.upstream_unknown);
+                    }
+                    if (g.failure_reason[0] != '\0' && std::strcmp(g.failure_reason, "none") != 0) {
+                        std::fprintf(s_file, "  - Failure reason: `%s`.\n", g.failure_reason);
                     }
                 }
                 std::fprintf(s_file, "\n");

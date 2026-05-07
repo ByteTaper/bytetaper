@@ -87,4 +87,35 @@ TEST_F(CoalescingDecisionTest, TooManyWaitersRejects) {
     EXPECT_STREQ(get_decision_reason_string(d3.reason).data(), "too_many_waiters");
 }
 
+TEST_F(CoalescingDecisionTest, LifecycleGenerationAndLeaderRequestIdPropagateToFollowers) {
+    ctx.request_id = 101;
+    auto leader = evaluate_coalescing_decision(&registry, ctx);
+    ASSERT_EQ(leader.action, CoalescingAction::Leader);
+    ASSERT_GT(leader.lifecycle_generation, 0u);
+    EXPECT_EQ(leader.leader_request_id, 101u);
+    EXPECT_EQ(leader.group_id, static_cast<std::uint32_t>(leader.lifecycle_generation));
+
+    ctx.request_id = 202;
+    auto follower = evaluate_coalescing_decision(&registry, ctx);
+    ASSERT_EQ(follower.action, CoalescingAction::Follower);
+    EXPECT_EQ(follower.lifecycle_generation, leader.lifecycle_generation);
+    EXPECT_EQ(follower.leader_request_id, leader.leader_request_id);
+    EXPECT_EQ(follower.group_id, leader.group_id);
+}
+
+TEST_F(CoalescingDecisionTest, NewLeaderLifecycleGetsNewGeneration) {
+    ctx.request_id = 1;
+    auto first_leader = evaluate_coalescing_decision(&registry, ctx);
+    ASSERT_EQ(first_leader.action, CoalescingAction::Leader);
+    ASSERT_GT(first_leader.lifecycle_generation, 0u);
+    EXPECT_EQ(first_leader.leader_request_id, 1u);
+
+    ctx.now_ms += 1000; // expire wait window with no followers attached
+    ctx.request_id = 2;
+    auto second_leader = evaluate_coalescing_decision(&registry, ctx);
+    ASSERT_EQ(second_leader.action, CoalescingAction::Leader);
+    EXPECT_NE(second_leader.lifecycle_generation, first_leader.lifecycle_generation);
+    EXPECT_EQ(second_leader.leader_request_id, 2u);
+}
+
 } // namespace bytetaper::coalescing

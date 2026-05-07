@@ -86,6 +86,8 @@ struct TraceRecord {
     char coalescing_result_source[32]{};         // "upstream" | "coalesced_result" | "l1_cache" |
                                                  // "l2_cache" | ...
     char coalescing_upstream_call_reason[64]{}; // "leader_fill" | "follower_timeout_fallback" | ...
+    std::uint64_t coalescing_lifecycle_generation = 0;
+    char coalescing_leader_request_id[32]{};
     bool coalescing_has_context = false; // gate: only emit coalescing fields in JSONL if true
 
     std::uint64_t total_duration_nano = 0;
@@ -165,7 +167,9 @@ void trace_set_coalescing_info(TraceRecord* record, bool leader, bool follower);
 void trace_set_coalescing_context(TraceRecord* record, const char* group_id, const char* key_hash,
                                   const char* role, const char* decision, const char* attach_result,
                                   const char* attach_failure_reason, const char* wakeup_reason,
-                                  const char* result_source, const char* upstream_call_reason);
+                                  const char* result_source, const char* upstream_call_reason,
+                                  std::uint64_t lifecycle_generation,
+                                  const char* leader_request_id);
 const char* trace_latency_class_str(TraceLatencyClass cls);
 void trace_classify(TraceRecord* record); // derives totals + dominant_latency_class
 bool trace_is_slow(const TraceRecord& record, const TraceConfig& config);

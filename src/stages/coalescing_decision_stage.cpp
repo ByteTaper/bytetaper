@@ -27,6 +27,7 @@ apg::StageOutput coalescing_decision_stage(apg::ApgTransformContext& context) {
     decision_ctx.policy = &policy;
     decision_ctx.method = context.request_method;
     decision_ctx.metrics = context.coalescing_metrics;
+    decision_ctx.request_id = context.request_id;
     decision_ctx.now_ms = static_cast<std::uint64_t>(context.request_epoch_ms);
     decision_ctx.trace = context.trace;
 
@@ -49,6 +50,16 @@ apg::StageOutput coalescing_decision_stage(apg::ApgTransformContext& context) {
     context.coalescing_attach_failure_reason = context.coalescing_decision.attach_failure_reason;
     context.coalescing_group_id = context.coalescing_decision.group_id;
     context.coalescing_key_hash = context.coalescing_decision.key_hash;
+    std::snprintf(
+        context.coalescing_group_id_str, sizeof(context.coalescing_group_id_str), "life-%020llu",
+        static_cast<unsigned long long>(context.coalescing_decision.lifecycle_generation));
+    std::snprintf(
+        context.coalescing_lifecycle_generation_str,
+        sizeof(context.coalescing_lifecycle_generation_str), "%llu",
+        static_cast<unsigned long long>(context.coalescing_decision.lifecycle_generation));
+    std::snprintf(context.coalescing_leader_request_id_str,
+                  sizeof(context.coalescing_leader_request_id_str), "%llu",
+                  static_cast<unsigned long long>(context.coalescing_decision.leader_request_id));
     context.coalescing_terminal_state = context.coalescing_decision.state_before;
     context.coalescing_terminal_result_join_flag =
         context.coalescing_decision.terminal_result_join_flag;

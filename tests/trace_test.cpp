@@ -249,6 +249,23 @@ TEST(TraceTest, JsonlOutputContainsDominantClass) {
     EXPECT_NE(std::strstr(buf, "\"dominant_latency_class\":\"grpc_read_wait\""), nullptr);
 }
 
+TEST(TraceTest, CoalescingContextJsonlContainsLifecycleAndLeaderRequestId) {
+    TraceRecord record{};
+    trace_start_record(&record, "scen");
+    trace_set_route(&record, "routeA", "/path/a");
+    trace_set_coalescing_context(&record, "life-00000000000000000042", "abc123", "follower",
+                                 "follower_timeout_fallback", "success", "none", "timeout",
+                                 "fallback_upstream", "follower_timeout_fallback", 42, "1001");
+
+    char buf[8192];
+    std::size_t size = trace_format_jsonl(record, buf, sizeof(buf));
+    ASSERT_GT(size, 0);
+
+    EXPECT_NE(std::strstr(buf, "\"lifecycle_generation\":42"), nullptr);
+    EXPECT_NE(std::strstr(buf, "\"leader_request_id\":\"1001\""), nullptr);
+    EXPECT_NE(std::strstr(buf, "\"group_id\":\"life-00000000000000000042\""), nullptr);
+}
+
 TEST(TraceTest, BenchmarkLegAbsentFromJsonl) {
     TraceRecord record{};
     trace_start_record(&record, "scen");

@@ -50,6 +50,8 @@ struct RegistryRegistrationResult {
     CoalescingState state_after = CoalescingState::LeaderRunning;
     std::uint64_t key_hash = 0;
     std::uint32_t group_id = 0;
+    std::uint64_t lifecycle_generation = 0;
+    std::uint64_t leader_request_id = 0;
     bool terminal_result_join_flag = false;
 };
 
@@ -82,6 +84,8 @@ struct InFlightEntry {
     std::uint32_t waiter_count = 0;
     bool active = false;
     CoalescingState state = CoalescingState::LeaderRunning;
+    std::uint64_t lifecycle_generation = 0;
+    std::uint64_t leader_request_id = 0;
     InFlightSharedResponse shared_response{};
 };
 
@@ -130,7 +134,8 @@ void registry_init(InFlightRegistry* registry);
  */
 RegistryRegistrationResult registry_register(InFlightRegistry* registry, const char* key,
                                              std::uint64_t now_ms, std::uint32_t wait_window_ms,
-                                             std::uint32_t max_waiters_per_key);
+                                             std::uint32_t max_waiters_per_key,
+                                             std::uint64_t leader_request_id = 0);
 
 /**
  * @brief Completes the in-flight entry with a response snapshot.

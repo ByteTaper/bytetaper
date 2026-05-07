@@ -90,7 +90,7 @@ CoalescingDecision evaluate_coalescing_decision(InFlightRegistry* registry,
     }
     RegistryRegistrationResult reg_res =
         registry_register(registry, decision.key, context.now_ms, context.policy->wait_window_ms,
-                          context.policy->max_waiters_per_key);
+                          context.policy->max_waiters_per_key, context.request_id);
     lookup_span.end();
 
     // Propagate all rich telemetry fields to decision
@@ -99,6 +99,8 @@ CoalescingDecision evaluate_coalescing_decision(InFlightRegistry* registry,
     decision.state_after = reg_res.state_after;
     decision.key_hash = reg_res.key_hash;
     decision.group_id = reg_res.group_id;
+    decision.lifecycle_generation = reg_res.lifecycle_generation;
+    decision.leader_request_id = reg_res.leader_request_id;
     decision.terminal_result_join_flag = reg_res.terminal_result_join_flag;
 
     // 6. Mapping Registry Result and Recording Events

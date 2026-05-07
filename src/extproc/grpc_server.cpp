@@ -22,6 +22,7 @@
 #include "stages/compression_decision_stage.h"
 #include "stages/pagination_request_mutation_stage.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <grpcpp/grpcpp.h>
@@ -32,6 +33,8 @@
 namespace bytetaper::extproc {
 
 namespace {
+
+std::atomic<std::uint64_t> g_request_id_counter{ 1 };
 
 constexpr const char* kPathHeader = ":path";
 constexpr const char* kContentTypeHeader = "content-type";
@@ -203,6 +206,7 @@ void apply_request_headers_selection(const envoy::service::ext_proc::v3::Process
     }
 
     state->context = apg::ApgTransformContext{};
+    state->context.request_id = g_request_id_counter.fetch_add(1, std::memory_order_relaxed);
     state->response_kind = json_transform::JsonResponseKind::SkipUnsupported;
     state->has_query_selection = false;
 
@@ -1044,8 +1048,14 @@ public:
 
             if (filter_state.context.coalescing_has_context) {
                 char group_id_buf[64]{};
-                std::snprintf(group_id_buf, sizeof(group_id_buf), "group-%03u",
-                              filter_state.context.coalescing_group_id);
+                if (filter_state.context.coalescing_group_id_str[0] != '\0') {
+                    std::strncpy(group_id_buf, filter_state.context.coalescing_group_id_str,
+                                 sizeof(group_id_buf) - 1);
+                    group_id_buf[sizeof(group_id_buf) - 1] = '\0';
+                } else {
+                    std::snprintf(group_id_buf, sizeof(group_id_buf), "group-%03u",
+                                  filter_state.context.coalescing_group_id);
+                }
                 char key_hash_buf[32]{};
                 std::snprintf(key_hash_buf, sizeof(key_hash_buf), "%llx",
                               (unsigned long long) filter_state.context.coalescing_key_hash);
@@ -1071,7 +1081,9 @@ public:
                     filter_state.context.coalescing_result_source != nullptr
                         ? filter_state.context.coalescing_result_source
                         : "none",
-                    filter_state.context.coalescing_upstream_call_reason);
+                    filter_state.context.coalescing_upstream_call_reason,
+                    filter_state.context.coalescing_decision.lifecycle_generation,
+                    filter_state.context.coalescing_leader_request_id_str);
             }
 
             const auto& trace_config = observability::trace_global_config();
