@@ -10,6 +10,19 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+  bytetaper-build-server:
+    image: bytetaper-dev:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
+        cmake --build build --target bytetaper-extproc-server
+
   bytetaper-unit-test:
     image: bytetaper-dev:latest
     working_dir: /workspace
@@ -119,6 +132,8 @@ services:
   bytetaper-extproc:
     image: bytetaper-dev:latest
     depends_on:
+      bytetaper-build-server:
+        condition: service_completed_successfully
       mock-api:
         condition: service_healthy
     working_dir: /workspace
@@ -130,8 +145,6 @@ services:
       - |
         set -eu
         mkdir -p /tmp/bytetaper-cache
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
-        cmake --build build --target bytetaper-extproc-server
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/bytetaper-policy.yaml --l2-cache-path /tmp/bytetaper-cache --metrics-address 0.0.0.0 --metrics-port 18081
     ports:
       - "18080:18080"
@@ -206,6 +219,8 @@ services:
   bytetaper-extproc-compression:
     image: bytetaper-dev:latest
     depends_on:
+      bytetaper-build-server:
+        condition: service_completed_successfully
       mock-api:
         condition: service_healthy
     working_dir: /workspace
@@ -217,8 +232,6 @@ services:
       - |
         set -eu
         mkdir -p /tmp/bytetaper-cache-compression
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
-        cmake --build build --target bytetaper-extproc-server
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/compression-benchmark-policy.yaml --l2-cache-path /tmp/bytetaper-cache-compression --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
@@ -284,6 +297,8 @@ services:
   bytetaper-extproc-observe:
     image: bytetaper-dev:latest
     depends_on:
+      bytetaper-build-server:
+        condition: service_completed_successfully
       mock-api:
         condition: service_healthy
     working_dir: /workspace
@@ -295,8 +310,6 @@ services:
       - |
         set -eu
         mkdir -p /tmp/bytetaper-cache-observe
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
-        cmake --build build --target bytetaper-extproc-server
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/observe-mode-policy.yaml --l2-cache-path /tmp/bytetaper-cache-observe --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
@@ -336,6 +349,8 @@ services:
   bytetaper-extproc-field-filtering:
     image: bytetaper-dev:latest
     depends_on:
+      bytetaper-build-server:
+        condition: service_completed_successfully
       mock-api:
         condition: service_healthy
     working_dir: /workspace
@@ -347,8 +362,6 @@ services:
       - |
         set -eu
         mkdir -p /tmp/bytetaper-cache-field-filtering
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
-        cmake --build build --target bytetaper-extproc-server
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/field-filtering-policy.yaml --l2-cache-path /tmp/bytetaper-cache-field-filtering --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
@@ -388,6 +401,8 @@ services:
   bytetaper-extproc-cache-a:
     image: bytetaper-dev:latest
     depends_on:
+      bytetaper-build-server:
+        condition: service_completed_successfully
       mock-api:
         condition: service_healthy
     working_dir: /workspace
@@ -398,10 +413,8 @@ services:
       - -lc
       - |
         set -eu
-        mkdir -p /workspace/build/cache-shared
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
-        cmake --build build --target bytetaper-extproc-server
-        exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/cache-benchmark-policy.yaml --l2-cache-path /workspace/build/cache-shared --metrics-address 0.0.0.0 --metrics-port 18081
+        mkdir -p /tmp/bytetaper-cache-shared-l2
+        exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/cache-benchmark-policy.yaml --l2-cache-path /tmp/bytetaper-cache-shared-l2 --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
       interval: 2s
@@ -440,6 +453,8 @@ services:
   bytetaper-extproc-pagination:
     image: bytetaper-dev:latest
     depends_on:
+      bytetaper-build-server:
+        condition: service_completed_successfully
       mock-api:
         condition: service_healthy
     working_dir: /workspace
@@ -451,8 +466,6 @@ services:
       - |
         set -eu
         mkdir -p /tmp/bytetaper-cache-pagination
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
-        cmake --build build --target bytetaper-extproc-server
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/pagination-benchmark-policy.yaml --l2-cache-path /tmp/bytetaper-cache-pagination --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
@@ -492,6 +505,8 @@ services:
   bytetaper-extproc-coalescing:
     image: bytetaper-dev:latest
     depends_on:
+      bytetaper-build-server:
+        condition: service_completed_successfully
       mock-api:
         condition: service_healthy
     working_dir: /workspace
@@ -503,8 +518,6 @@ services:
       - |
         set -eu
         mkdir -p /tmp/bytetaper-cache-coalescing
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
-        cmake --build build --target bytetaper-extproc-server
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/coalescing-benchmark-policy.yaml --l2-cache-path /tmp/bytetaper-cache-coalescing --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
@@ -616,9 +629,9 @@ services:
       - -lc
       - |
         set -eu
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
-        cmake --build build --target json_filter_benchmark
-        ./build/json_filter_benchmark
+        cmake -S . -B /tmp/build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
+        cmake --build /tmp/build --target json_filter_benchmark
+        /tmp/build/json_filter_benchmark
 
   bytetaper-benchmark:
     build:
