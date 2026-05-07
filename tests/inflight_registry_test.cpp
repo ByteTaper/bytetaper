@@ -84,7 +84,7 @@ TEST_F(InFlightRegistryTest, CompletionAllowsNewLeader) {
     EXPECT_EQ(registry_register(&registry, key, now, window, max_waiters).role,
               InFlightRole::Follower);
 
-    registry_complete_state(&registry, key, CoalescingState::NotCacheable, now);
+    registry_complete_state(&registry, key, InFlightCompletionState::NotCacheable, now);
 
     // After completion with cacheable=false, next request is Leader again
     EXPECT_EQ(registry_register(&registry, key, now, window, max_waiters).role,
@@ -98,7 +98,7 @@ TEST_F(InFlightRegistryTest, CacheableCompletionAllowsFollower) {
     std::uint32_t max_waiters = 5;
 
     registry_register(&registry, key, now, window, max_waiters);
-    registry_complete_state(&registry, key, CoalescingState::ResultReady, now);
+    registry_complete_state(&registry, key, InFlightCompletionState::Stored, now);
 
     // After completion with cacheable=true, next request within window is Follower
     EXPECT_EQ(registry_register(&registry, key, now + 10, window, max_waiters).role,
@@ -112,7 +112,7 @@ TEST_F(InFlightRegistryTest, CacheableCompletionExpiresToLeader) {
     std::uint32_t max_waiters = 5;
 
     registry_register(&registry, key, now, window, max_waiters);
-    registry_complete_state(&registry, key, CoalescingState::ResultReady, now);
+    registry_complete_state(&registry, key, InFlightCompletionState::Stored, now);
 
     // After completion window expires, next request is Leader again
     EXPECT_EQ(registry_register(&registry, key, now + window + 1, window, max_waiters).role,

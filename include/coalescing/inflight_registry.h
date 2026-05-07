@@ -20,40 +20,27 @@ enum class InFlightRole : std::uint8_t {
     Reject = 2,   // Queue/Shard full, instantly synthesize error response.
 };
 
-enum class CoalescingState : std::uint8_t {
-    LeaderRunning = 0, // replaces InFlight
-    ResultReady = 1,   // replaces Stored (implies shared_response.ready = true)
-    LeaderFailed = 2,  // replaces Failed
-    NotCacheable = 3,  // replaces NotCacheable
-    TimedOut = 4,      // new: leader exceeded its own deadline
-    Cancelled = 5,     // new: entry evicted before leader finished
-};
-
-static bool is_terminal(CoalescingState s) {
-    return s != CoalescingState::LeaderRunning;
-}
-
-enum class AttachFailureReason : std::uint8_t {
-    None = 0,
-    ShardFull = 1,
-    MaxWaitersEnforced = 2,
-    StateMismatch = 3,
-};
-
 /**
  * @brief Result of a request registration.
  */
 struct RegistryRegistrationResult {
     InFlightRole role;
-    AttachFailureReason attach_failure_reason = AttachFailureReason::None;
-    CoalescingState state_before = CoalescingState::LeaderRunning;
-    CoalescingState state_after = CoalescingState::LeaderRunning;
-    std::uint64_t key_hash = 0;
-    std::uint32_t group_id = 0;
-    std::uint64_t lifecycle_generation = 0;
-    std::uint64_t leader_request_id = 0;
-    bool terminal_result_join_flag = false;
 };
+
+/**
+ * @brief An entry in the in-flight request registry.
+ * Following Orthodox C++ style: plain struct with fixed-size key buffer.
+ */
+enum class InFlightCompletionState : std::uint8_t {
+    InFlight = 0,
+    Stored = 1,
+    NotCacheable = 2,
+    Failed = 3,
+};
+
+static bool is_terminal(InFlightCompletionState s) {
+    return s != InFlightCompletionState::InFlight;
+}
 
 static constexpr std::size_t kCoalescingSharedBodyMaxSize = 65536;
 static constexpr std::size_t kCoalescingContentTypeMaxLen = 64;
@@ -83,9 +70,7 @@ struct InFlightEntry {
     std::uint64_t completed_at_epoch_ms = 0;
     std::uint32_t waiter_count = 0;
     bool active = false;
-    CoalescingState state = CoalescingState::LeaderRunning;
-    std::uint64_t lifecycle_generation = 0;
-    std::uint64_t leader_request_id = 0;
+    InFlightCompletionState state = InFlightCompletionState::InFlight;
     InFlightSharedResponse shared_response{};
 };
 
@@ -134,8 +119,7 @@ void registry_init(InFlightRegistry* registry);
  */
 RegistryRegistrationResult registry_register(InFlightRegistry* registry, const char* key,
                                              std::uint64_t now_ms, std::uint32_t wait_window_ms,
-                                             std::uint32_t max_waiters_per_key,
-                                             std::uint64_t leader_request_id = 0);
+                                             std::uint32_t max_waiters_per_key);
 
 /**
  * @brief Completes the in-flight entry with a response snapshot.
@@ -147,8 +131,8 @@ bool registry_complete_with_response(InFlightRegistry* registry, const char* key
 /**
  * @brief Completes the in-flight entry with a simple terminal state.
  */
-bool registry_complete_state(InFlightRegistry* registry, const char* key, CoalescingState state,
-                             std::uint64_t now_ms);
+bool registry_complete_state(InFlightRegistry* registry, const char* key,
+                             InFlightCompletionState state, std::uint64_t now_ms);
 
 /**
  * @brief Result of a registry wait operation.
@@ -188,16 +172,6 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
  */
 void registry_remove_waiter(InFlightRegistry* registry, const char* key);
 
-} // namespace bytetaper::coalescing
-
-namespace bytetaper::metrics {
-struct CoalescingMetrics;
-}
-
-namespace bytetaper::coalescing {
-void registry_evaluate_group_invariants_and_summary(InFlightRegistry* registry, const char* key,
-                                                    std::uint64_t now_ms,
-                                                    metrics::CoalescingMetrics* metrics);
 } // namespace bytetaper::coalescing
 
 #endif // BYTETAPER_COALESCING_INFLIGHT_REGISTRY_H
