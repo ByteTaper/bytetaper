@@ -185,8 +185,38 @@ validate_report_file() {
         echo "ERROR: No payload savings JSON blocks found in report $file" >&2
         return 1
     fi
+    # 5. Find all JSON coalescing blocks within the report file if the scenario is coalescing_burst
+    local scenario
+    scenario=$(grep -E "^Scenario:" "$file" | head -n 1 | awk '{print $2}' || echo "unknown")
+    if [[ "$scenario" == *"coalescing_burst"* ]]; then
+        local coalescing_found=0
+        while IFS= read -r line; do
+            if [[ "$line" =~ Coalescing\ JSON:[[:space:]]*(.*) ]]; then
+                coalescing_found=$((coalescing_found + 1))
+                local json_str="${BASH_REMATCH[1]}"
+                echo "Checking coalescing JSON: $json_str"
 
-    echo "Report $file is fully VALID (all percentiles, throughput, container stats, and payload savings metrics present)."
+                # Parse using jq and assert fields exist
+                for field in "client_requests_sent" "upstream_mock_calls" "leaders" "followers" "follower_cache_hits" "fallbacks" "bypasses" "coalescing_ratio" "upstream_amplification_ratio" \
+                             "follower_shared_response" "follower_l1_hit" "follower_timeout" "follower_missing" "follower_stored_but_no_snapshot" \
+                             "follower_not_cacheable" "follower_failed" "follower_pool_queue_full" "follower_unaccounted"; do
+                    local val
+                    val=$(echo "$json_str" | jq -e ".$field" 2>/dev/null || true)
+                    if [ -z "$val" ] || [ "$val" = "null" ]; then
+                        echo "ERROR: Missing '$field' in Coalescing JSON of report $file" >&2
+                        return 1
+                    fi
+                done
+            fi
+        done < <(grep -E "Coalescing JSON" "$file" || true)
+
+        if [ $coalescing_found -lt 2 ]; then
+            echo "ERROR: Expected at least 2 coalescing JSON blocks (Leg A and Leg B), found $coalescing_found in report $file" >&2
+            return 1
+        fi
+    fi
+
+    echo "Report $file is fully VALID (all percentiles, throughput, container stats, payload savings, and coalescing metrics present)."
     return 0
 }
 

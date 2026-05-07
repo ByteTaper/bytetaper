@@ -56,7 +56,8 @@ const char* follower_wait_pool_start(FollowerWaitPool* pool, const FollowerWaitP
                 if (job.result_slot != nullptr) {
                     RegistrySharedResponseOutput resp{};
                     RegistryWaitResult result = registry_wait_for_completion(
-                        pool->resources.registry, job.key, job.wait_window_ms, &resp);
+                        pool->resources.registry, job.key, job.wait_window_ms,
+                        job.lifecycle_generation, &resp);
 
                     {
                         std::lock_guard<std::mutex> slot_lock(job.result_slot->mu);
@@ -114,6 +115,7 @@ void follower_wait_pool_shutdown(FollowerWaitPool* pool) {
 
 bool follower_wait_pool_submit_and_wait(FollowerWaitPool* pool, const char* key,
                                         std::uint32_t wait_window_ms,
+                                        std::uint64_t lifecycle_generation,
                                         RegistrySharedResponseOutput* response_out,
                                         RegistryWaitResult* result_out) {
     if (pool == nullptr || key == nullptr) {
@@ -135,6 +137,7 @@ bool follower_wait_pool_submit_and_wait(FollowerWaitPool* pool, const char* key,
         std::strncpy(job.key, key, sizeof(job.key) - 1);
         job.key[sizeof(job.key) - 1] = '\0';
         job.wait_window_ms = wait_window_ms;
+        job.lifecycle_generation = lifecycle_generation;
         job.result_slot = &slot;
 
         pool->queue[pool->queue_tail] = job;

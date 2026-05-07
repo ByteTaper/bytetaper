@@ -43,7 +43,7 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                                              std::uint64_t now_ms, std::uint32_t wait_window_ms,
                                              std::uint32_t max_waiters_per_key) {
     if (registry == nullptr || key == nullptr) {
-        return { InFlightRole::Reject };
+        return { InFlightRole::Reject, 0 };
     }
 
     std::uint64_t hash = hash_string(key);
@@ -67,15 +67,16 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                     slot.created_at_epoch_ms = now_ms;
                     slot.waiter_count = 0;
                     slot.active = true;
-                    return { InFlightRole::Leader };
+                    slot.lifecycle_generation++;
+                    return { InFlightRole::Leader, slot.lifecycle_generation };
                 }
 
                 // Still within grace window, join as follower
                 if (slot.waiter_count < max_waiters_per_key) {
                     slot.waiter_count++;
-                    return { InFlightRole::Follower };
+                    return { InFlightRole::Follower, slot.lifecycle_generation };
                 } else {
-                    return { InFlightRole::Reject };
+                    return { InFlightRole::Reject, 0 };
                 }
             } else if (slot.state == InFlightCompletionState::NotCacheable ||
                        slot.state == InFlightCompletionState::Failed) {
@@ -85,7 +86,8 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                 slot.created_at_epoch_ms = now_ms;
                 slot.waiter_count = 0;
                 slot.active = true;
-                return { InFlightRole::Leader };
+                slot.lifecycle_generation++;
+                return { InFlightRole::Leader, slot.lifecycle_generation };
             } else {
                 // InFlight
                 if (now_ms >= slot.created_at_epoch_ms + wait_window_ms) {
@@ -96,15 +98,16 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                     slot.shared_response = {};
                     slot.waiter_count = 0;
                     slot.active = true;
-                    return { InFlightRole::Leader };
+                    slot.lifecycle_generation++;
+                    return { InFlightRole::Leader, slot.lifecycle_generation };
                 }
 
                 // Still in flight, check waiter limit
                 if (slot.waiter_count < max_waiters_per_key) {
                     slot.waiter_count++;
-                    return { InFlightRole::Follower };
+                    return { InFlightRole::Follower, slot.lifecycle_generation };
                 } else {
-                    return { InFlightRole::Reject };
+                    return { InFlightRole::Reject, 0 };
                 }
             }
         }
@@ -121,12 +124,13 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
             slot.state = InFlightCompletionState::InFlight;
             slot.shared_response = {};
             slot.active = true;
-            return { InFlightRole::Leader };
+            slot.lifecycle_generation++;
+            return { InFlightRole::Leader, slot.lifecycle_generation };
         }
     }
 
     // [BT-130-005] Shard full, instantly drop traffic
-    return { InFlightRole::Reject };
+    return { InFlightRole::Reject, 0 };
 }
 
 bool registry_complete_with_response(InFlightRegistry* registry, const char* key,
@@ -223,6 +227,7 @@ void registry_remove_waiter(InFlightRegistry* registry, const char* key) {
 
 RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, const char* key,
                                                 std::uint32_t wait_window_ms,
+                                                std::uint64_t expected_lifecycle_generation,
                                                 RegistrySharedResponseOutput* response_out) {
     if (registry == nullptr || key == nullptr) {
         return RegistryWaitResult::Missing;
@@ -243,6 +248,11 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
     }
 
     if (entry == nullptr) {
+        return RegistryWaitResult::Missing;
+    }
+
+    if (expected_lifecycle_generation != 0 &&
+        entry->lifecycle_generation != expected_lifecycle_generation) {
         return RegistryWaitResult::Missing;
     }
 
@@ -272,14 +282,19 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(wait_window_ms);
 
-    const bool signalled = shard.cv.wait_until(
-        lock, deadline, [entry] { return is_terminal(entry->state) || !entry->active; });
+    const bool signalled =
+        shard.cv.wait_until(lock, deadline, [entry, expected_lifecycle_generation] {
+            return is_terminal(entry->state) || !entry->active ||
+                   (expected_lifecycle_generation != 0 &&
+                    entry->lifecycle_generation != expected_lifecycle_generation);
+        });
 
     if (!signalled) {
         return RegistryWaitResult::Timeout;
     }
 
-    if (!entry->active) {
+    if (!entry->active || (expected_lifecycle_generation != 0 &&
+                           entry->lifecycle_generation != expected_lifecycle_generation)) {
         return RegistryWaitResult::Missing;
     }
 

@@ -58,7 +58,7 @@ TEST(CoalescingEventDrivenWait, FollowerWakesBeforeFullWindowWhenLeaderCompletes
     // Should wake up much faster than 1 second (e.g. < 500ms)
     EXPECT_LT(elapsed_ms, 500);
     // In this test, it will fallback because we didn't actually put anything in L1
-    EXPECT_STREQ(output.note, "leader-complete-l1-miss");
+    EXPECT_STREQ(output.note, "stored-no-snapshot-fallback");
 }
 
 TEST(CoalescingEventDrivenWait, FollowerTimeoutFallbackStillWorks) {
@@ -159,7 +159,7 @@ TEST(CoalescingEventDrivenWait, ConcurrencyMultipleFollowersReleased) {
     EXPECT_LT(elapsed_all_ms, 300);
 
     for (int i = 0; i < kNumFollowers; ++i) {
-        EXPECT_STREQ(outputs[i].note, "leader-complete-l1-miss");
+        EXPECT_STREQ(outputs[i].note, "stored-no-snapshot-fallback");
         EXPECT_LT(elapsed_times[i], 300);
     }
 }
@@ -245,7 +245,7 @@ TEST(CoalescingEventDrivenWait, LeaderNonCacheableCompletionWakesFollower) {
 
     // Should wake up immediately and fall back to upstream
     EXPECT_LT(elapsed_ms, 300);
-    EXPECT_STREQ(output.note, "timeout-fallback");
+    EXPECT_STREQ(output.note, "not-cacheable-fallback");
 }
 
 } // namespace bytetaper::stages

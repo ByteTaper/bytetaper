@@ -25,6 +25,7 @@ enum class InFlightRole : std::uint8_t {
  */
 struct RegistryRegistrationResult {
     InFlightRole role;
+    std::uint64_t lifecycle_generation = 0;
 };
 
 /**
@@ -71,6 +72,7 @@ struct InFlightEntry {
     std::uint32_t waiter_count = 0;
     bool active = false;
     InFlightCompletionState state = InFlightCompletionState::InFlight;
+    std::uint64_t lifecycle_generation = 0;
     InFlightSharedResponse shared_response{};
 };
 
@@ -159,6 +161,7 @@ enum class RegistryWaitResult : std::uint8_t {
  */
 RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, const char* key,
                                                 std::uint32_t wait_window_ms,
+                                                std::uint64_t expected_lifecycle_generation,
                                                 RegistrySharedResponseOutput* response_out);
 
 /**

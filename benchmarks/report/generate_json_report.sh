@@ -32,11 +32,13 @@ LATENCY_JSON_MAP=$(mktemp)
 THROUGHPUT_JSON_MAP=$(mktemp)
 RESOURCES_JSON_MAP=$(mktemp)
 PAYLOAD_JSON_MAP=$(mktemp)
+COALESCING_JSON_MAP=$(mktemp)
 
 echo "{}" > "$LATENCY_JSON_MAP"
 echo "{}" > "$THROUGHPUT_JSON_MAP"
 echo "{}" > "$RESOURCES_JSON_MAP"
 echo "{}" > "$PAYLOAD_JSON_MAP"
+echo "{}" > "$COALESCING_JSON_MAP"
 
 # Helper to clean prefixes (e.g. "Leg 1 (Medium JSON)" -> "leg_1_medium_json" or just clean name "Leg 1")
 clean_key() {
@@ -87,6 +89,16 @@ while IFS= read -r line; do
     fi
 done < <(grep -E "Payload Savings JSON" "$TXT_FILE" || true)
 
+# 5. Parse Coalescing JSON
+while IFS= read -r line; do
+    if [[ "$line" =~ ^(.*)Coalescing\ JSON:[[:space:]]*(.*)$ ]]; then
+        key=$(clean_key "${BASH_REMATCH[1]}")
+        val="${BASH_REMATCH[2]}"
+        jq --arg k "$key" --argjson v "$val" '.[$k] = $v' "$COALESCING_JSON_MAP" > "${COALESCING_JSON_MAP}.tmp"
+        mv "${COALESCING_JSON_MAP}.tmp" "$COALESCING_JSON_MAP"
+    fi
+done < <(grep -E "Coalescing JSON" "$TXT_FILE" || true)
+
 # Build consolidated report JSON
 OUT_JSON_FILE="${TXT_FILE%.txt}.json"
 
@@ -95,6 +107,7 @@ lat_data=$(cat "$LATENCY_JSON_MAP")
 tp_data=$(cat "$THROUGHPUT_JSON_MAP")
 res_data=$(cat "$RESOURCES_JSON_MAP")
 pay_data=$(cat "$PAYLOAD_JSON_MAP")
+coal_data=$(cat "$COALESCING_JSON_MAP")
 
 # Compile consolidated JSON
 jq -n \
@@ -105,6 +118,7 @@ jq -n \
     --argjson tp "$tp_data" \
     --argjson res "$res_data" \
     --argjson pay "$pay_data" \
+    --argjson coal "$coal_data" \
     --arg os "$os_info" \
     --arg cpu "$cpu_cores" \
     --arg mem "$memory_total" \
@@ -117,6 +131,7 @@ jq -n \
         throughput: $tp,
         resources: $res,
         payload: $pay,
+        coalescing: $coal,
         features: {
             os_info: $os,
             cpu_cores: (try ($cpu | tonumber) catch $cpu),
@@ -126,7 +141,7 @@ jq -n \
     }' > "$OUT_JSON_FILE"
 
 # Clean up temporary maps
-rm -f "$LATENCY_JSON_MAP" "$THROUGHPUT_JSON_MAP" "$RESOURCES_JSON_MAP" "$PAYLOAD_JSON_MAP"
+rm -f "$LATENCY_JSON_MAP" "$THROUGHPUT_JSON_MAP" "$RESOURCES_JSON_MAP" "$PAYLOAD_JSON_MAP" "$COALESCING_JSON_MAP"
 
 echo "JSON report written successfully to: $OUT_JSON_FILE"
 cat "$OUT_JSON_FILE" | jq .

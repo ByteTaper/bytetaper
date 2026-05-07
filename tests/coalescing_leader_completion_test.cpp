@@ -45,7 +45,7 @@ TEST_F(CoalescingLeaderCompletionTest, CacheableLeaderCompletes) {
 
     auto output = coalescing_leader_completion_stage(ctx);
     EXPECT_EQ(output.result, apg::StageResult::Continue);
-    EXPECT_STREQ(output.note, "completed-cacheable");
+    EXPECT_STREQ(output.note, "completed-shared");
 
     // Verify it's completed in registry (subsequent request within window is Follower)
     auto now = std::chrono::system_clock::now();

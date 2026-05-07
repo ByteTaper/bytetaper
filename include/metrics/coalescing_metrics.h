@@ -19,6 +19,16 @@ enum class CoalescingMetricEvent : std::uint8_t {
     FollowerTimeoutBeforePublish, // leader hadn't published when follower timed out (valid)
     FollowerTimeoutAfterPublish,  // leader had published but follower still timed out (bug)
     FallbackDeadlineUnknown,      // follower fell back; no client deadline available to check
+    // Granular follower outcomes
+    FollowerSharedResponse,
+    FollowerL1Hit,
+    FollowerTimeout,
+    FollowerMissing,
+    FollowerStoredButNoSnapshot,
+    FollowerNotCacheable,
+    FollowerFailed,
+    FollowerPoolQueueFull,
+    FollowerUnaccounted,
 };
 
 struct CoalescingMetrics {
@@ -31,6 +41,16 @@ struct CoalescingMetrics {
     std::atomic<std::uint64_t> follower_timeout_before_publish_total{ 0 };
     std::atomic<std::uint64_t> follower_timeout_after_publish_total{ 0 };
     std::atomic<std::uint64_t> fallback_deadline_unknown_total{ 0 };
+    // Granular follower outcome counters
+    std::atomic<std::uint64_t> follower_shared_response_total{ 0 };
+    std::atomic<std::uint64_t> follower_l1_hit_total{ 0 };
+    std::atomic<std::uint64_t> follower_timeout_total{ 0 };
+    std::atomic<std::uint64_t> follower_missing_total{ 0 };
+    std::atomic<std::uint64_t> follower_stored_but_no_snapshot_total{ 0 };
+    std::atomic<std::uint64_t> follower_not_cacheable_total{ 0 };
+    std::atomic<std::uint64_t> follower_failed_total{ 0 };
+    std::atomic<std::uint64_t> follower_pool_queue_full_total{ 0 };
+    std::atomic<std::uint64_t> follower_unaccounted_total{ 0 };
 };
 
 void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent event);

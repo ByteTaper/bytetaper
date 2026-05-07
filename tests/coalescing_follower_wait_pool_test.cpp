@@ -55,7 +55,7 @@ TEST(CoalescingFollowerWaitPoolTest, SuccessfulWaitCoalescedResponse) {
     RegistryWaitResult result = RegistryWaitResult::Missing;
 
     std::thread sub_thread([&]() {
-        bool ok = follower_wait_pool_submit_and_wait(&pool, "test-key-1", 1000, &out, &result);
+        bool ok = follower_wait_pool_submit_and_wait(&pool, "test-key-1", 1000, 0, &out, &result);
         EXPECT_TRUE(ok);
     });
 
@@ -96,19 +96,19 @@ TEST(CoalescingFollowerWaitPoolTest, QueueFullSafety) {
     // First submission should enqueue (since queue is empty and size 0 < 2)
     // We run it on a thread because it blocks (no workers to dequeue it)
     std::thread t1(
-        [&]() { follower_wait_pool_submit_and_wait(&pool, "key1", 500, &out, &result); });
+        [&]() { follower_wait_pool_submit_and_wait(&pool, "key1", 500, 0, &out, &result); });
 
     // Wait slightly to let t1 enqueue
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
     // Second submission should also enqueue (queue size 1 < 2)
     std::thread t2(
-        [&]() { follower_wait_pool_submit_and_wait(&pool, "key2", 500, &out, &result); });
+        [&]() { follower_wait_pool_submit_and_wait(&pool, "key2", 500, 0, &out, &result); });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
     // Third submission should fail immediately because queue size (2) is at capacity (2)
-    bool ok = follower_wait_pool_submit_and_wait(&pool, "key3", 500, &out, &result);
+    bool ok = follower_wait_pool_submit_and_wait(&pool, "key3", 500, 0, &out, &result);
     EXPECT_FALSE(ok); // Safe fast-path rejection!
 
     // Shutdown pool to wake up pending enqueued items and join threads

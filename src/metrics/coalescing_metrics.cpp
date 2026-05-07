@@ -40,6 +40,33 @@ void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent e
     case CoalescingMetricEvent::FallbackDeadlineUnknown:
         metrics->fallback_deadline_unknown_total.fetch_add(1, std::memory_order_relaxed);
         break;
+    case CoalescingMetricEvent::FollowerSharedResponse:
+        metrics->follower_shared_response_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerL1Hit:
+        metrics->follower_l1_hit_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerTimeout:
+        metrics->follower_timeout_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerMissing:
+        metrics->follower_missing_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerStoredButNoSnapshot:
+        metrics->follower_stored_but_no_snapshot_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerNotCacheable:
+        metrics->follower_not_cacheable_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerFailed:
+        metrics->follower_failed_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerPoolQueueFull:
+        metrics->follower_pool_queue_full_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerUnaccounted:
+        metrics->follower_unaccounted_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     }
 }
 
@@ -86,7 +113,43 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "# HELP bytetaper_coalescing_fallback_deadline_unknown_total Total number of fallbacks "
         "with unknown deadlines.\n"
         "# TYPE bytetaper_coalescing_fallback_deadline_unknown_total counter\n"
-        "bytetaper_coalescing_fallback_deadline_unknown_total %llu\n",
+        "bytetaper_coalescing_fallback_deadline_unknown_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_shared_response_total Total number of followers that "
+        "successfully got a shared response.\n"
+        "# TYPE bytetaper_coalescing_follower_shared_response_total counter\n"
+        "bytetaper_coalescing_follower_shared_response_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_l1_hit_total Total number of followers that hit L1 "
+        "cache.\n"
+        "# TYPE bytetaper_coalescing_follower_l1_hit_total counter\n"
+        "bytetaper_coalescing_follower_l1_hit_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_timeout_total Total number of followers that timed "
+        "out waiting on CV.\n"
+        "# TYPE bytetaper_coalescing_follower_timeout_total counter\n"
+        "bytetaper_coalescing_follower_timeout_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_missing_total Total number of followers that found "
+        "registry entry missing / stale.\n"
+        "# TYPE bytetaper_coalescing_follower_missing_total counter\n"
+        "bytetaper_coalescing_follower_missing_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_stored_but_no_snapshot_total Total number of "
+        "followers that found stored state but no snapshot ready.\n"
+        "# TYPE bytetaper_coalescing_follower_stored_but_no_snapshot_total counter\n"
+        "bytetaper_coalescing_follower_stored_but_no_snapshot_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_not_cacheable_total Total number of followers that "
+        "found leader response was not cacheable.\n"
+        "# TYPE bytetaper_coalescing_follower_not_cacheable_total counter\n"
+        "bytetaper_coalescing_follower_not_cacheable_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_failed_total Total number of followers that found "
+        "leader failed.\n"
+        "# TYPE bytetaper_coalescing_follower_failed_total counter\n"
+        "bytetaper_coalescing_follower_failed_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_pool_queue_full_total Total number of followers that "
+        "fell back immediately due to queue full.\n"
+        "# TYPE bytetaper_coalescing_follower_pool_queue_full_total counter\n"
+        "bytetaper_coalescing_follower_pool_queue_full_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_unaccounted_total Total number of followers that "
+        "went unaccounted.\n"
+        "# TYPE bytetaper_coalescing_follower_unaccounted_total counter\n"
+        "bytetaper_coalescing_follower_unaccounted_total %llu\n",
         (unsigned long long) metrics.leader_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_cache_hit_total.load(std::memory_order_relaxed),
@@ -98,7 +161,17 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         (unsigned long long) metrics.follower_timeout_after_publish_total.load(
             std::memory_order_relaxed),
         (unsigned long long) metrics.fallback_deadline_unknown_total.load(
-            std::memory_order_relaxed));
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_shared_response_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_l1_hit_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_timeout_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_missing_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_stored_but_no_snapshot_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_not_cacheable_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_failed_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_pool_queue_full_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_unaccounted_total.load(std::memory_order_relaxed));
 
     if (written < 0 || static_cast<std::size_t>(written) >= buf_size) {
         return 0;

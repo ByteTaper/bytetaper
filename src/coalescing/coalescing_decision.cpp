@@ -72,6 +72,8 @@ CoalescingDecision evaluate_coalescing_decision(InFlightRegistry* registry,
         registry_register(registry, decision.key, context.now_ms,
                           context.policy->backend_timeout_ms, context.policy->max_waiters_per_key);
 
+    decision.lifecycle_generation = reg_res.lifecycle_generation;
+
     // 6. Mapping Registry Result
     switch (reg_res.role) {
     case InFlightRole::Leader:

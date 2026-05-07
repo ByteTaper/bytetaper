@@ -384,6 +384,8 @@ bool trace_push(TraceRingBuffer* ring, const TraceConfig& config, const TraceRec
     }
 
     ring->records[ring_idx] = record;
+    std::printf("trace_push: pushed record for route %s (write_index=%u)\n", r_id, idx);
+    std::fflush(stdout);
     return true;
 }
 
@@ -485,13 +487,21 @@ struct RouteStats {
 };
 
 void trace_flush(TraceRingBuffer* ring, const TraceConfig& config, const char* scenario) {
-    if (ring == nullptr)
+    if (ring == nullptr) {
+        std::printf("trace_flush: ring is null!\n");
+        std::fflush(stdout);
         return;
+    }
     std::uint32_t total_records = ring->write_index.load(std::memory_order_relaxed);
-    if (total_records == 0)
+    std::printf("trace_flush: config.enabled=%d, write_index=%u\n", config.enabled, total_records);
+    std::fflush(stdout);
+    if (total_records == 0) {
         return;
+    }
 
     std::string out_dir = config.output_dir;
+    std::printf("trace_flush: creating directory '%s'\n", out_dir.c_str());
+    std::fflush(stdout);
     mkdir(out_dir.c_str(), 0777);
 
     std::time_t rawtime = std::time(nullptr);
@@ -509,9 +519,14 @@ void trace_flush(TraceRingBuffer* ring, const TraceConfig& config, const char* s
     char md_path[512];
     std::snprintf(md_path, sizeof(md_path), "%s/%s_%s.summary.md", out_dir.c_str(), scen, time_str);
 
+    std::printf("trace_flush: opening file '%s' for writing\n", jsonl_path);
+    std::fflush(stdout);
     std::FILE* jsonl_file = std::fopen(jsonl_path, "w");
-    if (jsonl_file == nullptr)
+    if (jsonl_file == nullptr) {
+        std::printf("trace_flush: failed to open file '%s' for writing!\n", jsonl_path);
+        std::fflush(stdout);
         return;
+    }
 
     std::uint32_t max_rec = config.max_records;
     if (max_rec == 0 || max_rec > 4096)

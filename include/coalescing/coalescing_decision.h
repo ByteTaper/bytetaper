@@ -49,6 +49,7 @@ struct CoalescingDecision {
     CoalescingAction action;
     CoalescingDecisionReason reason;
     char key[256] = { 0 };
+    std::uint64_t lifecycle_generation = 0;
 };
 
 /**

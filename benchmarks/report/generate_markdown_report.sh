@@ -129,6 +129,49 @@ while IFS= read -r leg; do
     } >> "$OUT_MD_FILE"
 done < <(jq -r '.latency_ms | keys[]' "$JSON_FILE" || echo "main")
 
+# Coalescing Effectiveness table
+if jq -e '.coalescing and (.coalescing | length > 0)' "$JSON_FILE" > /dev/null 2>&1; then
+    {
+        echo ""
+        echo "## ⚙️ Coalescing Effectiveness"
+        echo ""
+        echo "| Leg | Client Requests | Upstream Calls | Leaders | Followers | Cache Hits | Fallbacks | Bypasses | Coalescing Ratio | Amplification |"
+        echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+
+        while IFS= read -r leg; do
+            cr=$(jq -r --arg l "$leg" '.coalescing[$l].client_requests_sent  // "n/a"' "$JSON_FILE")
+            uc=$(jq -r --arg l "$leg" '.coalescing[$l].upstream_mock_calls    // "n/a"' "$JSON_FILE")
+            ld=$(jq -r --arg l "$leg" '.coalescing[$l].leaders                // "n/a"' "$JSON_FILE")
+            fo=$(jq -r --arg l "$leg" '.coalescing[$l].followers              // "n/a"' "$JSON_FILE")
+            ch=$(jq -r --arg l "$leg" '.coalescing[$l].follower_cache_hits    // "n/a"' "$JSON_FILE")
+            fb=$(jq -r --arg l "$leg" '.coalescing[$l].fallbacks              // "n/a"' "$JSON_FILE")
+            by=$(jq -r --arg l "$leg" '.coalescing[$l].bypasses               // "n/a"' "$JSON_FILE")
+            cr_r=$(jq -r --arg l "$leg" '.coalescing[$l].coalescing_ratio     // "n/a"' "$JSON_FILE")
+            amp=$(jq -r --arg l "$leg" '.coalescing[$l].upstream_amplification_ratio // "n/a"' "$JSON_FILE")
+            echo "| $leg | $cr | $uc | $ld | $fo | $ch | $fb | $by | $cr_r | $amp |"
+        done < <(jq -r '.coalescing | keys[]' "$JSON_FILE" 2>/dev/null || true)
+
+        echo ""
+        echo "### 👥 Follower Outcome Breakdown"
+        echo ""
+        echo "| Leg | Shared Response | L1 Hit | Timeout | Missing Entry | Stored (No Snapshot) | Not Cacheable | Failed | Queue Full | Unaccounted |"
+        echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+
+        while IFS= read -r leg; do
+            fsr=$(jq -r --arg l "$leg" '.coalescing[$l].follower_shared_response // "0"' "$JSON_FILE")
+            fl1=$(jq -r --arg l "$leg" '.coalescing[$l].follower_l1_hit          // "0"' "$JSON_FILE")
+            fto=$(jq -r --arg l "$leg" '.coalescing[$l].follower_timeout         // "0"' "$JSON_FILE")
+            fmi=$(jq -r --arg l "$leg" '.coalescing[$l].follower_missing         // "0"' "$JSON_FILE")
+            fss=$(jq -r --arg l "$leg" '.coalescing[$l].follower_stored_but_no_snapshot // "0"' "$JSON_FILE")
+            fnc=$(jq -r --arg l "$leg" '.coalescing[$l].follower_not_cacheable   // "0"' "$JSON_FILE")
+            ffa=$(jq -r --arg l "$leg" '.coalescing[$l].follower_failed          // "0"' "$JSON_FILE")
+            fqu=$(jq -r --arg l "$leg" '.coalescing[$l].follower_pool_queue_full // "0"' "$JSON_FILE")
+            fun=$(jq -r --arg l "$leg" '.coalescing[$l].follower_unaccounted     // "0"' "$JSON_FILE")
+            echo "| $leg | $fsr | $fl1 | $fto | $fmi | $fss | $fnc | $ffa | $fqu | $fun |"
+        done < <(jq -r '.coalescing | keys[]' "$JSON_FILE" 2>/dev/null || true)
+    } >> "$OUT_MD_FILE"
+fi
+
 # Warnings & Notes Section
 {
     echo "## ⚠️ Notes & Warnings"

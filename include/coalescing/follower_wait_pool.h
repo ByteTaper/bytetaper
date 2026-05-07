@@ -40,6 +40,7 @@ struct FollowerWaitResultSlot {
 struct FollowerWaitJob {
     char key[256] = {};
     std::uint32_t wait_window_ms = 0;
+    std::uint64_t lifecycle_generation = 0;
     FollowerWaitResultSlot* result_slot = nullptr;
 };
 
@@ -69,6 +70,7 @@ void follower_wait_pool_shutdown(FollowerWaitPool* pool);
 // Returns false if queue is full (caller should fall back).
 bool follower_wait_pool_submit_and_wait(FollowerWaitPool* pool, const char* key,
                                         std::uint32_t wait_window_ms,
+                                        std::uint64_t lifecycle_generation,
                                         RegistrySharedResponseOutput* response_out,
                                         RegistryWaitResult* result_out);
 

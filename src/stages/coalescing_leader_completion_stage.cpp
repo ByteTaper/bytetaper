@@ -20,19 +20,18 @@ apg::StageOutput coalescing_leader_completion_stage(apg::ApgTransformContext& co
         return { apg::StageResult::Continue, "no-registry" };
     }
 
-    const bool cacheable = context.matched_policy != nullptr &&
-                           context.matched_policy->cache.behavior == policy::CacheBehavior::Store &&
-                           context.response_status_code >= 200 &&
-                           context.response_status_code < 300 && context.response_body != nullptr &&
-                           context.response_body_len > 0 &&
-                           context.response_body_len <= coalescing::kCoalescingSharedBodyMaxSize;
+    const bool share_with_followers =
+        context.matched_policy != nullptr && context.response_status_code >= 200 &&
+        context.response_status_code < 300 && context.response_body != nullptr &&
+        context.response_body_len > 0 &&
+        context.response_body_len <= coalescing::kCoalescingSharedBodyMaxSize;
 
     // Capture completion time
     auto now = std::chrono::system_clock::now();
     std::uint64_t now_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
-    if (cacheable) {
+    if (share_with_followers) {
         coalescing::registry_complete_with_response(
             context.coalescing_registry, context.coalescing_decision.key,
             context.response_status_code, context.response_content_type, context.response_body,
@@ -47,7 +46,8 @@ apg::StageOutput coalescing_leader_completion_stage(apg::ApgTransformContext& co
                                             coalescing::InFlightCompletionState::Failed, now_ms);
     }
 
-    return { apg::StageResult::Continue, cacheable ? "completed-cacheable" : "completed-cleared" };
+    return { apg::StageResult::Continue,
+             share_with_followers ? "completed-shared" : "completed-cleared" };
 }
 
 } // namespace bytetaper::stages

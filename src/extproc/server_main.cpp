@@ -20,7 +20,9 @@ namespace {
 
 std::atomic<bool> g_should_stop{ false };
 
-void on_signal(int) {
+void on_signal(int sig) {
+    std::printf("Received signal %d, setting g_should_stop to true...\n", sig);
+    std::fflush(stdout);
     g_should_stop.store(true);
 }
 
@@ -193,6 +195,9 @@ int main(int argc, char** argv) {
     while (!g_should_stop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
+
+    std::printf("Exiting main loop, stopping server...\n");
+    std::fflush(stdout);
 
     bytetaper::extproc::stop_grpc_server(&handle);
     bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
