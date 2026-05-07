@@ -234,6 +234,19 @@ bool route_needs_response_body_processing(const StreamFilterState& state) {
     return false;
 }
 
+static bool write_noop_response_body_continue(
+    grpc::ServerReaderWriter<envoy::service::ext_proc::v3::ProcessingResponse,
+                             envoy::service::ext_proc::v3::ProcessingRequest>* stream) {
+    if (stream == nullptr) {
+        return false;
+    }
+    envoy::service::ext_proc::v3::ProcessingResponse response{};
+    auto* response_body = response.mutable_response_body();
+    auto* common = response_body->mutable_response();
+    common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
+    return stream->Write(response);
+}
+
 ReportingHeaderMode reporting_mode_for_route(const StreamFilterState& state) {
     if (state.matched_policy == nullptr) {
         return ReportingHeaderMode::FullDiagnostics;
@@ -519,8 +532,11 @@ public:
                             filter_state.compression_decision_final = true;
                         }
 
-                        apply_compression_decision_headers(
-                            filter_state.compression_context.compression_decision, common_response);
+                        if (filter_state.compression_decision_final) {
+                            apply_compression_decision_headers(
+                                filter_state.compression_context.compression_decision,
+                                common_response);
+                        }
                     } else {
                         const auto* route_runtime = find_compiled_route_runtime(
                             route_runtimes, filter_state.matched_policy);
@@ -548,11 +564,7 @@ public:
             if (kind == ProcessingRequestKind::ResponseBody) {
                 if (is_compression_only_route(filter_state)) {
                     if (filter_state.compression_decision_final) {
-                        envoy::service::ext_proc::v3::ProcessingResponse response{};
-                        auto* response_body = response.mutable_response_body();
-                        auto* common = response_body->mutable_response();
-                        common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
-                        stream->Write(response);
+                        write_noop_response_body_continue(stream);
                         continue;
                     }
 
@@ -581,11 +593,7 @@ public:
                 }
 
                 if (!route_needs_response_body_processing(filter_state)) {
-                    envoy::service::ext_proc::v3::ProcessingResponse response{};
-                    auto* response_body = response.mutable_response_body();
-                    auto* common = response_body->mutable_response();
-                    common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
-                    stream->Write(response);
+                    write_noop_response_body_continue(stream);
                     continue;
                 }
 

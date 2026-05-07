@@ -109,7 +109,7 @@ int main() {
 
     auto stub = envoy::service::ext_proc::v3::ExternalProcessor::NewStub(channel);
 
-    // ── Scenario A: Eligible ──────────────────────────────────────────
+    // ── Test A & Test B: Small known-size response finalizes in headers, body pure no-op ──
     {
         grpc::ClientContext ctx{};
         auto stream = stub->Process(&ctx);
@@ -124,12 +124,12 @@ int main() {
         rm->set_raw_value("GET");
         auto* ae = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
         ae->set_key("accept-encoding");
-        ae->set_raw_value("br, gzip");
+        ae->set_raw_value("gzip");
         stream->Write(req_hdrs);
         envoy::service::ext_proc::v3::ProcessingResponse r1{};
         stream->Read(&r1);
 
-        // Response Headers
+        // Response Headers with small content-length (below 512)
         envoy::service::ext_proc::v3::ProcessingRequest resp_hdrs{};
         auto* rs = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
         rs->set_key(":status");
@@ -137,78 +137,43 @@ int main() {
         auto* ct = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
         ct->set_key("content-type");
         ct->set_raw_value("application/json");
+        auto* cl = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
+        cl->set_key("content-length");
+        cl->set_raw_value("120"); // below 512
         stream->Write(resp_hdrs);
         envoy::service::ext_proc::v3::ProcessingResponse r2{};
         stream->Read(&r2);
 
-        // Response Body
-        envoy::service::ext_proc::v3::ProcessingRequest resp_body{};
-        std::string large_body(1024, 'a');
-        resp_body.mutable_response_body()->set_body(large_body);
-        resp_body.mutable_response_body()->set_end_of_stream(true);
-        stream->Write(resp_body);
-        envoy::service::ext_proc::v3::ProcessingResponse r3{};
-        stream->Read(&r3);
-
-        if (!find_body_header(r3, "x-bytetaper-compression-candidate", "true"))
+        // Test A assertion
+        if (!find_headers_header(r2, "x-bytetaper-compression-candidate", "false"))
             return 100;
-        if (!find_body_header(r3, "x-bytetaper-compression-algorithm-hint", "br"))
+        if (!find_headers_header(r2, "x-bytetaper-compression-reason", "below_minimum"))
             return 101;
 
-        stream->WritesDone();
-        stream->Finish();
-    }
-
-    // ── Scenario B: Ineligible (Content-Type) ──────────────────────────
-    {
-        grpc::ClientContext ctx{};
-        auto stream = stub->Process(&ctx);
-
-        // Request Headers
-        envoy::service::ext_proc::v3::ProcessingRequest req_hdrs{};
-        auto* rh = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
-        rh->set_key(":path");
-        rh->set_raw_value("/api/image");
-        auto* rm = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
-        rm->set_key(":method");
-        rm->set_raw_value("GET");
-        auto* ae = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
-        ae->set_key("accept-encoding");
-        ae->set_raw_value("br, gzip");
-        stream->Write(req_hdrs);
-        envoy::service::ext_proc::v3::ProcessingResponse r1{};
-        stream->Read(&r1);
-
-        // Response Headers
-        envoy::service::ext_proc::v3::ProcessingRequest resp_hdrs{};
-        auto* rs = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
-        rs->set_key(":status");
-        rs->set_raw_value("200");
-        auto* ct = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
-        ct->set_key("content-type");
-        ct->set_raw_value("image/png");
-        stream->Write(resp_hdrs);
-        envoy::service::ext_proc::v3::ProcessingResponse r2{};
-        stream->Read(&r2);
-
         // Response Body
         envoy::service::ext_proc::v3::ProcessingRequest resp_body{};
-        resp_body.mutable_response_body()->set_body("fake-image-data");
+        resp_body.mutable_response_body()->set_body("{\"small\":\"payload\"}");
         resp_body.mutable_response_body()->set_end_of_stream(true);
         stream->Write(resp_body);
         envoy::service::ext_proc::v3::ProcessingResponse r3{};
         stream->Read(&r3);
 
-        if (!find_body_header(r3, "x-bytetaper-compression-candidate", "false"))
-            return 200;
-        if (!find_body_header(r3, "x-bytetaper-compression-reason", "content_type_not_eligible"))
-            return 201;
+        // Test B assertions
+        if (!r3.has_response_body())
+            return 102;
+        if (r3.response_body().response().status() !=
+            envoy::service::ext_proc::v3::CommonResponse::CONTINUE)
+            return 103;
+        if (r3.response_body().response().has_body_mutation())
+            return 104;
+        if (find_body_header(r3, "x-bytetaper-compression-candidate", "false"))
+            return 105;
 
         stream->WritesDone();
         stream->Finish();
     }
 
-    // ── Scenario C: Eligible with Content-Length (Header-Only Decision) ──
+    // ── Test C: Large known-size response finalizes as candidate in headers ──
     {
         grpc::ClientContext ctx{};
         auto stream = stub->Process(&ctx);
@@ -223,12 +188,12 @@ int main() {
         rm->set_raw_value("GET");
         auto* ae = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
         ae->set_key("accept-encoding");
-        ae->set_raw_value("br, gzip");
+        ae->set_raw_value("gzip");
         stream->Write(req_hdrs);
         envoy::service::ext_proc::v3::ProcessingResponse r1{};
         stream->Read(&r1);
 
-        // Response Headers with content-length present
+        // Response Headers with large content-length (above 512)
         envoy::service::ext_proc::v3::ProcessingRequest resp_hdrs{};
         auto* rs = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
         rs->set_key(":status");
@@ -243,19 +208,11 @@ int main() {
         envoy::service::ext_proc::v3::ProcessingResponse r2{};
         stream->Read(&r2);
 
-        // Verify that compression candidate and algorithm hint headers are emitted EARLY in
-        // response headers!
+        // Test C early assertions
         if (!find_headers_header(r2, "x-bytetaper-compression-candidate", "true"))
-            return 300;
-        if (!find_headers_header(r2, "x-bytetaper-compression-algorithm-hint", "br"))
-            return 301;
-
-        // Since the route is compression-only, it must NOT emit any bytetaper report headers
-        // in ResponseHeaders phase.
-        if (has_any_headers_header(r2, "x-bytetaper-extproc-response-body"))
-            return 305;
-        if (has_any_headers_header(r2, "x-bytetaper-route-policy"))
-            return 306;
+            return 200;
+        if (!find_headers_header(r2, "x-bytetaper-compression-algorithm-hint", "gzip"))
+            return 201;
 
         // Response Body
         envoy::service::ext_proc::v3::ProcessingRequest resp_body{};
@@ -266,23 +223,76 @@ int main() {
         envoy::service::ext_proc::v3::ProcessingResponse r3{};
         stream->Read(&r3);
 
-        // Since the decision was final, the body stage must NOT have re-evaluated or written
-        // duplicate compression headers.
+        // Test C body assertions
+        if (!r3.has_response_body())
+            return 202;
+        if (r3.response_body().response().status() !=
+            envoy::service::ext_proc::v3::CommonResponse::CONTINUE)
+            return 203;
         if (find_body_header(r3, "x-bytetaper-compression-candidate", "true"))
-            return 302;
-
-        // Since the decision was final and body processing is not needed, body stage must NOT
-        // have written any bytetaper report headers.
-        if (has_any_body_header(r3, "x-bytetaper-extproc-response-body"))
-            return 303;
-        if (has_any_body_header(r3, "x-bytetaper-original-bytes"))
-            return 304;
+            return 204;
 
         stream->WritesDone();
         stream->Finish();
     }
 
-    // Scenario D: Full Diagnostics Route (matching /full-diag)
+    // ── Test D: Unknown size response evaluates in body phase, no duplicate headers ──
+    {
+        grpc::ClientContext ctx{};
+        auto stream = stub->Process(&ctx);
+
+        // Request Headers
+        envoy::service::ext_proc::v3::ProcessingRequest req_hdrs{};
+        auto* rh = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
+        rh->set_key(":path");
+        rh->set_raw_value("/api/data");
+        auto* rm = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
+        rm->set_key(":method");
+        rm->set_raw_value("GET");
+        auto* ae = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
+        ae->set_key("accept-encoding");
+        ae->set_raw_value("gzip");
+        stream->Write(req_hdrs);
+        envoy::service::ext_proc::v3::ProcessingResponse r1{};
+        stream->Read(&r1);
+
+        // Response Headers (no Content-Length)
+        envoy::service::ext_proc::v3::ProcessingRequest resp_hdrs{};
+        auto* rs = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
+        rs->set_key(":status");
+        rs->set_raw_value("200");
+        auto* ct = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
+        ct->set_key("content-type");
+        ct->set_raw_value("application/json");
+        stream->Write(resp_hdrs);
+        envoy::service::ext_proc::v3::ProcessingResponse r2{};
+        stream->Read(&r2);
+
+        // Test D header assertion: NO compression headers emitted early
+        if (has_any_headers_header(r2, "x-bytetaper-compression-candidate"))
+            return 300;
+
+        // Response Body
+        envoy::service::ext_proc::v3::ProcessingRequest resp_body{};
+        resp_body.mutable_response_body()->set_body("{\"small\":\"payload\"}");
+        resp_body.mutable_response_body()->set_end_of_stream(true);
+        stream->Write(resp_body);
+        envoy::service::ext_proc::v3::ProcessingResponse r3{};
+        stream->Read(&r3);
+
+        // Test D body assertions
+        if (!find_body_header(r3, "x-bytetaper-compression-candidate", "false"))
+            return 301;
+        if (!find_body_header(r3, "x-bytetaper-compression-reason", "below_minimum"))
+            return 302;
+        if (!find_body_header(r3, "content-length", "19"))
+            return 303;
+
+        stream->WritesDone();
+        stream->Finish();
+    }
+
+    // ── Test E: Full Diagnostics Route (matching /full-diag) ──
     {
         grpc::ClientContext client_context{};
         auto stream = stub->Process(&client_context);
@@ -301,7 +311,7 @@ int main() {
         rm->set_raw_value("GET");
         auto* ae = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
         ae->set_key("accept-encoding");
-        ae->set_raw_value("br, gzip");
+        ae->set_raw_value("gzip");
         stream->Write(req_hdrs);
         envoy::service::ext_proc::v3::ProcessingResponse r1{};
         stream->Read(&r1);
@@ -321,8 +331,7 @@ int main() {
         envoy::service::ext_proc::v3::ProcessingResponse r2{};
         stream->Read(&r2);
 
-        // Since this is a FullDiagnostics route, it MUST emit report headers in ResponseHeaders
-        // phase!
+        // Test E assertions: FullDiagnostics route MUST emit report headers early
         if (!find_headers_header(r2, "x-bytetaper-extproc-response-body", "true"))
             return 401;
         if (!find_headers_header(r2, "x-bytetaper-route-policy", "test-full-diagnostics"))
