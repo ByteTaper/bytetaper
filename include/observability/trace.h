@@ -72,6 +72,22 @@ struct TraceRecord {
     bool coalescing_leader = false;
     bool coalescing_follower = false;
 
+    // --- Coalescing context (written from ApgTransformContext after pipeline) ---
+    char coalescing_group_id[64]{};
+    char coalescing_key_hash[32]{};
+    char coalescing_role[32]{};     // "leader" | "follower" | "bypass" | "disabled" | "unknown"
+    char coalescing_decision[64]{}; // "leader_fill" | "follower_wait" | "follower_consume_result" |
+                                    // ...
+    char coalescing_attach_result[32]{};         // "success" | "failed" | "not_applicable"
+    char coalescing_attach_failure_reason[64]{}; // "max_waiters_exceeded" |
+                                                 // "entry_already_terminal" | ...
+    char coalescing_wakeup_reason[32]{};         // "result_ready" | "leader_failed" | "timeout" |
+                                                 // "cancelled" | ...
+    char coalescing_result_source[32]{};         // "upstream" | "coalesced_result" | "l1_cache" |
+                                                 // "l2_cache" | ...
+    char coalescing_upstream_call_reason[64]{}; // "leader_fill" | "follower_timeout_fallback" | ...
+    bool coalescing_has_context = false; // gate: only emit coalescing fields in JSONL if true
+
     std::uint64_t total_duration_nano = 0;
     std::uint64_t total_read_wait_nano = 0;
     std::uint64_t total_active_processing_nano = 0;
@@ -84,6 +100,23 @@ struct TraceRecord {
     TraceSpan spans[kMaxSpansPerTrace];
     std::size_t span_count = 0;
 };
+
+static constexpr const char* kSpanCoalescingKeyBuild = "coalescing.key.build";
+static constexpr const char* kSpanCoalescingInflightLookup = "coalescing.inflight.lookup";
+static constexpr const char* kSpanCoalescingRoleDecide = "coalescing.role.decide";
+static constexpr const char* kSpanCoalescingLeaderElect = "coalescing.leader.elect";
+static constexpr const char* kSpanCoalescingFollowerAttach = "coalescing.follower.attach";
+static constexpr const char* kSpanCoalescingFollowerWait = "coalescing.follower.wait";
+static constexpr const char* kSpanCoalescingFollowerWakeup = "coalescing.follower.wakeup";
+static constexpr const char* kSpanCoalescingFollowerTimeout = "coalescing.follower.timeout";
+static constexpr const char* kSpanCoalescingFollowerConsumeResult =
+    "coalescing.follower.consume_result";
+static constexpr const char* kSpanCoalescingFollowerFallback = "coalescing.follower.fallback";
+static constexpr const char* kSpanCoalescingLeaderUpstreamCall = "coalescing.leader.upstream_call";
+static constexpr const char* kSpanCoalescingLeaderPublishResult =
+    "coalescing.leader.publish_result";
+static constexpr const char* kSpanCoalescingLeaderNotifyFollowers =
+    "coalescing.leader.notify_followers";
 
 struct TraceConfig {
     bool enabled = false;
@@ -129,6 +162,10 @@ void trace_set_compression_info(TraceRecord* record, bool candidate, bool decisi
                                 std::size_t body_len, bool body_size_known);
 void trace_set_cache_info(TraceRecord* record, bool cache_hit);
 void trace_set_coalescing_info(TraceRecord* record, bool leader, bool follower);
+void trace_set_coalescing_context(TraceRecord* record, const char* group_id, const char* key_hash,
+                                  const char* role, const char* decision, const char* attach_result,
+                                  const char* attach_failure_reason, const char* wakeup_reason,
+                                  const char* result_source, const char* upstream_call_reason);
 const char* trace_latency_class_str(TraceLatencyClass cls);
 void trace_classify(TraceRecord* record); // derives totals + dominant_latency_class
 bool trace_is_slow(const TraceRecord& record, const TraceConfig& config);

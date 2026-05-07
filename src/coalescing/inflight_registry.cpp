@@ -3,6 +3,8 @@
 
 #include "coalescing/inflight_registry.h"
 
+#include "metrics/coalescing_metrics.h"
+
 #include <chrono>
 #include <cstring>
 
@@ -39,14 +41,22 @@ void registry_init(InFlightRegistry* registry) {
     }
 }
 
+static constexpr std::uint32_t kResultRetentionWindowMs = 50;
+
 RegistryRegistrationResult registry_register(InFlightRegistry* registry, const char* key,
                                              std::uint64_t now_ms, std::uint32_t wait_window_ms,
                                              std::uint32_t max_waiters_per_key) {
+    RegistryRegistrationResult res{};
     if (registry == nullptr || key == nullptr) {
-        return { InFlightRole::Reject };
+        res.role = InFlightRole::Reject;
+        res.attach_failure_reason = AttachFailureReason::ShardFull;
+        return res;
     }
 
     std::uint64_t hash = hash_string(key);
+    res.key_hash = hash;
+    res.group_id = static_cast<std::uint32_t>(hash);
+
     std::size_t shard_idx = hash % kInFlightShards;
     InFlightShard& shard = registry->shards[shard_idx];
 
@@ -59,14 +69,24 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
         // Check for existing active entry
         if (slot.active && std::strcmp(slot.key, key) == 0) {
             if (is_terminal(slot.state)) {
-                if (slot.state == CoalescingState::NotCacheable ||
-                    slot.state == CoalescingState::LeaderFailed ||
-                    slot.state == CoalescingState::TimedOut ||
-                    slot.state == CoalescingState::Cancelled ||
-                    now_ms >= slot.completed_at_epoch_ms + wait_window_ms) {
+                CoalescingState orig_state = slot.state;
+                res.state_before = orig_state;
 
-                    if (slot.state == CoalescingState::ResultReady && slot.waiter_count > 0) {
-                        return { InFlightRole::Reject };
+                bool should_recycle = false;
+                if (orig_state == CoalescingState::ResultReady) {
+                    if (now_ms >= slot.completed_at_epoch_ms + kResultRetentionWindowMs) {
+                        should_recycle = true;
+                    }
+                } else {
+                    should_recycle = true;
+                }
+
+                if (should_recycle) {
+                    if (orig_state == CoalescingState::ResultReady && slot.waiter_count > 0) {
+                        res.role = InFlightRole::Reject;
+                        res.attach_failure_reason = AttachFailureReason::StateMismatch;
+                        res.state_after = orig_state;
+                        return res;
                     }
                     // treat as new leader
                     slot.state = CoalescingState::LeaderRunning;
@@ -75,21 +95,36 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                     slot.completed_at_epoch_ms = 0;
                     slot.waiter_count = 0;
                     slot.active = true;
-                    return { InFlightRole::Leader };
+
+                    res.role = InFlightRole::Leader;
+                    res.state_after = CoalescingState::LeaderRunning;
+                    return res;
                 }
 
-                // Still within grace window, join as follower
+                // Still within retention window, join as follower
                 if (slot.waiter_count < max_waiters_per_key) {
                     slot.waiter_count++;
-                    return { InFlightRole::Follower };
+                    res.role = InFlightRole::Follower;
+                    res.state_after = orig_state;
+                    res.terminal_result_join_flag = true;
+                    return res;
                 } else {
-                    return { InFlightRole::Reject };
+                    res.role = InFlightRole::Reject;
+                    res.attach_failure_reason = AttachFailureReason::MaxWaitersEnforced;
+                    res.state_after = orig_state;
+                    return res;
                 }
             } else {
                 // LeaderRunning
+                CoalescingState orig_state = slot.state;
+                res.state_before = orig_state;
+
                 if (now_ms >= slot.created_at_epoch_ms + wait_window_ms) {
                     if (slot.waiter_count > 0) {
-                        return { InFlightRole::Reject };
+                        res.role = InFlightRole::Reject;
+                        res.attach_failure_reason = AttachFailureReason::StateMismatch;
+                        res.state_after = orig_state;
+                        return res;
                     }
                     // treat as new leader (leader timed out)
                     slot.state = CoalescingState::LeaderRunning;
@@ -98,15 +133,23 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                     slot.completed_at_epoch_ms = 0;
                     slot.waiter_count = 0;
                     slot.active = true;
-                    return { InFlightRole::Leader };
+
+                    res.role = InFlightRole::Leader;
+                    res.state_after = CoalescingState::LeaderRunning;
+                    return res;
                 }
 
                 // Still in flight, check waiter limit
                 if (slot.waiter_count < max_waiters_per_key) {
                     slot.waiter_count++;
-                    return { InFlightRole::Follower };
+                    res.role = InFlightRole::Follower;
+                    res.state_after = orig_state;
+                    return res;
                 } else {
-                    return { InFlightRole::Reject };
+                    res.role = InFlightRole::Reject;
+                    res.attach_failure_reason = AttachFailureReason::MaxWaitersEnforced;
+                    res.state_after = orig_state;
+                    return res;
                 }
             }
         }
@@ -122,12 +165,16 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
         }
 
         if (is_terminal(slot.state) && slot.waiter_count == 0) {
-            if (slot.state == CoalescingState::NotCacheable ||
-                slot.state == CoalescingState::LeaderFailed ||
-                slot.state == CoalescingState::TimedOut ||
-                slot.state == CoalescingState::Cancelled ||
-                now_ms >= slot.completed_at_epoch_ms + wait_window_ms) {
+            bool can_reuse = false;
+            if (slot.state == CoalescingState::ResultReady) {
+                if (now_ms >= slot.completed_at_epoch_ms + kResultRetentionWindowMs) {
+                    can_reuse = true;
+                }
+            } else {
+                can_reuse = true;
+            }
 
+            if (can_reuse) {
                 best_reusable_slot = &slot;
                 break;
             }
@@ -135,6 +182,9 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
     }
 
     if (best_reusable_slot != nullptr) {
+        res.state_before =
+            best_reusable_slot->active ? best_reusable_slot->state : CoalescingState::LeaderRunning;
+
         std::strncpy(best_reusable_slot->key, key, sizeof(best_reusable_slot->key) - 1);
         best_reusable_slot->key[sizeof(best_reusable_slot->key) - 1] = '\0';
         best_reusable_slot->created_at_epoch_ms = now_ms;
@@ -143,11 +193,18 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
         best_reusable_slot->state = CoalescingState::LeaderRunning;
         best_reusable_slot->shared_response = {};
         best_reusable_slot->active = true;
-        return { InFlightRole::Leader };
+
+        res.role = InFlightRole::Leader;
+        res.state_after = CoalescingState::LeaderRunning;
+        return res;
     }
 
     // [BT-130-005] Shard full, instantly drop traffic
-    return { InFlightRole::Reject };
+    res.role = InFlightRole::Reject;
+    res.attach_failure_reason = AttachFailureReason::ShardFull;
+    res.state_before = CoalescingState::LeaderRunning;
+    res.state_after = CoalescingState::LeaderRunning;
+    return res;
 }
 
 bool registry_complete_with_response(InFlightRegistry* registry, const char* key,
@@ -345,6 +402,64 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
     }
 
     return RegistryWaitResult::Missing;
+}
+
+void registry_evaluate_group_invariants_and_summary(InFlightRegistry* registry, const char* key,
+                                                    std::uint64_t now_ms,
+                                                    metrics::CoalescingMetrics* metrics) {
+    if (registry == nullptr || key == nullptr) {
+        return;
+    }
+    std::uint64_t hash = hash_string(key);
+    std::size_t shard_idx = hash % kInFlightShards;
+    InFlightShard& shard = registry->shards[shard_idx];
+    std::lock_guard<std::mutex> lock(shard.mutex);
+
+    for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
+        InFlightEntry& slot = shard.slots[j];
+        if (slot.active && std::strcmp(slot.key, key) == 0) {
+            std::uint64_t duration_ms =
+                (now_ms >= slot.created_at_epoch_ms) ? (now_ms - slot.created_at_epoch_ms) : 0;
+
+            std::printf("[COALESCING SUMMARY] Thread group completed processing for key: %s\n",
+                        key);
+            std::printf("  - Key Hash: %llu, Group ID: %u\n", (unsigned long long) hash,
+                        static_cast<std::uint32_t>(hash));
+            std::printf("  - Duration (monotonic): %llu ms\n", (unsigned long long) duration_ms);
+            std::printf("  - State: %d, Completed Epoch: %llu ms\n", static_cast<int>(slot.state),
+                        (unsigned long long) slot.completed_at_epoch_ms);
+            std::printf("  - Waiter Count: %u\n", slot.waiter_count);
+            std::printf("  - Shared Response: status=%u, len=%zu, ready=%s\n",
+                        slot.shared_response.status_code, slot.shared_response.body_len,
+                        slot.shared_response.ready ? "true" : "false");
+
+            bool invariant_failed = false;
+            if (!is_terminal(slot.state)) {
+                invariant_failed = true;
+            }
+            if (slot.state == CoalescingState::ResultReady) {
+                if (!slot.shared_response.ready || slot.shared_response.status_code < 200 ||
+                    slot.shared_response.status_code >= 300) {
+                    invariant_failed = true;
+                }
+            } else {
+                if (slot.shared_response.ready && slot.shared_response.status_code != 0) {
+                    invariant_failed = true;
+                }
+            }
+
+            if (invariant_failed) {
+                std::printf("  [ERROR] Group Invariant Violation detected for key %s!\n", key);
+                if (metrics != nullptr) {
+                    record_coalescing_event(metrics,
+                                            metrics::CoalescingMetricEvent::GroupInvariantFailures);
+                }
+            } else {
+                std::printf("  [SUCCESS] All Group Invariants passed for key %s.\n", key);
+            }
+            break;
+        }
+    }
 }
 
 } // namespace bytetaper::coalescing

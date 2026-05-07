@@ -35,7 +35,7 @@ TEST_F(CoalescingMetricsTest, RenderPrometheus) {
     record_coalescing_event(&metrics, CoalescingMetricEvent::Leader);
     record_coalescing_event(&metrics, CoalescingMetricEvent::Follower);
 
-    char buf[4096];
+    char buf[16384];
     std::size_t written = render_coalescing_metrics_prometheus(metrics, buf, sizeof(buf));
     ASSERT_GT(written, 0u);
 

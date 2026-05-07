@@ -1117,6 +1117,7 @@ if(BUILD_TESTING)
     add_executable(inflight_registry_test
       tests/inflight_registry_test.cpp
       src/coalescing/inflight_registry.cpp
+      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(inflight_registry_test
       PRIVATE
@@ -1168,6 +1169,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_decision_test
       PRIVATE
         gtest_main
+        bytetaper_trace
     )
 
     add_test(
@@ -1192,6 +1194,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_timeout_test
       PRIVATE
         gtest_main
+        bytetaper_trace
     )
 
     add_test(
@@ -1305,6 +1308,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_leader_completion_test
       PRIVATE
         gtest_main
+        bytetaper_trace
     )
 
     add_test(

@@ -30,6 +30,10 @@ namespace bytetaper::runtime {
 struct WorkerQueue;
 } // namespace bytetaper::runtime
 
+namespace bytetaper::observability {
+struct TraceRecord;
+}
+
 namespace bytetaper::apg {
 
 struct RequestMutationOutput {
@@ -123,6 +127,28 @@ struct ApgTransformContext {
     coalescing::CoalescingDecision coalescing_decision{};
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
     coalescing::FollowerWaitPool* follower_wait_pool = nullptr;
+
+    // --- Coalescing extra state (BT-037F) ---
+    metrics::UpstreamCallReason coalescing_upstream_reason = metrics::UpstreamCallReason::Unknown;
+    coalescing::AttachFailureReason coalescing_attach_failure_reason =
+        coalescing::AttachFailureReason::None;
+    const char* coalescing_result_source = nullptr; // "NONE", "L1", "COALESCED"
+    std::uint32_t coalescing_group_id = 0;
+    std::uint64_t coalescing_key_hash = 0;
+    coalescing::CoalescingState coalescing_terminal_state =
+        coalescing::CoalescingState::LeaderRunning;
+    bool coalescing_terminal_result_join_flag = false;
+
+    // --- Coalescing extra string state (BT-037G) ---
+    bool coalescing_has_context = false;
+    char coalescing_role_str[32]{};
+    char coalescing_decision_str[64]{};
+    char coalescing_attach_result_str[32]{};
+    char coalescing_wakeup_reason_str[32]{};
+    char coalescing_upstream_call_reason[64]{};
+
+    // --- Trace context (non-owning pointer into StreamFilterState.trace) ---
+    observability::TraceRecord* trace = nullptr;
 
     // --- Background runtime inputs (set by caller for async stages) ---
     runtime::WorkerQueue* worker_queue = nullptr;
