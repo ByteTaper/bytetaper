@@ -12,7 +12,7 @@ TEST(WaitWindowTest, ValidateZero) {
 }
 
 TEST(WaitWindowTest, ValidateTooLong) {
-    EXPECT_EQ(validate_wait_window(101), WaitWindowValidationResult::InvalidTooLong);
+    EXPECT_EQ(validate_wait_window(30001), WaitWindowValidationResult::InvalidTooLong);
     EXPECT_EQ(validate_wait_window(kMaxWaitWindowMs + 1),
               WaitWindowValidationResult::InvalidTooLong);
 }

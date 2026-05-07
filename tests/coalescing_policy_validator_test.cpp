@@ -16,7 +16,9 @@ protected:
 
     void SetUp() override {
         policy.enabled = true;
-        policy.wait_window_ms = 25;
+        policy.backend_timeout_ms = 500;
+        policy.handoff_buffer_ms = 250;
+        policy.result_ready_retention_ms = 50;
         policy.max_waiters_per_key = 64;
         policy.require_cache_enabled = false;
         policy.allow_authenticated = false;
@@ -31,18 +33,19 @@ TEST_F(CoalescingPolicyValidatorTest, ValidMinimal) {
 
 TEST_F(CoalescingPolicyValidatorTest, DisabledPolicyIsAlwaysValid) {
     policy.enabled = false;
-    policy.wait_window_ms = 0; // structurally invalid but policy is disabled
+    policy.backend_timeout_ms = 0; // structurally invalid but policy is disabled
     EXPECT_EQ(validate_coalescing_policy_safe(policy, &cache_policy), nullptr);
 }
 
 TEST_F(CoalescingPolicyValidatorTest, RejectInvalidWaitWindow) {
-    policy.wait_window_ms = 0;
+    policy.backend_timeout_ms = 0;
     EXPECT_STREQ(validate_coalescing_policy_safe(policy, &cache_policy),
-                 "coalescing.wait_window_ms must be > 0");
+                 "backend_timeout_ms must be > 0");
 
-    policy.wait_window_ms = 101;
+    policy.backend_timeout_ms = 100;
+    policy.result_ready_retention_ms = 100;
     EXPECT_STREQ(validate_coalescing_policy_safe(policy, &cache_policy),
-                 "coalescing.wait_window_ms exceeds safe production limit (100ms)");
+                 "result_ready_retention_ms must be < backend_timeout_ms");
 }
 
 TEST_F(CoalescingPolicyValidatorTest, RejectInvalidMaxWaiters) {

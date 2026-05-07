@@ -25,7 +25,8 @@ TEST(CoalescingEventDrivenWait, FollowerWakesBeforeFullWindowWhenLeaderCompletes
     policy.route_id = "test-route";
     policy.cache.behavior = policy::CacheBehavior::Store;
     policy.coalescing.enabled = true;
-    policy.coalescing.wait_window_ms = 1000; // 1 second window
+    policy.coalescing.backend_timeout_ms = 800;
+    policy.coalescing.handoff_buffer_ms = 200;
 
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &policy;
@@ -71,7 +72,8 @@ TEST(CoalescingEventDrivenWait, FollowerTimeoutFallbackStillWorks) {
     policy.route_id = "test-route";
     policy.cache.behavior = policy::CacheBehavior::Store;
     policy.coalescing.enabled = true;
-    policy.coalescing.wait_window_ms = 100; // 100ms window
+    policy.coalescing.backend_timeout_ms = 80;
+    policy.coalescing.handoff_buffer_ms = 20;
 
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &policy;
@@ -106,7 +108,8 @@ TEST(CoalescingEventDrivenWait, ConcurrencyMultipleFollowersReleased) {
     policy.route_id = "test-route";
     policy.cache.behavior = policy::CacheBehavior::Store;
     policy.coalescing.enabled = true;
-    policy.coalescing.wait_window_ms = 1000; // 1 second window
+    policy.coalescing.backend_timeout_ms = 800;
+    policy.coalescing.handoff_buffer_ms = 200;
 
     // Register leader
     coalescing::registry_register(registry.get(), "shared-key", 1000, 1000, 128);
@@ -209,7 +212,8 @@ TEST(CoalescingEventDrivenWait, LeaderNonCacheableCompletionWakesFollower) {
     policy.route_id = "test-route";
     policy.cache.behavior = policy::CacheBehavior::Store;
     policy.coalescing.enabled = true;
-    policy.coalescing.wait_window_ms = 500;
+    policy.coalescing.backend_timeout_ms = 400;
+    policy.coalescing.handoff_buffer_ms = 100;
 
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &policy;

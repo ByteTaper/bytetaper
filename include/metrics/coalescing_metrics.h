@@ -15,7 +15,10 @@ enum class CoalescingMetricEvent : std::uint8_t {
     FollowerCacheHit,
     Fallback,
     Bypass,
-    TooManyWaiters
+    TooManyWaiters,
+    FollowerTimeoutBeforePublish, // leader hadn't published when follower timed out (valid)
+    FollowerTimeoutAfterPublish,  // leader had published but follower still timed out (bug)
+    FallbackDeadlineUnknown,      // follower fell back; no client deadline available to check
 };
 
 struct CoalescingMetrics {
@@ -25,6 +28,9 @@ struct CoalescingMetrics {
     std::atomic<std::uint64_t> fallback_total{ 0 };
     std::atomic<std::uint64_t> bypass_total{ 0 };
     std::atomic<std::uint64_t> too_many_waiters_total{ 0 };
+    std::atomic<std::uint64_t> follower_timeout_before_publish_total{ 0 };
+    std::atomic<std::uint64_t> follower_timeout_after_publish_total{ 0 };
+    std::atomic<std::uint64_t> fallback_deadline_unknown_total{ 0 };
 };
 
 void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent event);

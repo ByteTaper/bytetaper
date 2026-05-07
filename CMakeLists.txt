@@ -1849,6 +1849,29 @@ if(BUILD_TESTING)
       COMMAND coalescing_policy_test
     )
 
+    add_executable(coalescing_budget_policy_test
+      tests/coalescing_budget_policy_test.cpp
+      src/policy/coalescing_policy.cpp
+      src/policy/pagination_policy.cpp
+      src/policy/compression_policy.cpp
+      src/policy/pagination_policy_validator.cpp
+      src/policy/compression_policy_validator.cpp
+      src/policy/coalescing_policy_validator.cpp
+    )
+    target_include_directories(coalescing_budget_policy_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(coalescing_budget_policy_test
+      PRIVATE
+        gtest_main
+    )
+
+    add_test(
+      NAME coalescing_budget_policy_test
+      COMMAND coalescing_budget_policy_test
+    )
+
     add_executable(safety_fail_open_test
       tests/safety_fail_open_test.cpp
       src/safety/fail_open.cpp

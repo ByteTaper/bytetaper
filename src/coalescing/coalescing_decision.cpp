@@ -69,8 +69,8 @@ CoalescingDecision evaluate_coalescing_decision(InFlightRegistry* registry,
 
     // 5. Registry Registration
     RegistryRegistrationResult reg_res =
-        registry_register(registry, decision.key, context.now_ms, context.policy->wait_window_ms,
-                          context.policy->max_waiters_per_key);
+        registry_register(registry, decision.key, context.now_ms,
+                          context.policy->backend_timeout_ms, context.policy->max_waiters_per_key);
 
     // 6. Mapping Registry Result
     switch (reg_res.role) {

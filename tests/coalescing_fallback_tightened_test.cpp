@@ -28,7 +28,8 @@ protected:
         policy.route_id = "test-route";
         policy.cache.behavior = policy::CacheBehavior::Store;
         policy.coalescing.enabled = true;
-        policy.coalescing.wait_window_ms = 200;
+        policy.coalescing.backend_timeout_ms = 150;
+        policy.coalescing.handoff_buffer_ms = 50;
 
         ctx.matched_policy = &policy;
         ctx.l1_cache = l1.get();
@@ -176,7 +177,8 @@ TEST_F(CoalescingFallbackTightenedTest, WaiterCountDecrementedOnTimeout) {
 
     EXPECT_EQ(get_waiter_count("burst-key"), 1);
 
-    policy.coalescing.wait_window_ms = 50;
+    policy.coalescing.backend_timeout_ms = 40;
+    policy.coalescing.handoff_buffer_ms = 10;
     cache_key_prepare_stage(ctx);
     auto output = coalescing_follower_wait_stage(ctx);
 
@@ -187,7 +189,8 @@ TEST_F(CoalescingFallbackTightenedTest, WaiterCountDecrementedOnTimeout) {
 TEST_F(CoalescingFallbackTightenedTest, SteadyClockUsedForWait) {
     coalescing::registry_register(registry.get(), "burst-key", ctx.request_epoch_ms, 50, 128);
 
-    policy.coalescing.wait_window_ms = 50;
+    policy.coalescing.backend_timeout_ms = 40;
+    policy.coalescing.handoff_buffer_ms = 10;
     auto start = std::chrono::steady_clock::now();
     cache_key_prepare_stage(ctx);
     coalescing_follower_wait_stage(ctx);

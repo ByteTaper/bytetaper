@@ -10,7 +10,7 @@
 namespace bytetaper::coalescing {
 
 // Hard cap on wait window to prevent long blocking waits in ExtProc.
-static constexpr std::uint32_t kMaxWaitWindowMs = 100;
+static constexpr std::uint32_t kMaxWaitWindowMs = 30000;
 
 /**
  * @brief Result of wait window validation.

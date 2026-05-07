@@ -15,7 +15,12 @@ enum class CoalescingMode : std::uint8_t {
 struct CoalescingPolicy {
     bool enabled = false;
     CoalescingMode mode = CoalescingMode::CacheAssisted;
-    std::uint32_t wait_window_ms = 25;
+
+    // Budget-aware follower wait policy (BT-037H-03)
+    std::uint32_t backend_timeout_ms = 500;       // expected max leader upstream latency
+    std::uint32_t handoff_buffer_ms = 250;        // extra time for notify + wakeup path
+    std::uint32_t result_ready_retention_ms = 50; // InFlightEntry result retention (not cache TTL)
+
     std::uint32_t max_waiters_per_key = 64;
     bool require_cache_enabled = true;
     bool allow_authenticated = false;

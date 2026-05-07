@@ -13,7 +13,7 @@ protected:
         registry_init(&registry);
 
         policy.enabled = true;
-        policy.wait_window_ms = 100;
+        policy.backend_timeout_ms = 100;
         policy.max_waiters_per_key = 2;
 
         ctx.policy = &policy;

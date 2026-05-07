@@ -12,7 +12,9 @@ TEST(CoalescingPolicyTest, DefaultValues) {
     CoalescingPolicy p{};
     EXPECT_FALSE(p.enabled);
     EXPECT_EQ(p.mode, CoalescingMode::CacheAssisted);
-    EXPECT_EQ(p.wait_window_ms, 25);
+    EXPECT_EQ(p.backend_timeout_ms, 500);
+    EXPECT_EQ(p.handoff_buffer_ms, 250);
+    EXPECT_EQ(p.result_ready_retention_ms, 50);
     EXPECT_EQ(p.max_waiters_per_key, 64);
     EXPECT_TRUE(p.require_cache_enabled);
     EXPECT_FALSE(p.allow_authenticated);
@@ -21,32 +23,43 @@ TEST(CoalescingPolicyTest, DefaultValues) {
 TEST(CoalescingPolicyTest, Validation_DisabledIsAlwaysValid) {
     CoalescingPolicy p{};
     p.enabled = false;
-    p.wait_window_ms = 0; // invalid if enabled
+    p.backend_timeout_ms = 0; // invalid if enabled
     EXPECT_EQ(validate_coalescing_policy(p), nullptr);
 }
 
 TEST(CoalescingPolicyTest, Validation_ValidEnabled) {
     CoalescingPolicy p{};
     p.enabled = true;
-    p.wait_window_ms = 100;
+    p.backend_timeout_ms = 100;
+    p.handoff_buffer_ms = 50;
+    p.result_ready_retention_ms = 10;
     p.max_waiters_per_key = 10;
     p.require_cache_enabled = false;
     EXPECT_EQ(validate_coalescing_policy_safe(p), nullptr);
 }
 
-TEST(CoalescingPolicyTest, Validation_InvalidWaitWindow) {
+TEST(CoalescingPolicyTest, Validation_InvalidTimeoutAndBuffer) {
     CoalescingPolicy p{};
     p.enabled = true;
-    p.wait_window_ms = 0;
-    EXPECT_STREQ(validate_coalescing_policy(p), "coalescing.wait_window_ms must be > 0");
+    p.backend_timeout_ms = 0;
+    EXPECT_STREQ(validate_coalescing_policy(p), "backend_timeout_ms must be > 0");
 
-    p.wait_window_ms = 101;
-    EXPECT_STREQ(validate_coalescing_policy_safe(p),
-                 "coalescing.wait_window_ms exceeds safe production limit (100ms)");
+    p.backend_timeout_ms = 35000;
+    EXPECT_STREQ(validate_coalescing_policy(p), "backend_timeout_ms must be <= 30000");
 
-    p.wait_window_ms = 6000;
-    EXPECT_STREQ(validate_coalescing_policy(p),
-                 "coalescing.wait_window_ms exceeds maximum allowed wait (5000ms)");
+    p.backend_timeout_ms = 500;
+    p.handoff_buffer_ms = 0;
+    EXPECT_STREQ(validate_coalescing_policy(p), "handoff_buffer_ms must be > 0");
+
+    p.handoff_buffer_ms = 6000;
+    EXPECT_STREQ(validate_coalescing_policy(p), "handoff_buffer_ms must be <= 5000");
+
+    p.handoff_buffer_ms = 250;
+    p.result_ready_retention_ms = 5;
+    EXPECT_STREQ(validate_coalescing_policy(p), "result_ready_retention_ms must be >= 10");
+
+    p.result_ready_retention_ms = 1500;
+    EXPECT_STREQ(validate_coalescing_policy(p), "result_ready_retention_ms must be <= 1000");
 }
 
 TEST(CoalescingPolicyTest, Validation_InvalidMaxWaiters) {

@@ -39,7 +39,8 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
         return { apg::StageResult::Continue, "cache-disabled-bypassed" };
     }
 
-    const std::uint32_t wait_window_ms = policy.wait_window_ms;
+    const std::uint32_t follower_wait_budget_ms =
+        policy.backend_timeout_ms + policy.handoff_buffer_ms;
     if (context.coalescing_registry == nullptr) {
         context.coalescing_decision.action = coalescing::CoalescingAction::Bypass;
         record_coalescing_event(context.coalescing_metrics, metrics::CoalescingMetricEvent::Bypass);
@@ -66,8 +67,8 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
 
     if (context.follower_wait_pool != nullptr) {
         submitted = coalescing::follower_wait_pool_submit_and_wait(
-            context.follower_wait_pool, context.coalescing_decision.key, wait_window_ms, &shared,
-            &wait_result);
+            context.follower_wait_pool, context.coalescing_decision.key, follower_wait_budget_ms,
+            &shared, &wait_result);
         if (!submitted) {
             coalescing::handle_timeout_fallback(context.coalescing_registry,
                                                 context.coalescing_decision);
@@ -76,8 +77,9 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
             return { apg::StageResult::Continue, "pool-queue-full-fallback" };
         }
     } else {
-        wait_result = coalescing::registry_wait_for_completion(
-            context.coalescing_registry, context.coalescing_decision.key, wait_window_ms, &shared);
+        wait_result = coalescing::registry_wait_for_completion(context.coalescing_registry,
+                                                               context.coalescing_decision.key,
+                                                               follower_wait_budget_ms, &shared);
     }
 
     // Step 3: Handle fast-path delivery if snapshot is ready
@@ -117,10 +119,50 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
         wait_result == coalescing::RegistryWaitResult::Missing ||
         wait_result == coalescing::RegistryWaitResult::NotCacheable ||
         wait_result == coalescing::RegistryWaitResult::Failed) {
+
+        if (wait_result == coalescing::RegistryWaitResult::Timeout) {
+            // Check if leader published just as timeout fired (race-edge case)
+            coalescing::RegistrySharedResponseOutput late_check{};
+            auto recheck = coalescing::registry_wait_for_completion(context.coalescing_registry,
+                                                                    context.coalescing_decision.key,
+                                                                    0, // immediate poll
+                                                                    &late_check);
+
+            if (recheck == coalescing::RegistryWaitResult::SharedResponseReady) {
+                // Leader published just after timeout — consume result
+                context.cache_hit = true;
+                context.cache_layer = "COALESCED";
+                context.should_return_immediate_response = true;
+                context.cached_response.status_code = late_check.status_code;
+                std::strncpy(context.cached_response.content_type, late_check.content_type,
+                             cache::kCacheContentTypeMaxLen - 1);
+                context.cached_response.content_type[cache::kCacheContentTypeMaxLen - 1] = '\0';
+                std::memcpy(context.l2_body_buf, late_check.body, late_check.body_len);
+                context.cached_response.body = context.l2_body_buf;
+                context.cached_response.body_len = late_check.body_len;
+
+                coalescing::registry_remove_waiter(context.coalescing_registry,
+                                                   context.coalescing_decision.key);
+                record_coalescing_event(
+                    context.coalescing_metrics,
+                    metrics::CoalescingMetricEvent::FollowerTimeoutAfterPublish);
+                record_coalescing_event(context.coalescing_metrics,
+                                        metrics::CoalescingMetricEvent::FollowerCacheHit);
+                return { apg::StageResult::SkipRemaining, "coalesced-shared-response-late" };
+            } else {
+                // Genuine timeout — leader not yet done
+                record_coalescing_event(
+                    context.coalescing_metrics,
+                    metrics::CoalescingMetricEvent::FollowerTimeoutBeforePublish);
+            }
+        }
+
         coalescing::handle_timeout_fallback(context.coalescing_registry,
                                             context.coalescing_decision);
         record_coalescing_event(context.coalescing_metrics,
                                 metrics::CoalescingMetricEvent::Fallback);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FallbackDeadlineUnknown);
         return { apg::StageResult::Continue, "timeout-fallback" };
     }
 
@@ -128,6 +170,8 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
     // non-cacheable/failed
     coalescing::handle_timeout_fallback(context.coalescing_registry, context.coalescing_decision);
     record_coalescing_event(context.coalescing_metrics, metrics::CoalescingMetricEvent::Fallback);
+    record_coalescing_event(context.coalescing_metrics,
+                            metrics::CoalescingMetricEvent::FallbackDeadlineUnknown);
     return { apg::StageResult::Continue, "leader-complete-l1-miss" };
 }
 

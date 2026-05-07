@@ -29,7 +29,9 @@ protected:
         ctx.request_method = policy::HttpMethod::Get;
 
         policy.coalescing.enabled = true;
-        policy.coalescing.wait_window_ms = 50;
+        policy.coalescing.backend_timeout_ms = 40;
+        policy.coalescing.handoff_buffer_ms = 10;
+        policy.coalescing.result_ready_retention_ms = 10;
 
         auto now = std::chrono::system_clock::now();
         ctx.request_epoch_ms =
@@ -87,7 +89,8 @@ TEST_F(CoalescingFollowerWaitTest, TimeoutReturnsContinue) {
     coalescing::registry_register(registry.get(), ctx.coalescing_decision.key, ctx.request_epoch_ms,
                                   50, 128);
 
-    policy.coalescing.wait_window_ms = 20; // Short wait
+    policy.coalescing.backend_timeout_ms = 15; // Short wait
+    policy.coalescing.handoff_buffer_ms = 5;
 
     auto start = std::chrono::steady_clock::now();
     cache_key_prepare_stage(ctx);
@@ -105,7 +108,8 @@ TEST_F(CoalescingFollowerWaitTest, L2SeededNoL1HitTimesOut) {
     coalescing::registry_register(registry.get(), ctx.coalescing_decision.key, ctx.request_epoch_ms,
                                   50, 128);
 
-    policy.coalescing.wait_window_ms = 20; // short timeout
+    policy.coalescing.backend_timeout_ms = 15; // short timeout
+    policy.coalescing.handoff_buffer_ms = 5;
 
     // No L1 population, so L1 will always miss.
     cache_key_prepare_stage(ctx);

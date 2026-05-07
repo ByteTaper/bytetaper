@@ -31,6 +31,15 @@ void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent e
     case CoalescingMetricEvent::TooManyWaiters:
         metrics->too_many_waiters_total.fetch_add(1, std::memory_order_relaxed);
         break;
+    case CoalescingMetricEvent::FollowerTimeoutBeforePublish:
+        metrics->follower_timeout_before_publish_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerTimeoutAfterPublish:
+        metrics->follower_timeout_after_publish_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FallbackDeadlineUnknown:
+        metrics->fallback_deadline_unknown_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     }
 }
 
@@ -65,13 +74,31 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "# HELP bytetaper_coalescing_too_many_waiters_total Total number of requests rejected due "
         "to queue full.\n"
         "# TYPE bytetaper_coalescing_too_many_waiters_total counter\n"
-        "bytetaper_coalescing_too_many_waiters_total %llu\n",
+        "bytetaper_coalescing_too_many_waiters_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_timeout_before_publish_total Total number of "
+        "follower timeout fallbacks before leader publish.\n"
+        "# TYPE bytetaper_coalescing_follower_timeout_before_publish_total counter\n"
+        "bytetaper_coalescing_follower_timeout_before_publish_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_timeout_after_publish_total Total number of follower "
+        "timeout fallbacks after leader publish.\n"
+        "# TYPE bytetaper_coalescing_follower_timeout_after_publish_total counter\n"
+        "bytetaper_coalescing_follower_timeout_after_publish_total %llu\n"
+        "# HELP bytetaper_coalescing_fallback_deadline_unknown_total Total number of fallbacks "
+        "with unknown deadlines.\n"
+        "# TYPE bytetaper_coalescing_fallback_deadline_unknown_total counter\n"
+        "bytetaper_coalescing_fallback_deadline_unknown_total %llu\n",
         (unsigned long long) metrics.leader_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_cache_hit_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.fallback_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.bypass_total.load(std::memory_order_relaxed),
-        (unsigned long long) metrics.too_many_waiters_total.load(std::memory_order_relaxed));
+        (unsigned long long) metrics.too_many_waiters_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_timeout_before_publish_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_timeout_after_publish_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.fallback_deadline_unknown_total.load(
+            std::memory_order_relaxed));
 
     if (written < 0 || static_cast<std::size_t>(written) >= buf_size) {
         return 0;

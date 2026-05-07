@@ -328,8 +328,38 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
                     return false;
                 }
             }
-            if (coal_node["wait_window_ms"]) {
-                policy.coalescing.wait_window_ms = coal_node["wait_window_ms"].as<std::uint32_t>();
+            if (coal_node["backend_timeout_ms"]) {
+                policy.coalescing.backend_timeout_ms =
+                    coal_node["backend_timeout_ms"].as<std::uint32_t>();
+            }
+            if (coal_node["handoff_buffer_ms"]) {
+                policy.coalescing.handoff_buffer_ms =
+                    coal_node["handoff_buffer_ms"].as<std::uint32_t>();
+            }
+            if (coal_node["result_ready_retention_ms"]) {
+                policy.coalescing.result_ready_retention_ms =
+                    coal_node["result_ready_retention_ms"].as<std::uint32_t>();
+            }
+            // backward compat: wait_window_ms maps to backend_timeout_ms
+            if (coal_node["wait_window_ms"] && !coal_node["backend_timeout_ms"]) {
+                policy.coalescing.backend_timeout_ms =
+                    coal_node["wait_window_ms"].as<std::uint32_t>();
+
+                if (!coal_node["handoff_buffer_ms"]) {
+                    policy.coalescing.handoff_buffer_ms =
+                        std::max(1U, policy.coalescing.backend_timeout_ms / 2);
+                }
+                if (!coal_node["result_ready_retention_ms"]) {
+                    policy.coalescing.result_ready_retention_ms =
+                        std::max(10U, policy.coalescing.backend_timeout_ms / 4);
+                    if (policy.coalescing.result_ready_retention_ms >=
+                        policy.coalescing.backend_timeout_ms) {
+                        policy.coalescing.result_ready_retention_ms =
+                            policy.coalescing.backend_timeout_ms > 10
+                                ? policy.coalescing.backend_timeout_ms - 1
+                                : 10;
+                    }
+                }
             }
             if (coal_node["max_waiters_per_key"]) {
                 policy.coalescing.max_waiters_per_key =

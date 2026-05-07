@@ -88,7 +88,8 @@ TEST_F(CoalescingCacheIntegrationTest, FollowerBypassesWhenCacheDisabled) {
 }
 
 TEST_F(CoalescingCacheIntegrationTest, FollowerTimesOutAndFallsBack) {
-    policy.coalescing.wait_window_ms = 10;
+    policy.coalescing.backend_timeout_ms = 8;
+    policy.coalescing.handoff_buffer_ms = 2;
     ctx.request_epoch_ms = 1000;
 
     // Manually register leader and follower

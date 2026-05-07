@@ -19,9 +19,12 @@ const char* validate_coalescing_policy_safe(const CoalescingPolicy& policy,
         return nullptr;
     }
 
-    // 2. Excessive wait check
-    if (policy.wait_window_ms > 100) {
-        return "coalescing.wait_window_ms exceeds safe production limit (100ms)";
+    // 2. Budget sanity check
+    if (policy.backend_timeout_ms + policy.handoff_buffer_ms > 30000) {
+        return "coalescing total wait budget exceeds 30000ms";
+    }
+    if (policy.handoff_buffer_ms > policy.backend_timeout_ms) {
+        return "coalescing handoff_buffer_ms exceeds backend_timeout_ms";
     }
 
     // 3. Unsupported mode check (future-proofing)

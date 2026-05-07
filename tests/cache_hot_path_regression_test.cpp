@@ -78,7 +78,7 @@ TEST(CacheHotPathRegression, L1MissStillEvaluatesCoalescing) {
     policy.route_id = "test-route";
     policy.cache.behavior = policy::CacheBehavior::Store;
     policy.coalescing.enabled = true;
-    policy.coalescing.wait_window_ms = 100;
+    policy.coalescing.backend_timeout_ms = 100;
 
     auto registry = std::make_unique<coalescing::InFlightRegistry>();
     coalescing::registry_init(registry.get());

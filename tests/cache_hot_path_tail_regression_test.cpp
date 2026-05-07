@@ -125,7 +125,8 @@ TEST_F(CacheHotPathTailRegressionTest, SleepForAbsentFromFollowerWait) {
     // (Wait, if no leader, it bypasses or returns Continue immediately if registry is null)
     // If registry is present but no leader registered for key, it returns timeout-fallback.
 
-    policy.coalescing.wait_window_ms = 50;
+    policy.coalescing.backend_timeout_ms = 40;
+    policy.coalescing.handoff_buffer_ms = 10;
     ctx.coalescing_decision.action = coalescing::CoalescingAction::Follower;
     std::strcpy(ctx.coalescing_decision.key, "no-leader-key");
 
