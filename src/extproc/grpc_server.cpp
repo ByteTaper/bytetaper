@@ -44,6 +44,12 @@ constexpr const char* kOptimizedBytesHeader = "x-bytetaper-optimized-bytes";
 constexpr const char* kTransformAppliedHeader = "x-bytetaper-transform-applied";
 constexpr const char* kRoutePolicyHeader = "x-bytetaper-route-policy";
 
+enum class ReportingHeaderMode {
+    None,
+    CompressionOnly,
+    FullDiagnostics,
+};
+
 struct StreamFilterState {
     apg::ApgTransformContext context{};
     json_transform::JsonResponseKind response_kind =
@@ -205,6 +211,20 @@ bool route_needs_response_body_processing(const StreamFilterState& state) {
     }
 
     return false;
+}
+
+ReportingHeaderMode reporting_mode_for_route(const StreamFilterState& state) {
+    if (state.matched_policy == nullptr) {
+        return ReportingHeaderMode::FullDiagnostics;
+    }
+
+    const bool compression_only =
+        state.matched_policy->compression.enabled && !state.has_query_selection &&
+        state.matched_policy->cache.behavior != policy::CacheBehavior::Store &&
+        !state.matched_policy->pagination.enabled && !state.matched_policy->coalescing.enabled;
+
+    return compression_only ? ReportingHeaderMode::CompressionOnly
+                            : ReportingHeaderMode::FullDiagnostics;
 }
 
 bool build_filtered_body_response(const envoy::service::ext_proc::v3::ProcessingRequest& request,
@@ -432,9 +452,10 @@ public:
                 auto* response_headers = response.mutable_response_headers();
                 auto* common_response = response_headers->mutable_response();
                 common_response->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
-                add_bytetaper_report_headers(common_response, 0, 0, 0, 0, false,
-                                             filter_state.context.cache_hit);
-                {
+                const ReportingHeaderMode reporting_mode = reporting_mode_for_route(filter_state);
+                if (reporting_mode == ReportingHeaderMode::FullDiagnostics) {
+                    add_bytetaper_report_headers(common_response, 0, 0, 0, 0, false,
+                                                 filter_state.context.cache_hit);
                     const char* route_id = (filter_state.matched_policy != nullptr)
                                                ? filter_state.matched_policy->route_id
                                                : kNoneValue;

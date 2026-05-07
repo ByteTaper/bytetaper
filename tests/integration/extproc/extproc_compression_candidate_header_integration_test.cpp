@@ -60,12 +60,30 @@ static bool has_any_body_header(const envoy::service::ext_proc::v3::ProcessingRe
     return false;
 }
 
+static bool has_any_headers_header(const envoy::service::ext_proc::v3::ProcessingResponse& resp,
+                                   const std::string& key) {
+    if (!resp.has_response_headers())
+        return false;
+    for (const auto& m : resp.response_headers().response().header_mutation().set_headers()) {
+        if (m.header().key() == key) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int main() {
-    auto policy = make_compression_policy();
+    bytetaper::policy::RoutePolicy policies[2];
+    policies[0] = make_compression_policy();
+
+    policies[1] = make_compression_policy();
+    policies[1].route_id = "test-full-diagnostics";
+    policies[1].match_prefix = "/full-diag";
+    policies[1].cache.behavior = bytetaper::policy::CacheBehavior::Store;
 
     bytetaper::extproc::GrpcServerConfig config{};
-    config.policies = &policy;
-    config.policy_count = 1;
+    config.policies = policies;
+    config.policy_count = 2;
     config.listen_address = "127.0.0.1:0";
     bytetaper::extproc::GrpcServerHandle handle{};
 
@@ -232,6 +250,13 @@ int main() {
         if (!find_headers_header(r2, "x-bytetaper-compression-algorithm-hint", "br"))
             return 301;
 
+        // Since the route is compression-only, it must NOT emit any bytetaper report headers
+        // in ResponseHeaders phase.
+        if (has_any_headers_header(r2, "x-bytetaper-extproc-response-body"))
+            return 305;
+        if (has_any_headers_header(r2, "x-bytetaper-route-policy"))
+            return 306;
+
         // Response Body
         envoy::service::ext_proc::v3::ProcessingRequest resp_body{};
         std::string large_body(1024, 'a');
@@ -252,6 +277,56 @@ int main() {
             return 303;
         if (has_any_body_header(r3, "x-bytetaper-original-bytes"))
             return 304;
+
+        stream->WritesDone();
+        stream->Finish();
+    }
+
+    // Scenario D: Full Diagnostics Route (matching /full-diag)
+    {
+        grpc::ClientContext client_context{};
+        auto stream = stub->Process(&client_context);
+        if (!stream) {
+            bytetaper::extproc::stop_grpc_server(&handle);
+            return 400;
+        }
+
+        // Request Headers
+        envoy::service::ext_proc::v3::ProcessingRequest req_hdrs{};
+        auto* hp = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
+        hp->set_key(":path");
+        hp->set_raw_value("/full-diag");
+        auto* rm = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
+        rm->set_key(":method");
+        rm->set_raw_value("GET");
+        auto* ae = req_hdrs.mutable_request_headers()->mutable_headers()->add_headers();
+        ae->set_key("accept-encoding");
+        ae->set_raw_value("br, gzip");
+        stream->Write(req_hdrs);
+        envoy::service::ext_proc::v3::ProcessingResponse r1{};
+        stream->Read(&r1);
+
+        // Response Headers with content-length present
+        envoy::service::ext_proc::v3::ProcessingRequest resp_hdrs{};
+        auto* rs = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
+        rs->set_key(":status");
+        rs->set_raw_value("200");
+        auto* ct = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
+        ct->set_key("content-type");
+        ct->set_raw_value("application/json");
+        auto* cl = resp_hdrs.mutable_response_headers()->mutable_headers()->add_headers();
+        cl->set_key("content-length");
+        cl->set_raw_value("1024");
+        stream->Write(resp_hdrs);
+        envoy::service::ext_proc::v3::ProcessingResponse r2{};
+        stream->Read(&r2);
+
+        // Since this is a FullDiagnostics route, it MUST emit report headers in ResponseHeaders
+        // phase!
+        if (!find_headers_header(r2, "x-bytetaper-extproc-response-body", "true"))
+            return 401;
+        if (!find_headers_header(r2, "x-bytetaper-route-policy", "test-full-diagnostics"))
+            return 402;
 
         stream->WritesDone();
         stream->Finish();
