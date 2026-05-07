@@ -5,7 +5,6 @@
 
 #include "metrics/coalescing_metrics.h"
 
-#include <atomic>
 #include <chrono>
 #include <cstring>
 
@@ -27,8 +26,6 @@ std::uint64_t hash_string(const char* s) {
     return hash;
 }
 
-static std::atomic<std::uint64_t> g_lifecycle_counter{ 1 };
-
 } // namespace
 
 void registry_init(InFlightRegistry* registry) {
@@ -39,8 +36,6 @@ void registry_init(InFlightRegistry* registry) {
         for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
             registry->shards[i].slots[j].active = false;
             registry->shards[i].slots[j].state = CoalescingState::LeaderRunning;
-            registry->shards[i].slots[j].lifecycle_generation = 0;
-            registry->shards[i].slots[j].leader_request_id = 0;
             registry->shards[i].slots[j].shared_response = {};
         }
     }
@@ -50,8 +45,7 @@ static constexpr std::uint32_t kResultRetentionWindowMs = 50;
 
 RegistryRegistrationResult registry_register(InFlightRegistry* registry, const char* key,
                                              std::uint64_t now_ms, std::uint32_t wait_window_ms,
-                                             std::uint32_t max_waiters_per_key,
-                                             std::uint64_t leader_request_id) {
+                                             std::uint32_t max_waiters_per_key) {
     RegistryRegistrationResult res{};
     if (registry == nullptr || key == nullptr) {
         res.role = InFlightRole::Reject;
@@ -61,6 +55,7 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
 
     std::uint64_t hash = hash_string(key);
     res.key_hash = hash;
+    res.group_id = static_cast<std::uint32_t>(hash);
 
     std::size_t shard_idx = hash % kInFlightShards;
     InFlightShard& shard = registry->shards[shard_idx];
@@ -100,15 +95,9 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                     slot.completed_at_epoch_ms = 0;
                     slot.waiter_count = 0;
                     slot.active = true;
-                    slot.lifecycle_generation =
-                        g_lifecycle_counter.fetch_add(1, std::memory_order_relaxed);
-                    slot.leader_request_id = leader_request_id;
 
                     res.role = InFlightRole::Leader;
                     res.state_after = CoalescingState::LeaderRunning;
-                    res.lifecycle_generation = slot.lifecycle_generation;
-                    res.leader_request_id = slot.leader_request_id;
-                    res.group_id = static_cast<std::uint32_t>(res.lifecycle_generation);
                     return res;
                 }
 
@@ -117,9 +106,6 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                     slot.waiter_count++;
                     res.role = InFlightRole::Follower;
                     res.state_after = orig_state;
-                    res.lifecycle_generation = slot.lifecycle_generation;
-                    res.leader_request_id = slot.leader_request_id;
-                    res.group_id = static_cast<std::uint32_t>(res.lifecycle_generation);
                     res.terminal_result_join_flag = true;
                     return res;
                 } else {
@@ -147,15 +133,9 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                     slot.completed_at_epoch_ms = 0;
                     slot.waiter_count = 0;
                     slot.active = true;
-                    slot.lifecycle_generation =
-                        g_lifecycle_counter.fetch_add(1, std::memory_order_relaxed);
-                    slot.leader_request_id = leader_request_id;
 
                     res.role = InFlightRole::Leader;
                     res.state_after = CoalescingState::LeaderRunning;
-                    res.lifecycle_generation = slot.lifecycle_generation;
-                    res.leader_request_id = slot.leader_request_id;
-                    res.group_id = static_cast<std::uint32_t>(res.lifecycle_generation);
                     return res;
                 }
 
@@ -164,9 +144,6 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                     slot.waiter_count++;
                     res.role = InFlightRole::Follower;
                     res.state_after = orig_state;
-                    res.lifecycle_generation = slot.lifecycle_generation;
-                    res.leader_request_id = slot.leader_request_id;
-                    res.group_id = static_cast<std::uint32_t>(res.lifecycle_generation);
                     return res;
                 } else {
                     res.role = InFlightRole::Reject;
@@ -216,15 +193,9 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
         best_reusable_slot->state = CoalescingState::LeaderRunning;
         best_reusable_slot->shared_response = {};
         best_reusable_slot->active = true;
-        best_reusable_slot->lifecycle_generation =
-            g_lifecycle_counter.fetch_add(1, std::memory_order_relaxed);
-        best_reusable_slot->leader_request_id = leader_request_id;
 
         res.role = InFlightRole::Leader;
         res.state_after = CoalescingState::LeaderRunning;
-        res.lifecycle_generation = best_reusable_slot->lifecycle_generation;
-        res.leader_request_id = best_reusable_slot->leader_request_id;
-        res.group_id = static_cast<std::uint32_t>(res.lifecycle_generation);
         return res;
     }
 
