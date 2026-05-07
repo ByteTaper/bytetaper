@@ -31,27 +31,62 @@ struct RegistryRegistrationResult {
  * @brief An entry in the in-flight request registry.
  * Following Orthodox C++ style: plain struct with fixed-size key buffer.
  */
+enum class InFlightCompletionState : std::uint8_t {
+    InFlight = 0,
+    Stored = 1,
+    NotCacheable = 2,
+    Failed = 3,
+};
+
+static bool is_terminal(InFlightCompletionState s) {
+    return s != InFlightCompletionState::InFlight;
+}
+
+static constexpr std::size_t kCoalescingSharedBodyMaxSize = 65536;
+static constexpr std::size_t kCoalescingContentTypeMaxLen = 64;
+
+struct InFlightSharedResponse {
+    std::uint16_t status_code = 0;
+    char content_type[kCoalescingContentTypeMaxLen] = {};
+    char body[kCoalescingSharedBodyMaxSize] = {};
+    std::size_t body_len = 0;
+    bool ready = false;
+};
+
+struct RegistrySharedResponseOutput {
+    std::uint16_t status_code = 0;
+    char content_type[kCoalescingContentTypeMaxLen] = {};
+    char body[kCoalescingSharedBodyMaxSize] = {};
+    std::size_t body_len = 0;
+};
+
+/**
+ * @brief An entry in the in-flight request registry.
+ * Following Orthodox C++ style: plain struct with fixed-size key buffer.
+ */
 struct InFlightEntry {
     char key[256] = { 0 };
     std::uint64_t created_at_epoch_ms = 0;
     std::uint64_t completed_at_epoch_ms = 0;
     std::uint32_t waiter_count = 0;
     bool active = false;
-    bool completed = false;
+    InFlightCompletionState state = InFlightCompletionState::InFlight;
+    InFlightSharedResponse shared_response{};
 };
 
 /**
  * @brief Constants for sharded architecture.
+ * Using 8 shards with 16 slots each as described in the memory note of the plan.
  */
-static constexpr std::size_t kInFlightShards = 256;
-static constexpr std::size_t kSlotsPerShard = 16; // 4096 total capacity
+static constexpr std::size_t kInFlightShards = 8;
+static constexpr std::size_t kSlotsPerShard = 16; // 128 total capacity
 
 /**
  * @brief A shard of the registry, protected by its own mutex to minimize contention.
  */
 struct InFlightShard {
     std::mutex mutex;
-    std::condition_variable cv; // notified by registry_complete()
+    std::condition_variable cv; // notified by registry completion functions
     InFlightEntry slots[kSlotsPerShard];
 };
 
@@ -87,26 +122,28 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
                                              std::uint32_t max_waiters_per_key);
 
 /**
- * @brief Marks a leader's request as completed in the registry.
- *
- * If cacheable is true, the entry is kept in a "completed" state for a grace window.
- * If false, the entry is cleared immediately.
- *
- * @param registry The registry instance.
- * @param key The coalescing key.
- * @param cacheable Whether the response was stored in cache.
- * @param now_ms Current epoch time.
+ * @brief Completes the in-flight entry with a response snapshot.
  */
-void registry_complete(InFlightRegistry* registry, const char* key, bool cacheable,
-                       std::uint64_t now_ms);
+bool registry_complete_with_response(InFlightRegistry* registry, const char* key,
+                                     std::uint16_t status_code, const char* content_type,
+                                     const char* body, std::size_t body_len, std::uint64_t now_ms);
+
+/**
+ * @brief Completes the in-flight entry with a simple terminal state.
+ */
+bool registry_complete_state(InFlightRegistry* registry, const char* key,
+                             InFlightCompletionState state, std::uint64_t now_ms);
 
 /**
  * @brief Result of a registry wait operation.
  */
 enum class RegistryWaitResult : std::uint8_t {
-    Completed, // Leader marked completion before deadline
-    Timeout,   // Wait window elapsed without leader completion
-    Missing,   // Key not found in registry
+    SharedResponseReady = 0,
+    StoredButNoSnapshot = 1,
+    NotCacheable = 2,
+    Failed = 3,
+    Timeout = 4,
+    Missing = 5,
 };
 
 /**
@@ -117,10 +154,12 @@ enum class RegistryWaitResult : std::uint8_t {
  * @param registry The registry instance.
  * @param key The coalescing key.
  * @param wait_window_ms Maximum time to wait in milliseconds.
+ * @param response_out Location to write response snapshot, if available.
  * @return RegistryWaitResult The result of the wait.
  */
 RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, const char* key,
-                                                std::uint32_t wait_window_ms);
+                                                std::uint32_t wait_window_ms,
+                                                RegistrySharedResponseOutput* response_out);
 
 /**
 

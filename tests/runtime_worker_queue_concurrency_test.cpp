@@ -24,14 +24,15 @@ namespace bytetaper::runtime {
 class WorkerQueueConcurrencyTest : public ::testing::Test {
 public:
     void SetUp() override {
-        cache::l1_init(&l1_cache);
+        l1_cache = std::make_unique<cache::L1Cache>();
+        cache::l1_init(l1_cache.get());
         metrics_reg = std::make_unique<metrics::MetricsRegistry>();
 
         WorkerQueueConfig config{};
         config.worker_count = 2;
         worker_queue_init(&worker_queue, config);
 
-        resources.l1_cache = &l1_cache;
+        resources.l1_cache = l1_cache.get();
         resources.runtime_metrics = &metrics_reg->runtime_metrics;
     }
 
@@ -40,7 +41,7 @@ public:
     }
 
     WorkerQueue worker_queue;
-    cache::L1Cache l1_cache;
+    std::unique_ptr<cache::L1Cache> l1_cache;
     std::unique_ptr<metrics::MetricsRegistry> metrics_reg;
     WorkerQueueResources resources;
 };
@@ -106,7 +107,7 @@ TEST_F(WorkerQueueConcurrencyTest, WorkerDoesNotReadExpiredRequestPointer) {
 
 TEST_F(WorkerQueueConcurrencyTest, L1StoreBeforeLeaderCompletion) {
     apg::ApgTransformContext ctx{};
-    ctx.l1_cache = &this->l1_cache;
+    ctx.l1_cache = this->l1_cache.get();
     ctx.cache_metrics = &this->metrics_reg->cache_metrics;
     ctx.coalescing_metrics = &this->metrics_reg->coalescing_metrics;
     ctx.runtime_metrics = &this->metrics_reg->runtime_metrics;
@@ -124,13 +125,13 @@ TEST_F(WorkerQueueConcurrencyTest, L1StoreBeforeLeaderCompletion) {
     ctx.response_body = "test_body";
     ctx.response_body_len = 9;
 
-    coalescing::InFlightRegistry registry{};
-    coalescing::registry_init(&registry);
-    ctx.coalescing_registry = &registry;
+    auto registry = std::make_unique<coalescing::InFlightRegistry>();
+    coalescing::registry_init(registry.get());
+    ctx.coalescing_registry = registry.get();
 
     // Mark as leader
     const char* shared_key = "test_key";
-    coalescing::registry_register(&registry, shared_key, 100, 1000, 10);
+    coalescing::registry_register(registry.get(), shared_key, 100, 1000, 10);
     ctx.coalescing_decision.action = coalescing::CoalescingAction::Leader;
     ::strncpy(ctx.coalescing_decision.key, shared_key, sizeof(ctx.coalescing_decision.key) - 1);
 
@@ -150,13 +151,13 @@ TEST_F(WorkerQueueConcurrencyTest, L1StoreBeforeLeaderCompletion) {
 
     cache::CacheEntry hit{};
     char body_buf[cache::kL1MaxBodySize];
-    EXPECT_TRUE(cache::l1_get(&this->l1_cache, key_buf, 0, &hit, body_buf, sizeof(body_buf)));
+    EXPECT_TRUE(cache::l1_get(this->l1_cache.get(), key_buf, 0, &hit, body_buf, sizeof(body_buf)));
     EXPECT_STREQ((const char*) hit.body, "test_body");
 }
 
 TEST_F(WorkerQueueConcurrencyTest, FollowerCanReadL1AfterLeaderCompletion) {
     apg::ApgTransformContext leader_ctx{};
-    leader_ctx.l1_cache = &this->l1_cache;
+    leader_ctx.l1_cache = this->l1_cache.get();
     leader_ctx.cache_metrics = &this->metrics_reg->cache_metrics;
     leader_ctx.coalescing_metrics = &this->metrics_reg->coalescing_metrics;
     leader_ctx.runtime_metrics = &this->metrics_reg->runtime_metrics;
@@ -164,9 +165,9 @@ TEST_F(WorkerQueueConcurrencyTest, FollowerCanReadL1AfterLeaderCompletion) {
     leader_ctx.response_status_code = 200;
     leader_ctx.request_epoch_ms = 1000;
 
-    coalescing::InFlightRegistry registry{};
-    coalescing::registry_init(&registry);
-    leader_ctx.coalescing_registry = &registry;
+    auto registry = std::make_unique<coalescing::InFlightRegistry>();
+    coalescing::registry_init(registry.get());
+    leader_ctx.coalescing_registry = registry.get();
 
     policy::RoutePolicy policy{};
     policy.route_id = "test_route";
@@ -179,7 +180,7 @@ TEST_F(WorkerQueueConcurrencyTest, FollowerCanReadL1AfterLeaderCompletion) {
 
     // Leader starts
     const char* shared_key = "shared_key";
-    coalescing::registry_register(&registry, shared_key, 100, 1000, 10);
+    coalescing::registry_register(registry.get(), shared_key, 100, 1000, 10);
     leader_ctx.coalescing_decision.action = coalescing::CoalescingAction::Leader;
     ::strncpy(leader_ctx.coalescing_decision.key, shared_key,
               sizeof(leader_ctx.coalescing_decision.key) - 1);
@@ -193,10 +194,10 @@ TEST_F(WorkerQueueConcurrencyTest, FollowerCanReadL1AfterLeaderCompletion) {
 
     // Follower starts
     apg::ApgTransformContext follower_ctx{};
-    follower_ctx.l1_cache = &this->l1_cache;
+    follower_ctx.l1_cache = this->l1_cache.get();
     follower_ctx.cache_metrics = &this->metrics_reg->cache_metrics;
     follower_ctx.coalescing_metrics = &this->metrics_reg->coalescing_metrics;
-    follower_ctx.coalescing_registry = &registry;
+    follower_ctx.coalescing_registry = registry.get();
     follower_ctx.matched_policy = &policy;
     ::strncpy(follower_ctx.raw_path, "/shared", sizeof(follower_ctx.raw_path) - 1);
 

@@ -20,25 +20,32 @@ apg::StageOutput coalescing_leader_completion_stage(apg::ApgTransformContext& co
         return { apg::StageResult::Continue, "no-registry" };
     }
 
-    // Determine if the response was cacheable.
-    // If it was, we keep the entry in the registry for a grace period so new requests join as
-    // followers.
-    bool cacheable = false;
-    if (context.matched_policy != nullptr &&
-        context.matched_policy->cache.behavior == policy::CacheBehavior::Store) {
-        // Status code 2xx is generally cacheable in our system
-        if (context.response_status_code >= 200 && context.response_status_code < 300) {
-            cacheable = true;
-        }
-    }
+    const bool cacheable = context.matched_policy != nullptr &&
+                           context.matched_policy->cache.behavior == policy::CacheBehavior::Store &&
+                           context.response_status_code >= 200 &&
+                           context.response_status_code < 300 && context.response_body != nullptr &&
+                           context.response_body_len > 0 &&
+                           context.response_body_len <= coalescing::kCoalescingSharedBodyMaxSize;
 
     // Capture completion time
     auto now = std::chrono::system_clock::now();
     std::uint64_t now_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
-    coalescing::registry_complete(context.coalescing_registry, context.coalescing_decision.key,
-                                  cacheable, now_ms);
+    if (cacheable) {
+        coalescing::registry_complete_with_response(
+            context.coalescing_registry, context.coalescing_decision.key,
+            context.response_status_code, context.response_content_type, context.response_body,
+            context.response_body_len, now_ms);
+    } else if (context.response_status_code >= 200 && context.response_status_code < 300) {
+        coalescing::registry_complete_state(
+            context.coalescing_registry, context.coalescing_decision.key,
+            coalescing::InFlightCompletionState::NotCacheable, now_ms);
+    } else {
+        coalescing::registry_complete_state(context.coalescing_registry,
+                                            context.coalescing_decision.key,
+                                            coalescing::InFlightCompletionState::Failed, now_ms);
+    }
 
     return { apg::StageResult::Continue, cacheable ? "completed-cacheable" : "completed-cleared" };
 }

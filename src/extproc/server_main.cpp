@@ -149,8 +149,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    bytetaper::coalescing::InFlightRegistry coalescing_registry{};
-    bytetaper::coalescing::registry_init(&coalescing_registry);
+    auto coalescing_registry = std::make_unique<bytetaper::coalescing::InFlightRegistry>();
+    bytetaper::coalescing::registry_init(coalescing_registry.get());
 
     bytetaper::metrics::MetricsRegistry metrics_registry{};
     bytetaper::metrics::MetricsHttpServerConfig metrics_config{};
@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
     config.l1_cache = l1_cache.get();
     config.l2_cache = l2_cache;
     config.metrics_registry = &metrics_registry;
-    config.coalescing_registry = &coalescing_registry;
+    config.coalescing_registry = coalescing_registry.get();
     if (policy_result.ok) {
         config.policies = policy_result.policies;
         config.policy_count = policy_result.count;

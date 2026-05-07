@@ -96,7 +96,9 @@ TEST_F(CoalescingFallbackTightenedTest, FinalL1HitSavesFollowerBeforeFallback) {
         cache::build_cache_key(ki, key, sizeof(key));
 
         populate_l1(key);
-        coalescing::registry_complete(registry.get(), "burst-key", true, ctx.request_epoch_ms + 50);
+        coalescing::registry_complete_state(registry.get(), "burst-key",
+                                            coalescing::InFlightCompletionState::Stored,
+                                            ctx.request_epoch_ms + 50);
     });
 
     auto start = std::chrono::steady_clock::now();
@@ -155,7 +157,9 @@ TEST_F(CoalescingFallbackTightenedTest, WaiterCountDecrementedOnPostWaitL1Hit) {
         cache::build_cache_key(ki, key, sizeof(key));
 
         populate_l1(key);
-        coalescing::registry_complete(registry.get(), "burst-key", true, ctx.request_epoch_ms + 20);
+        coalescing::registry_complete_state(registry.get(), "burst-key",
+                                            coalescing::InFlightCompletionState::Stored,
+                                            ctx.request_epoch_ms + 20);
     });
 
     cache_key_prepare_stage(ctx);

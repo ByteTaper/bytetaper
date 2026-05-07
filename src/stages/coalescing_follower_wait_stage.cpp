@@ -4,11 +4,13 @@
 #include "stages/coalescing_follower_wait_stage.h"
 
 #include "coalescing/coalescing_timeout.h"
+#include "coalescing/follower_wait_pool.h"
 #include "coalescing/inflight_registry.h"
 #include "metrics/coalescing_metrics.h"
 #include "stages/l1_cache_lookup_stage.h"
 
 #include <chrono>
+#include <cstring>
 
 namespace bytetaper::stages {
 
@@ -57,12 +59,48 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
     }
 
     // Step 2: Block until leader completes or timeout.
-    // This uses a non-polling, notification-aware wait strategy via std::condition_variable
-    // inside registry_wait_for_completion, avoiding any sleep-based polling loops.
-    const coalescing::RegistryWaitResult wait_result = coalescing::registry_wait_for_completion(
-        context.coalescing_registry, context.coalescing_decision.key, wait_window_ms);
+    // Try to delegate wait to dedicated pool when available, otherwise direct wait.
+    coalescing::RegistryWaitResult wait_result = coalescing::RegistryWaitResult::Missing;
+    coalescing::RegistrySharedResponseOutput shared{};
+    bool submitted = false;
 
-    // Step 3: L1 check after wake (whether Completed, Timeout, or Missing)
+    if (context.follower_wait_pool != nullptr) {
+        submitted = coalescing::follower_wait_pool_submit_and_wait(
+            context.follower_wait_pool, context.coalescing_decision.key, wait_window_ms, &shared,
+            &wait_result);
+        if (!submitted) {
+            coalescing::handle_timeout_fallback(context.coalescing_registry,
+                                                context.coalescing_decision);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::Fallback);
+            return { apg::StageResult::Continue, "pool-queue-full-fallback" };
+        }
+    } else {
+        wait_result = coalescing::registry_wait_for_completion(
+            context.coalescing_registry, context.coalescing_decision.key, wait_window_ms, &shared);
+    }
+
+    // Step 3: Handle fast-path delivery if snapshot is ready
+    if (wait_result == coalescing::RegistryWaitResult::SharedResponseReady) {
+        context.cache_hit = true;
+        context.cache_layer = "COALESCED";
+        context.should_return_immediate_response = true;
+        context.cached_response.status_code = shared.status_code;
+        std::strncpy(context.cached_response.content_type, shared.content_type,
+                     cache::kCacheContentTypeMaxLen - 1);
+        context.cached_response.content_type[cache::kCacheContentTypeMaxLen - 1] = '\0';
+        std::memcpy(context.l2_body_buf, shared.body, shared.body_len);
+        context.cached_response.body = context.l2_body_buf;
+        context.cached_response.body_len = shared.body_len;
+
+        coalescing::registry_remove_waiter(context.coalescing_registry,
+                                           context.coalescing_decision.key);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerCacheHit);
+        return { apg::StageResult::SkipRemaining, "coalesced-shared-response" };
+    }
+
+    // Step 4: L1 check after wake (whether Completed/Stored but no snapshot, Timeout, or Missing)
     l1_res = l1_cache_lookup_stage(context);
     if (l1_res.result == apg::StageResult::SkipRemaining) {
         if (context.coalescing_registry != nullptr) {
@@ -76,7 +114,9 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
 
     // L1 miss after wait — fallback upstream
     if (wait_result == coalescing::RegistryWaitResult::Timeout ||
-        wait_result == coalescing::RegistryWaitResult::Missing) {
+        wait_result == coalescing::RegistryWaitResult::Missing ||
+        wait_result == coalescing::RegistryWaitResult::NotCacheable ||
+        wait_result == coalescing::RegistryWaitResult::Failed) {
         coalescing::handle_timeout_fallback(context.coalescing_registry,
                                             context.coalescing_decision);
         record_coalescing_event(context.coalescing_metrics,
@@ -84,7 +124,8 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
         return { apg::StageResult::Continue, "timeout-fallback" };
     }
 
-    // Leader completed (Completed) but L1 still miss — leader may not have cached or was evicted.
+    // Leader completed but L1 still miss — leader may not have cached, was evicted, or
+    // non-cacheable/failed
     coalescing::handle_timeout_fallback(context.coalescing_registry, context.coalescing_decision);
     record_coalescing_event(context.coalescing_metrics, metrics::CoalescingMetricEvent::Fallback);
     return { apg::StageResult::Continue, "leader-complete-l1-miss" };

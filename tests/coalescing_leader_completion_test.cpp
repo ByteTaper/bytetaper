@@ -39,6 +39,10 @@ TEST_F(CoalescingLeaderCompletionTest, CacheableLeaderCompletes) {
     // Manually register leader
     coalescing::registry_register(&registry, ctx.coalescing_decision.key, 1000, 100, 5);
 
+    ctx.response_body = "{\"status\":\"ok\"}";
+    ctx.response_body_len = 15;
+    std::strcpy(ctx.response_content_type, "application/json");
+
     auto output = coalescing_leader_completion_stage(ctx);
     EXPECT_EQ(output.result, apg::StageResult::Continue);
     EXPECT_STREQ(output.note, "completed-cacheable");

@@ -82,7 +82,7 @@ TEST_F(CacheHotPathTailRegressionTest, HotPathL1HitLatencyBoundedUnderLoad) {
 
     // 3. Assert no coalescing entries created
     // If coalescing ran before L1, it would create entries in registry.
-    for (int i = 0; i < 256; i++) {
+    for (std::size_t i = 0; i < coalescing::kInFlightShards; i++) {
         auto& shard = registry->shards[i];
         std::lock_guard<std::mutex> lock(shard.mutex);
         for (auto& slot : shard.slots) {
