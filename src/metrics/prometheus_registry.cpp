@@ -106,7 +106,7 @@ std::string render_prometheus_text(const MetricsRegistry& registry) {
         }
     }
 
-    char component_buf[4096];
+    char component_buf[16384];
     if (render_pagination_metrics_prometheus(registry.pagination_metrics, component_buf,
                                              sizeof(component_buf)) > 0) {
         out += component_buf;

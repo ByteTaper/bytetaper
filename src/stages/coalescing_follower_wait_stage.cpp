@@ -106,6 +106,31 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
         record_coalescing_event(context.coalescing_metrics,
                                 metrics::CoalescingMetricEvent::FollowerCacheHit);
         return { apg::StageResult::SkipRemaining, "coalesced-shared-response" };
+    } else if (wait_result == coalescing::RegistryWaitResult::L1Ready) {
+        apg::StageOutput l1 = l1_cache_lookup_stage(context);
+        if (l1.result == apg::StageResult::SkipRemaining) {
+            if (context.coalescing_registry != nullptr) {
+                coalescing::registry_remove_waiter(context.coalescing_registry,
+                                                   context.coalescing_decision.key);
+            }
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerL1Ready);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerL1Hit);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerCacheHit);
+            return l1;
+        }
+        // L1Ready wakeup but L1 lookup missed — unexpected, record and fallback.
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerL1Ready);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerL1ReadyButMiss);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::Fallback);
+        coalescing::handle_timeout_fallback(context.coalescing_registry,
+                                            context.coalescing_decision);
+        return { apg::StageResult::Continue, "l1-ready-but-miss-fallback" };
     }
 
     // Step 4: L1 check after wake (whether Completed/Stored but no snapshot, Timeout, or Missing)
@@ -164,6 +189,20 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
             return { apg::StageResult::Continue, "timeout-fallback" };
         }
     } else if (wait_result == coalescing::RegistryWaitResult::Missing) {
+        // Entry expired/recycled. Try L1 — leader may have stored before entry was gone.
+        apg::StageOutput l1 = l1_cache_lookup_stage(context);
+        if (l1.result == apg::StageResult::SkipRemaining) {
+            if (context.coalescing_registry != nullptr) {
+                coalescing::registry_remove_waiter(context.coalescing_registry,
+                                                   context.coalescing_decision.key);
+            }
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerL1Hit);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerCacheHit);
+            return l1;
+        }
+        // Truly missing — no L1 entry either.
         record_coalescing_event(context.coalescing_metrics,
                                 metrics::CoalescingMetricEvent::FollowerMissing);
         record_coalescing_event(context.coalescing_metrics,

@@ -22,6 +22,10 @@ TEST_F(CoalescingMetricsTest, RecordEvents) {
     record_coalescing_event(&metrics, CoalescingMetricEvent::Bypass);
     record_coalescing_event(&metrics, CoalescingMetricEvent::TooManyWaiters);
     record_coalescing_event(&metrics, CoalescingMetricEvent::Leader); // twice
+    record_coalescing_event(&metrics, CoalescingMetricEvent::LeaderL1StoreSuccess);
+    record_coalescing_event(&metrics, CoalescingMetricEvent::LeaderL1StoreFailed);
+    record_coalescing_event(&metrics, CoalescingMetricEvent::FollowerL1Ready);
+    record_coalescing_event(&metrics, CoalescingMetricEvent::FollowerL1ReadyButMiss);
 
     EXPECT_EQ(metrics.leader_total.load(), 2u);
     EXPECT_EQ(metrics.follower_total.load(), 1u);
@@ -29,13 +33,18 @@ TEST_F(CoalescingMetricsTest, RecordEvents) {
     EXPECT_EQ(metrics.fallback_total.load(), 1u);
     EXPECT_EQ(metrics.bypass_total.load(), 1u);
     EXPECT_EQ(metrics.too_many_waiters_total.load(), 1u);
+    EXPECT_EQ(metrics.leader_l1_store_success_total.load(), 1u);
+    EXPECT_EQ(metrics.leader_l1_store_failed_total.load(), 1u);
+    EXPECT_EQ(metrics.follower_l1_ready_total.load(), 1u);
+    EXPECT_EQ(metrics.follower_l1_ready_but_miss_total.load(), 1u);
 }
 
 TEST_F(CoalescingMetricsTest, RenderPrometheus) {
     record_coalescing_event(&metrics, CoalescingMetricEvent::Leader);
     record_coalescing_event(&metrics, CoalescingMetricEvent::Follower);
+    record_coalescing_event(&metrics, CoalescingMetricEvent::LeaderL1StoreSuccess);
 
-    char buf[4096];
+    char buf[8192];
     std::size_t written = render_coalescing_metrics_prometheus(metrics, buf, sizeof(buf));
     ASSERT_GT(written, 0u);
 
@@ -43,6 +52,7 @@ TEST_F(CoalescingMetricsTest, RenderPrometheus) {
     EXPECT_NE(out.find("bytetaper_coalescing_leader_total 1"), std::string::npos);
     EXPECT_NE(out.find("bytetaper_coalescing_follower_total 1"), std::string::npos);
     EXPECT_NE(out.find("bytetaper_coalescing_follower_cache_hit_total 0"), std::string::npos);
+    EXPECT_NE(out.find("bytetaper_coalescing_leader_l1_store_success_total 1"), std::string::npos);
 }
 
 TEST_F(CoalescingMetricsTest, BufferOverflow) {

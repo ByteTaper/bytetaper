@@ -58,8 +58,9 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
 
         // Check for existing active entry
         if (slot.active && std::strcmp(slot.key, key) == 0) {
-            // Check if completed and stored
-            if (slot.state == InFlightCompletionState::Stored) {
+            // Check if completed and stored/L1Ready
+            if (slot.state == InFlightCompletionState::Stored ||
+                slot.state == InFlightCompletionState::L1Ready) {
                 if (now_ms >= slot.completed_at_epoch_ms + wait_window_ms) {
                     // treat as new leader
                     slot.state = InFlightCompletionState::InFlight;
@@ -271,6 +272,8 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
                 return RegistryWaitResult::SharedResponseReady;
             }
             return RegistryWaitResult::StoredButNoSnapshot;
+        } else if (entry->state == InFlightCompletionState::L1Ready) {
+            return RegistryWaitResult::L1Ready;
         } else if (entry->state == InFlightCompletionState::NotCacheable) {
             return RegistryWaitResult::NotCacheable;
         } else if (entry->state == InFlightCompletionState::Failed) {
@@ -311,6 +314,8 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
             return RegistryWaitResult::SharedResponseReady;
         }
         return RegistryWaitResult::StoredButNoSnapshot;
+    } else if (entry->state == InFlightCompletionState::L1Ready) {
+        return RegistryWaitResult::L1Ready;
     } else if (entry->state == InFlightCompletionState::NotCacheable) {
         return RegistryWaitResult::NotCacheable;
     } else if (entry->state == InFlightCompletionState::Failed) {

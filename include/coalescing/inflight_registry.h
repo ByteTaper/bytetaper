@@ -37,6 +37,7 @@ enum class InFlightCompletionState : std::uint8_t {
     Stored = 1,
     NotCacheable = 2,
     Failed = 3,
+    L1Ready = 4, // leader committed response to L1; followers should lookup L1
 };
 
 static bool is_terminal(InFlightCompletionState s) {
@@ -146,6 +147,7 @@ enum class RegistryWaitResult : std::uint8_t {
     Failed = 3,
     Timeout = 4,
     Missing = 5,
+    L1Ready = 6, // leader marked L1Ready; follower should do L1 lookup
 };
 
 /**

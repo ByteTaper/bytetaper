@@ -12,6 +12,10 @@ routes:
       max_waiters_per_key: 128
       require_cache_enabled: true
       allow_authenticated: false
+      backend_timeout_ms: 15
+      handoff_buffer_ms: 10
+      result_ready_retention_ms: 10
     cache:
+      enabled: true
       behavior: store
       ttl_seconds: 300

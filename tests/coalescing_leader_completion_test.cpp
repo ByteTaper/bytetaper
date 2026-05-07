@@ -39,13 +39,14 @@ TEST_F(CoalescingLeaderCompletionTest, CacheableLeaderCompletes) {
     // Manually register leader
     coalescing::registry_register(&registry, ctx.coalescing_decision.key, 1000, 100, 5);
 
+    ctx.cache_key_ready = true;
     ctx.response_body = "{\"status\":\"ok\"}";
     ctx.response_body_len = 15;
     std::strcpy(ctx.response_content_type, "application/json");
 
     auto output = coalescing_leader_completion_stage(ctx);
     EXPECT_EQ(output.result, apg::StageResult::Continue);
-    EXPECT_STREQ(output.note, "completed-shared");
+    EXPECT_STREQ(output.note, "completed-l1-ready");
 
     // Verify it's completed in registry (subsequent request within window is Follower)
     auto now = std::chrono::system_clock::now();

@@ -199,7 +199,8 @@ validate_report_file() {
                 # Parse using jq and assert fields exist
                 for field in "client_requests_sent" "upstream_mock_calls" "leaders" "followers" "follower_cache_hits" "fallbacks" "bypasses" "coalescing_ratio" "upstream_amplification_ratio" \
                              "follower_shared_response" "follower_l1_hit" "follower_timeout" "follower_missing" "follower_stored_but_no_snapshot" \
-                             "follower_not_cacheable" "follower_failed" "follower_pool_queue_full" "follower_unaccounted"; do
+                             "follower_not_cacheable" "follower_failed" "follower_pool_queue_full" "follower_unaccounted" \
+                             "leader_l1_store_success" "leader_l1_store_failed" "follower_l1_ready" "follower_l1_ready_but_miss"; do
                     local val
                     val=$(echo "$json_str" | jq -e ".$field" 2>/dev/null || true)
                     if [ -z "$val" ] || [ "$val" = "null" ]; then

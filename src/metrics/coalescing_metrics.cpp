@@ -67,6 +67,18 @@ void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent e
     case CoalescingMetricEvent::FollowerUnaccounted:
         metrics->follower_unaccounted_total.fetch_add(1, std::memory_order_relaxed);
         break;
+    case CoalescingMetricEvent::LeaderL1StoreSuccess:
+        metrics->leader_l1_store_success_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::LeaderL1StoreFailed:
+        metrics->leader_l1_store_failed_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerL1Ready:
+        metrics->follower_l1_ready_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerL1ReadyButMiss:
+        metrics->follower_l1_ready_but_miss_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     }
 }
 
@@ -149,7 +161,23 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "# HELP bytetaper_coalescing_follower_unaccounted_total Total number of followers that "
         "went unaccounted.\n"
         "# TYPE bytetaper_coalescing_follower_unaccounted_total counter\n"
-        "bytetaper_coalescing_follower_unaccounted_total %llu\n",
+        "bytetaper_coalescing_follower_unaccounted_total %llu\n"
+        "# HELP bytetaper_coalescing_leader_l1_store_success_total Total number of leader L1 store "
+        "successes.\n"
+        "# TYPE bytetaper_coalescing_leader_l1_store_success_total counter\n"
+        "bytetaper_coalescing_leader_l1_store_success_total %llu\n"
+        "# HELP bytetaper_coalescing_leader_l1_store_failed_total Total number of leader L1 store "
+        "failures.\n"
+        "# TYPE bytetaper_coalescing_leader_l1_store_failed_total counter\n"
+        "bytetaper_coalescing_leader_l1_store_failed_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_l1_ready_total Total number of follower L1Ready "
+        "wakeups.\n"
+        "# TYPE bytetaper_coalescing_follower_l1_ready_total counter\n"
+        "bytetaper_coalescing_follower_l1_ready_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_l1_ready_but_miss_total Total number of follower "
+        "L1Ready wakeups that missed L1 lookup.\n"
+        "# TYPE bytetaper_coalescing_follower_l1_ready_but_miss_total counter\n"
+        "bytetaper_coalescing_follower_l1_ready_but_miss_total %llu\n",
         (unsigned long long) metrics.leader_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_cache_hit_total.load(std::memory_order_relaxed),
@@ -171,7 +199,12 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         (unsigned long long) metrics.follower_not_cacheable_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_failed_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_pool_queue_full_total.load(std::memory_order_relaxed),
-        (unsigned long long) metrics.follower_unaccounted_total.load(std::memory_order_relaxed));
+        (unsigned long long) metrics.follower_unaccounted_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.leader_l1_store_success_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.leader_l1_store_failed_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_l1_ready_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_l1_ready_but_miss_total.load(
+            std::memory_order_relaxed));
 
     if (written < 0 || static_cast<std::size_t>(written) >= buf_size) {
         return 0;

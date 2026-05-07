@@ -35,7 +35,7 @@ cat "$REPORT_FILE"
 
 # Check targets are UP
 echo "Checking target availability..."
-if ! curl -s --fail "${ENVOY_HOST}/products/fast/123" > /dev/null; then
+if ! curl -s --fail "${ENVOY_HOST}/products/fast/healthcheck-target-availability" > /dev/null; then
     echo "ERROR: Target Envoy at ${ENVOY_HOST} is unavailable."
     echo "Status: UNAVAILABLE" >> "$REPORT_FILE"
     exit 1
@@ -84,6 +84,10 @@ base_follower_not_cacheable=$(get_metric "bytetaper_coalescing_follower_not_cach
 base_follower_failed=$(get_metric "bytetaper_coalescing_follower_failed_total")
 base_follower_pool_queue_full=$(get_metric "bytetaper_coalescing_follower_pool_queue_full_total")
 base_follower_unaccounted=$(get_metric "bytetaper_coalescing_follower_unaccounted_total")
+base_leader_l1_store_success=$(get_metric "bytetaper_coalescing_leader_l1_store_success_total")
+base_leader_l1_store_failed=$(get_metric "bytetaper_coalescing_leader_l1_store_failed_total")
+base_follower_l1_ready=$(get_metric "bytetaper_coalescing_follower_l1_ready_total")
+base_follower_l1_ready_but_miss=$(get_metric "bytetaper_coalescing_follower_l1_ready_but_miss_total")
 
 # Reset mock api counter
 curl -s "${MOCK_HOST}/reset-count" > /dev/null
@@ -115,6 +119,10 @@ new_follower_not_cacheable=$(get_metric "bytetaper_coalescing_follower_not_cache
 new_follower_failed=$(get_metric "bytetaper_coalescing_follower_failed_total")
 new_follower_pool_queue_full=$(get_metric "bytetaper_coalescing_follower_pool_queue_full_total")
 new_follower_unaccounted=$(get_metric "bytetaper_coalescing_follower_unaccounted_total")
+new_leader_l1_store_success=$(get_metric "bytetaper_coalescing_leader_l1_store_success_total")
+new_leader_l1_store_failed=$(get_metric "bytetaper_coalescing_leader_l1_store_failed_total")
+new_follower_l1_ready=$(get_metric "bytetaper_coalescing_follower_l1_ready_total")
+new_follower_l1_ready_but_miss=$(get_metric "bytetaper_coalescing_follower_l1_ready_but_miss_total")
 mock_calls=$(curl -s "${MOCK_HOST}/call-count")
 
 # Compute delta
@@ -132,6 +140,10 @@ delta_follower_not_cacheable=$((new_follower_not_cacheable - base_follower_not_c
 delta_follower_failed=$((new_follower_failed - base_follower_failed))
 delta_follower_pool_queue_full=$((new_follower_pool_queue_full - base_follower_pool_queue_full))
 delta_follower_unaccounted=$((new_follower_unaccounted - base_follower_unaccounted))
+delta_leader_l1_store_success=$((new_leader_l1_store_success - base_leader_l1_store_success))
+delta_leader_l1_store_failed=$((new_leader_l1_store_failed - base_leader_l1_store_failed))
+delta_follower_l1_ready=$((new_follower_l1_ready - base_follower_l1_ready))
+delta_follower_l1_ready_but_miss=$((new_follower_l1_ready_but_miss - base_follower_l1_ready_but_miss))
 
 echo "Running wrk latency check on fast path..."
 WRK_COAL_A=$(mktemp)
@@ -171,6 +183,10 @@ JSON_COAL_A_DATA=$(jq -c -n \
     --argjson follower_failed          "$delta_follower_failed" \
     --argjson follower_pool_queue_full "$delta_follower_pool_queue_full" \
     --argjson follower_unaccounted     "$delta_follower_unaccounted" \
+    --argjson leader_l1_store_success  "$delta_leader_l1_store_success" \
+    --argjson leader_l1_store_failed   "$delta_leader_l1_store_failed" \
+    --argjson follower_l1_ready        "$delta_follower_l1_ready" \
+    --argjson follower_l1_ready_but_miss "$delta_follower_l1_ready_but_miss" \
     '{
         client_requests_sent: $client_requests_sent,
         upstream_mock_calls:   $upstream_mock_calls,
@@ -189,7 +205,11 @@ JSON_COAL_A_DATA=$(jq -c -n \
         follower_not_cacheable:   $follower_not_cacheable,
         follower_failed:          $follower_failed,
         follower_pool_queue_full: $follower_pool_queue_full,
-        follower_unaccounted:     $follower_unaccounted
+        follower_unaccounted:     $follower_unaccounted,
+        leader_l1_store_success:  $leader_l1_store_success,
+        leader_l1_store_failed:   $leader_l1_store_failed,
+        follower_l1_ready:        $follower_l1_ready,
+        follower_l1_ready_but_miss: $follower_l1_ready_but_miss
     }')
 
 {
@@ -209,6 +229,10 @@ JSON_COAL_A_DATA=$(jq -c -n \
     echo "Delta Follower Failed: $delta_follower_failed"
     echo "Delta Follower Pool Queue Full: $delta_follower_pool_queue_full"
     echo "Delta Follower Unaccounted: $delta_follower_unaccounted"
+    echo "Delta Leader L1 Store Success: $delta_leader_l1_store_success"
+    echo "Delta Leader L1 Store Failed: $delta_leader_l1_store_failed"
+    echo "Delta Follower L1 Ready: $delta_follower_l1_ready"
+    echo "Delta Follower L1 Ready But Miss: $delta_follower_l1_ready_but_miss"
     echo "Leg A Latency JSON: $JSON_COAL_A"
     echo "Leg A Coalescing JSON: $JSON_COAL_A_DATA"
     echo ""
@@ -250,6 +274,10 @@ base_follower_not_cacheable=$(get_metric "bytetaper_coalescing_follower_not_cach
 base_follower_failed=$(get_metric "bytetaper_coalescing_follower_failed_total")
 base_follower_pool_queue_full=$(get_metric "bytetaper_coalescing_follower_pool_queue_full_total")
 base_follower_unaccounted=$(get_metric "bytetaper_coalescing_follower_unaccounted_total")
+base_leader_l1_store_success=$(get_metric "bytetaper_coalescing_leader_l1_store_success_total")
+base_leader_l1_store_failed=$(get_metric "bytetaper_coalescing_leader_l1_store_failed_total")
+base_follower_l1_ready=$(get_metric "bytetaper_coalescing_follower_l1_ready_total")
+base_follower_l1_ready_but_miss=$(get_metric "bytetaper_coalescing_follower_l1_ready_but_miss_total")
 
 # Reset mock api counter
 curl -s "${MOCK_HOST}/reset-count" > /dev/null
@@ -280,6 +308,10 @@ new_follower_not_cacheable=$(get_metric "bytetaper_coalescing_follower_not_cache
 new_follower_failed=$(get_metric "bytetaper_coalescing_follower_failed_total")
 new_follower_pool_queue_full=$(get_metric "bytetaper_coalescing_follower_pool_queue_full_total")
 new_follower_unaccounted=$(get_metric "bytetaper_coalescing_follower_unaccounted_total")
+new_leader_l1_store_success=$(get_metric "bytetaper_coalescing_leader_l1_store_success_total")
+new_leader_l1_store_failed=$(get_metric "bytetaper_coalescing_leader_l1_store_failed_total")
+new_follower_l1_ready=$(get_metric "bytetaper_coalescing_follower_l1_ready_total")
+new_follower_l1_ready_but_miss=$(get_metric "bytetaper_coalescing_follower_l1_ready_but_miss_total")
 mock_calls=$(curl -s "${MOCK_HOST}/call-count")
 
 # Compute delta
@@ -297,6 +329,10 @@ delta_follower_not_cacheable=$((new_follower_not_cacheable - base_follower_not_c
 delta_follower_failed=$((new_follower_failed - base_follower_failed))
 delta_follower_pool_queue_full=$((new_follower_pool_queue_full - base_follower_pool_queue_full))
 delta_follower_unaccounted=$((new_follower_unaccounted - base_follower_unaccounted))
+delta_leader_l1_store_success=$((new_leader_l1_store_success - base_leader_l1_store_success))
+delta_leader_l1_store_failed=$((new_leader_l1_store_failed - base_leader_l1_store_failed))
+delta_follower_l1_ready=$((new_follower_l1_ready - base_follower_l1_ready))
+delta_follower_l1_ready_but_miss=$((new_follower_l1_ready_but_miss - base_follower_l1_ready_but_miss))
 
 echo "Running wrk latency check on slow path..."
 WRK_COAL_B=$(mktemp)
@@ -346,6 +382,10 @@ JSON_COAL_B_DATA=$(jq -c -n \
     --argjson follower_failed          "$delta_follower_failed" \
     --argjson follower_pool_queue_full "$delta_follower_pool_queue_full" \
     --argjson follower_unaccounted     "$delta_follower_unaccounted" \
+    --argjson leader_l1_store_success  "$delta_leader_l1_store_success" \
+    --argjson leader_l1_store_failed   "$delta_leader_l1_store_failed" \
+    --argjson follower_l1_ready        "$delta_follower_l1_ready" \
+    --argjson follower_l1_ready_but_miss "$delta_follower_l1_ready_but_miss" \
     '{
         client_requests_sent: $client_requests_sent,
         upstream_mock_calls:   $upstream_mock_calls,
@@ -364,7 +404,11 @@ JSON_COAL_B_DATA=$(jq -c -n \
         follower_not_cacheable:   $follower_not_cacheable,
         follower_failed:          $follower_failed,
         follower_pool_queue_full: $follower_pool_queue_full,
-        follower_unaccounted:     $follower_unaccounted
+        follower_unaccounted:     $follower_unaccounted,
+        leader_l1_store_success:  $leader_l1_store_success,
+        leader_l1_store_failed:   $leader_l1_store_failed,
+        follower_l1_ready:        $follower_l1_ready,
+        follower_l1_ready_but_miss: $follower_l1_ready_but_miss
     }')
 
 {
@@ -384,6 +428,10 @@ JSON_COAL_B_DATA=$(jq -c -n \
     echo "Delta Follower Failed: $delta_follower_failed"
     echo "Delta Follower Pool Queue Full: $delta_follower_pool_queue_full"
     echo "Delta Follower Unaccounted: $delta_follower_unaccounted"
+    echo "Delta Leader L1 Store Success: $delta_leader_l1_store_success"
+    echo "Delta Leader L1 Store Failed: $delta_leader_l1_store_failed"
+    echo "Delta Follower L1 Ready: $delta_follower_l1_ready"
+    echo "Delta Follower L1 Ready But Miss: $delta_follower_l1_ready_but_miss"
     echo "Leg B Latency JSON: $JSON_COAL_B"
     echo "Leg B Throughput JSON: $JSON_COAL_TP_B"
     echo "Leg B Container Stats JSON: $JSON_COAL_STATS_B"
