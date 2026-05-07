@@ -187,6 +187,26 @@ void apply_response_content_type(const envoy::service::ext_proc::v3::ProcessingR
     }
 }
 
+bool route_needs_response_body_processing(const StreamFilterState& state) {
+    if (state.matched_policy == nullptr) {
+        return true;
+    }
+
+    if (state.has_query_selection) {
+        return true;
+    }
+
+    if (state.matched_policy->cache.behavior == policy::CacheBehavior::Store) {
+        return true;
+    }
+
+    if (!state.context.compression_decision_final) {
+        return true;
+    }
+
+    return false;
+}
+
 bool build_filtered_body_response(const envoy::service::ext_proc::v3::ProcessingRequest& request,
                                   StreamFilterState& state,
                                   envoy::service::ext_proc::v3::ProcessingResponse* response_out,
@@ -447,6 +467,15 @@ public:
                 continue;
             }
             if (kind == ProcessingRequestKind::ResponseBody) {
+                if (!route_needs_response_body_processing(filter_state)) {
+                    envoy::service::ext_proc::v3::ProcessingResponse response{};
+                    auto* response_body = response.mutable_response_body();
+                    auto* common = response_body->mutable_response();
+                    common->set_status(envoy::service::ext_proc::v3::CommonResponse::CONTINUE);
+                    stream->Write(response);
+                    continue;
+                }
+
                 envoy::service::ext_proc::v3::ProcessingResponse response{};
 
                 safety::FailOpenReason fail_reason = safety::FailOpenReason::None;

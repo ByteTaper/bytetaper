@@ -48,6 +48,18 @@ static bool find_headers_header(const envoy::service::ext_proc::v3::ProcessingRe
     return false;
 }
 
+static bool has_any_body_header(const envoy::service::ext_proc::v3::ProcessingResponse& resp,
+                                const std::string& key) {
+    if (!resp.has_response_body())
+        return false;
+    for (const auto& m : resp.response_body().response().header_mutation().set_headers()) {
+        if (m.header().key() == key) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int main() {
     auto policy = make_compression_policy();
 
@@ -233,6 +245,13 @@ int main() {
         // duplicate compression headers.
         if (find_body_header(r3, "x-bytetaper-compression-candidate", "true"))
             return 302;
+
+        // Since the decision was final and body processing is not needed, body stage must NOT
+        // have written any bytetaper report headers.
+        if (has_any_body_header(r3, "x-bytetaper-extproc-response-body"))
+            return 303;
+        if (has_any_body_header(r3, "x-bytetaper-original-bytes"))
+            return 304;
 
         stream->WritesDone();
         stream->Finish();
