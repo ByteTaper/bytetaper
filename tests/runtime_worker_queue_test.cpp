@@ -708,3 +708,162 @@ TEST_F(WorkerQueueTest, ShutdownDrainsPendingJobs) {
     // Verify that all 5 store jobs were drained and processed from shard 0 during shutdown
     EXPECT_EQ(q_->shards[target_shard].store_count, 0u);
 }
+
+TEST_F(WorkerQueueTest, StateMachineProcessesReadyShard) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    L2StoreJob job;
+    std::strcpy(job.key, "key-sm-1");
+    job.body_len = 0;
+
+    EXPECT_TRUE(worker_queue_try_enqueue_store(q_.get(), job));
+    EXPECT_EQ(q_->worker_ready[0].count, 1u);
+
+    // Run one event
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+
+    EXPECT_EQ(q_->worker_ready[0].count, 0u);
+    // Find shard and check store_count is 0
+    std::uint32_t hash = 5381;
+    for (const char* p = "key-sm-1"; *p; ++p) {
+        hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(*p);
+    }
+    std::size_t shard_idx = hash % kRuntimeShardCount;
+    EXPECT_EQ(q_->shards[shard_idx].store_count, 0u);
+}
+
+TEST_F(WorkerQueueTest, StateMachineTransitionsToDrainingOnShutdown) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+
+    // Seed lookups / stores on owned shards
+    L2StoreJob job;
+    std::strcpy(job.key, "key-sm-2");
+    job.body_len = 0;
+
+    // Artificially put jobs in shard but do NOT push into ready queue
+    std::uint32_t hash = 5381;
+    for (const char* p = "key-sm-2"; *p; ++p) {
+        hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(*p);
+    }
+    std::size_t shard_idx = hash % kRuntimeShardCount;
+    q_->shards[shard_idx].store_slots[0] = job;
+    q_->shards[shard_idx].store_count = 1;
+
+    // Transition state: set running to false to simulate shutdown
+    q_->running = false;
+
+    // Run one event. Since ready queue is empty and running is false, it should drain and process
+    // the job
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+
+    // Shard should be drained
+    EXPECT_EQ(q_->shards[shard_idx].store_count, 0u);
+}
+
+TEST_F(WorkerQueueTest, DrainingProcessesAllJobsAndStops) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+
+    L2StoreJob job1, job2;
+    std::strcpy(job1.key, "key-sm-3a");
+    std::strcpy(job2.key, "key-sm-3b");
+
+    // Manually enqueue without running threads or triggering push
+    std::uint32_t h1 = 5381;
+    for (const char* p = "key-sm-3a"; *p; ++p) {
+        h1 = ((h1 << 5) + h1) + static_cast<std::uint32_t>(*p);
+    }
+    std::size_t s1 = h1 % kRuntimeShardCount;
+
+    std::uint32_t h2 = 5381;
+    for (const char* p = "key-sm-3b"; *p; ++p) {
+        h2 = ((h2 << 5) + h2) + static_cast<std::uint32_t>(*p);
+    }
+    std::size_t s2 = h2 % kRuntimeShardCount;
+
+    q_->shards[s1].store_slots[0] = job1;
+    q_->shards[s1].store_count = 1;
+
+    q_->shards[s2].store_slots[0] = job2;
+    q_->shards[s2].store_count = 1;
+
+    // Initially work remains
+    EXPECT_EQ(q_->shards[s1].store_count, 1u);
+    EXPECT_EQ(q_->shards[s2].store_count, 1u);
+
+    // Simulate Shutdown by running one event when not running
+    q_->running = false;
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+
+    // Both should be drained
+    EXPECT_EQ(q_->shards[s1].store_count, 0u);
+    EXPECT_EQ(q_->shards[s2].store_count, 0u);
+}
+
+TEST_F(WorkerQueueTest, WorkerDoesNotProcessUnownedShards) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 2;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+
+    L2StoreJob job;
+    std::strcpy(job.key, "key-sm-5");
+    std::uint32_t hash = 5381;
+    for (const char* p = "key-sm-5"; *p; ++p) {
+        hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(*p);
+    }
+    std::size_t shard_idx = hash % kRuntimeShardCount;
+    std::size_t owner = shard_idx % 2;
+    std::size_t non_owner = 1 - owner;
+
+    q_->shards[shard_idx].store_slots[0] = job;
+    q_->shards[shard_idx].store_count = 1;
+
+    // Non-owner trying to drain should do nothing
+    EXPECT_FALSE(worker_drain_owned_once(q_.get(), non_owner));
+    EXPECT_EQ(q_->shards[shard_idx].store_count, 1u);
+
+    // Owner trying to drain should process it
+    EXPECT_TRUE(worker_drain_owned_once(q_.get(), owner));
+    EXPECT_EQ(q_->shards[shard_idx].store_count, 0u);
+}
+
+TEST_F(WorkerQueueTest, ShutdownSignalWakesAllSleepingWorkers) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 4;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+
+    WorkerQueueResources res{};
+    res.runtime_metrics = &metrics_;
+    ASSERT_EQ(worker_queue_start(q_.get(), res), nullptr);
+
+    // Workers are now sleeping on wait_cv.
+    // Call shutdown. It should wake them all up via notify_all and join them quickly.
+    auto start = std::chrono::steady_clock::now();
+    worker_queue_shutdown(q_.get());
+    auto end = std::chrono::steady_clock::now();
+
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    // It should join very quickly (well under 200ms)
+    EXPECT_LT(duration_ms, 200);
+}
+
+TEST_F(WorkerQueueTest, DrainOwnedOnceDoesNotBlockOnEmpty) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+
+    // Ensure all shards are empty (they are by default)
+    // Call drain owned once. It should return false instantly and not block.
+    auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(worker_drain_owned_once(q_.get(), 0));
+    auto end = std::chrono::steady_clock::now();
+
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    EXPECT_LT(duration_ms, 5);
+}

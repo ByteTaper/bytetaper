@@ -22,6 +22,10 @@ static bool shard_try_pop_one_job(WorkerQueue* q, std::size_t shard_idx,
                                   DequeuedRuntimeJob* job_out);
 static void shard_requeue_or_clear(WorkerQueue* q, std::size_t shard_idx);
 
+static WorkerEvent worker_wait_for_event(WorkerQueue* q, std::size_t worker_id);
+static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size_t shard_id);
+static void drain_owned_shards(WorkerQueue* q, std::size_t worker_id);
+
 static std::uint32_t hash_key(const char* key) {
     if (key == nullptr)
         return 0;
@@ -170,52 +174,66 @@ static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& j
     }
 }
 
+static WorkerEvent worker_wait_for_event(WorkerQueue* q, std::size_t worker_id) {
+    std::size_t shard_id = 0;
+    bool got_shard = worker_ready_wait_pop(q, worker_id, &shard_id);
+    if (got_shard) {
+        return WorkerEvent{ WorkerEventKind::ReadyShard, shard_id };
+    }
+    return WorkerEvent{ WorkerEventKind::Shutdown, 0 };
+}
+
+static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size_t shard_id) {
+    DequeuedRuntimeJob job;
+    if (shard_try_pop_one_job(q, shard_id, &job)) {
+        if (job.kind == DequeuedJobKind::Lookup) {
+            execute_lookup_job(q, &q->shards[shard_id], job.lookup_job,
+                               q->worker_scratch[worker_id].l2_lookup_body, kAsyncL2MaxBodySize);
+        } else if (job.kind == DequeuedJobKind::Store) {
+            execute_store_job(q, &q->shards[shard_id], job.store_job);
+        }
+    }
+    shard_requeue_or_clear(q, shard_id);
+}
+
+static void drain_owned_shards(WorkerQueue* q, std::size_t worker_id) {
+    while (worker_drain_owned_once(q, worker_id)) {
+        // Drain until no owned shards have work remaining
+    }
+}
+
+// Worker loop invariants:
+// 1. Worker sleeps when no owned shard has work.
+// 2. Worker wakes when an owned shard is ready or shutdown is requested.
+// 3. Worker only processes shards it owns.
+// 4. Worker pops jobs under shard lock.
+// 5. Worker releases shard lock before RocksDB I/O.
+// 6. Worker clears pending lookup marker after L2 lookup completion.
+// 7. Worker requeues shard if more jobs remain.
+// 8. Worker drains owned shard jobs during shutdown according to current semantics.
+// 9. Worker must not call backend.
+// 10. Worker must not write to Envoy/gRPC stream.
 static void worker_loop(WorkerQueue* q, std::size_t worker_id) {
-    while (true) {
-        std::size_t shard_idx = 0;
-        bool got_shard = worker_ready_wait_pop(q, worker_id, &shard_idx);
+    WorkerState state = WorkerState::Running;
 
-        if (!got_shard) {
-            // Wait pop failed. If we are shutting down, drain remaining work.
-            if (!q->running.load(std::memory_order_acquire)) {
-                bool worked = false;
-                const std::size_t owned_count = q->worker_owned_shard_count[worker_id];
-                for (std::size_t i = 0; i < owned_count; ++i) {
-                    const std::size_t s_idx = q->worker_owned_shards[worker_id][i];
-                    DequeuedRuntimeJob job;
-                    if (shard_try_pop_one_job(q, s_idx, &job)) {
-                        worked = true;
-                        if (job.kind == DequeuedJobKind::Lookup) {
-                            execute_lookup_job(q, &q->shards[s_idx], job.lookup_job,
-                                               q->worker_scratch[worker_id].l2_lookup_body,
-                                               kAsyncL2LookupScratchSize);
-                        } else if (job.kind == DequeuedJobKind::Store) {
-                            execute_store_job(q, &q->shards[s_idx], job.store_job);
-                        }
-                    }
-                }
-                if (!worked) {
-                    return; // No remaining work across any owned shards, safe to exit.
-                }
-                continue;
+    while (state != WorkerState::Stopped) {
+        switch (state) {
+        case WorkerState::Running: {
+            const WorkerEvent ev = worker_wait_for_event(q, worker_id);
+            if (ev.kind == WorkerEventKind::ReadyShard) {
+                process_ready_shard(q, worker_id, ev.shard_id);
+            } else {
+                state = WorkerState::Draining;
             }
-            continue;
+            break;
         }
-
-        // We popped a shard! Process up to kRuntimeShardBatchQuota (which is 1) jobs.
-        DequeuedRuntimeJob job;
-        if (shard_try_pop_one_job(q, shard_idx, &job)) {
-            if (job.kind == DequeuedJobKind::Lookup) {
-                execute_lookup_job(q, &q->shards[shard_idx], job.lookup_job,
-                                   q->worker_scratch[worker_id].l2_lookup_body,
-                                   kAsyncL2LookupScratchSize);
-            } else if (job.kind == DequeuedJobKind::Store) {
-                execute_store_job(q, &q->shards[shard_idx], job.store_job);
-            }
+        case WorkerState::Draining:
+            drain_owned_shards(q, worker_id);
+            state = WorkerState::Stopped;
+            break;
+        case WorkerState::Stopped:
+            break;
         }
-
-        // Requeue or clear the shard's enqueued status
-        shard_requeue_or_clear(q, shard_idx);
     }
 }
 
@@ -623,6 +641,45 @@ bool worker_queue_shard_try_pop_for_test(WorkerQueue* q, std::size_t shard_idx,
 
 void worker_queue_shard_requeue_or_clear_for_test(WorkerQueue* q, std::size_t shard_idx) {
     shard_requeue_or_clear(q, shard_idx);
+}
+
+bool worker_drain_owned_once(WorkerQueue* q, std::size_t worker_id) {
+    if (q == nullptr || worker_id >= q->worker_count) {
+        return false;
+    }
+    bool worked = false;
+    const std::size_t owned_count = q->worker_owned_shard_count[worker_id];
+    for (std::size_t i = 0; i < owned_count; ++i) {
+        const std::size_t s_idx = q->worker_owned_shards[worker_id][i];
+        DequeuedRuntimeJob job;
+        if (shard_try_pop_one_job(q, s_idx, &job)) {
+            worked = true;
+            if (job.kind == DequeuedJobKind::Lookup) {
+                execute_lookup_job(q, &q->shards[s_idx], job.lookup_job,
+                                   q->worker_scratch[worker_id].l2_lookup_body,
+                                   kAsyncL2MaxBodySize);
+            } else if (job.kind == DequeuedJobKind::Store) {
+                execute_store_job(q, &q->shards[s_idx], job.store_job);
+            }
+        }
+    }
+    return worked;
+}
+
+bool worker_test_run_one_event(WorkerQueue* q, std::size_t worker_id) {
+    if (q == nullptr || worker_id >= q->worker_count) {
+        return false;
+    }
+    std::size_t shard_id = 0;
+    if (worker_ready_try_pop(q, worker_id, &shard_id)) {
+        process_ready_shard(q, worker_id, shard_id);
+        return true;
+    }
+    if (!q->running.load(std::memory_order_acquire)) {
+        drain_owned_shards(q, worker_id);
+        return true;
+    }
+    return false;
 }
 
 } // namespace bytetaper::runtime
