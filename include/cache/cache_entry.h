@@ -18,6 +18,8 @@ struct CacheEntry {
     char content_type[kCacheContentTypeMaxLen] = {};
     const char* body = nullptr; // non-owning; caller manages lifetime
     std::size_t body_len = 0;
+    std::size_t original_body_len = 0; // input body size before field filtering; 0 if unfiltered
+    std::uint16_t removed_fields = 0;  // fields removed by filter; 0 if unfiltered
     std::int64_t created_at_epoch_ms = 0;
     std::int64_t expires_at_epoch_ms = 0; // 0 = no TTL / never expires
 };

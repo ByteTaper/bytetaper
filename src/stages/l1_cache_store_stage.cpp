@@ -76,6 +76,8 @@ apg::StageOutput l1_cache_store_stage(apg::ApgTransformContext& context) {
                  cache::kCacheContentTypeMaxLen - 1);
     entry.body = context.response_body;
     entry.body_len = context.response_body_len;
+    entry.original_body_len = context.input_payload_bytes;
+    entry.removed_fields = static_cast<std::uint16_t>(context.removed_field_count);
     entry.created_at_epoch_ms = context.request_epoch_ms;
     entry.expires_at_epoch_ms =
         (context.request_epoch_ms > 0)

@@ -131,4 +131,56 @@ TEST_F(CacheKeyPrepareStageTest, PrepareStage_QuerySanitationAndVariantKey) {
     EXPECT_TRUE(std::strstr(context.variant_cache_key, "fields=") == nullptr);
 }
 
+TEST_F(CacheKeyPrepareStageTest, PolicyIdentityDifferentiatesCacheKey) {
+    policy::RoutePolicy p1{};
+    p1.route_id = "test-route";
+    p1.cache.behavior = policy::CacheBehavior::Store;
+    std::memcpy(p1.policy_identity, "v1-abc", 7);
+
+    policy::RoutePolicy p2{};
+    p2.route_id = "test-route";
+    p2.cache.behavior = policy::CacheBehavior::Store;
+    std::memcpy(p2.policy_identity, "v2-xyz", 7);
+
+    // Build first key
+    context.matched_policy = &p1;
+    cache_key_prepare_stage(context);
+    char key1[cache::kCacheKeyMaxLen];
+    std::memcpy(key1, context.cache_key, cache::kCacheKeyMaxLen);
+
+    // Build second key
+    context.matched_policy = &p2;
+    cache_key_prepare_stage(context);
+    char key2[cache::kCacheKeyMaxLen];
+    std::memcpy(key2, context.cache_key, cache::kCacheKeyMaxLen);
+
+    EXPECT_STRNE(key1, key2);
+}
+
+TEST_F(CacheKeyPrepareStageTest, SamePolicyIdentityStableKey) {
+    policy::RoutePolicy p1{};
+    p1.route_id = "test-route";
+    p1.cache.behavior = policy::CacheBehavior::Store;
+    std::memcpy(p1.policy_identity, "v1-abc", 7);
+
+    policy::RoutePolicy p2{};
+    p2.route_id = "test-route";
+    p2.cache.behavior = policy::CacheBehavior::Store;
+    std::memcpy(p2.policy_identity, "v1-abc", 7);
+
+    // Build first key
+    context.matched_policy = &p1;
+    cache_key_prepare_stage(context);
+    char key1[cache::kCacheKeyMaxLen];
+    std::memcpy(key1, context.cache_key, cache::kCacheKeyMaxLen);
+
+    // Build second key
+    context.matched_policy = &p2;
+    cache_key_prepare_stage(context);
+    char key2[cache::kCacheKeyMaxLen];
+    std::memcpy(key2, context.cache_key, cache::kCacheKeyMaxLen);
+
+    EXPECT_STREQ(key1, key2);
+}
+
 } // namespace bytetaper::stages

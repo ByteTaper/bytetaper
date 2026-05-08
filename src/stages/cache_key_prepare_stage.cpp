@@ -57,7 +57,9 @@ apg::StageOutput cache_key_prepare_stage(apg::ApgTransformContext& context) {
         ki_raw.selected_field_count = context.selected_field_count;
         ki_raw.variant = false;
     }
-    ki_raw.policy_version = context.matched_policy->route_id;
+    ki_raw.policy_version = context.matched_policy->policy_identity[0] != '\0'
+                                ? context.matched_policy->policy_identity
+                                : context.matched_policy->route_id;
 
     if (cache::build_cache_key(ki_raw, context.cache_key, sizeof(context.cache_key))) {
         context.cache_key_ready = true;
@@ -74,7 +76,9 @@ apg::StageOutput cache_key_prepare_stage(apg::ApgTransformContext& context) {
         ki_var.query = context.sanitized_query_ready ? context.sanitized_query : context.raw_query;
         ki_var.selected_fields = context.selected_fields;
         ki_var.selected_field_count = context.selected_field_count;
-        ki_var.policy_version = context.matched_policy->route_id;
+        ki_var.policy_version = context.matched_policy->policy_identity[0] != '\0'
+                                    ? context.matched_policy->policy_identity
+                                    : context.matched_policy->route_id;
         ki_var.variant = true;
 
         if (cache::build_cache_key(ki_var, context.variant_cache_key,

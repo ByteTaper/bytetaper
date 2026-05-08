@@ -41,8 +41,11 @@ enum class HttpMethod : std::uint8_t {
     Patch = 5,
 };
 
+static constexpr std::size_t kPolicyIdentityMaxLen = 64;
+
 struct RoutePolicy {
     const char* route_id = nullptr;
+    char policy_identity[kPolicyIdentityMaxLen] = {};
     const char* match_prefix = nullptr;
     RouteMatchKind match_kind = RouteMatchKind::Prefix;
     MutationMode mutation = MutationMode::Disabled;

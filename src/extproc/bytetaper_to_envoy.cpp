@@ -62,6 +62,20 @@ bool map_cache_hit_to_immediate_response(
 
     add_header(imm, kCachedResponseHeader, kTrueValue);
 
+    add_header(imm, kResponseBodyHeader, kTrueValue);
+
+    const std::size_t saved =
+        (entry.original_body_len > 0 && entry.original_body_len > entry.body_len)
+            ? (entry.original_body_len - entry.body_len)
+            : 0;
+    add_header(imm, kWasteRemovedFieldsHeader, std::to_string(entry.removed_fields));
+    add_header(imm, kWasteSavedBytesHeader, std::to_string(saved));
+    add_header(
+        imm, kOriginalResponseBytesHeader,
+        std::to_string(entry.original_body_len > 0 ? entry.original_body_len : entry.body_len));
+    add_header(imm, kOptimizedResponseBytesHeader, std::to_string(entry.body_len));
+    add_header(imm, kTransformAppliedHeader, entry.removed_fields > 0 ? kTrueValue : kFalseValue);
+
     if (ctx.cache_layer != nullptr) {
         add_header(imm, kCacheLayerHeader, ctx.cache_layer);
     }

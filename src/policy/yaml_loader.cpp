@@ -10,6 +10,103 @@ namespace bytetaper::policy {
 
 namespace {
 
+static void compute_route_policy_identity(const RoutePolicy& p, char* out, std::size_t out_size) {
+    // FNV-1a over a canonical string of all cache-semantic fields
+    uint64_t h = 14695981039346656037ULL;
+    auto feed_str = [&](const char* s) {
+        if (!s)
+            return;
+        for (; *s; ++s) {
+            h ^= static_cast<unsigned char>(*s);
+            h *= 1099511628211ULL;
+        }
+        h ^= '|';
+        h *= 1099511628211ULL; // field separator
+    };
+    auto feed_u32 = [&](uint32_t v) {
+        for (int i = 0; i < 4; ++i) {
+            h ^= (v & 0xFF);
+            h *= 1099511628211ULL;
+            v >>= 8;
+        }
+        h ^= '|';
+        h *= 1099511628211ULL;
+    };
+    auto feed_u8 = [&](uint8_t v) {
+        h ^= v;
+        h *= 1099511628211ULL;
+        h ^= '|';
+        h *= 1099511628211ULL;
+    };
+
+    feed_str(p.route_id);
+    feed_str(p.match_prefix);
+    feed_u8(static_cast<uint8_t>(p.match_kind));
+    feed_u8(static_cast<uint8_t>(p.mutation));
+    feed_u8(static_cast<uint8_t>(p.allowed_method));
+    feed_u32(p.max_response_bytes);
+    feed_u8(static_cast<uint8_t>(p.failure_mode));
+
+    // field filter
+    feed_u8(static_cast<uint8_t>(p.field_filter.mode));
+    feed_u32(static_cast<uint32_t>(p.field_filter.field_count));
+    for (std::size_t i = 0; i < p.field_filter.field_count; ++i) {
+        feed_str(p.field_filter.fields[i]);
+    }
+
+    // cache
+    feed_u8(static_cast<uint8_t>(p.cache.behavior));
+    feed_u32(p.cache.ttl_seconds);
+    feed_u8(p.cache.enabled ? 1 : 0);
+    feed_u8(p.cache.field_variant.enabled ? 1 : 0);
+    feed_u32(p.cache.field_variant.max_variants_per_route);
+    feed_u32(p.cache.field_variant.min_field_count);
+    feed_u32(p.cache.field_variant.max_field_count);
+    feed_u32(p.cache.field_variant.admission_threshold);
+    feed_u32(p.cache.field_variant.ttl_max_ms);
+
+    // pagination
+    feed_u8(p.pagination.enabled ? 1 : 0);
+    feed_u8(static_cast<uint8_t>(p.pagination.mode));
+    feed_str(p.pagination.limit_param);
+    feed_str(p.pagination.offset_param);
+    feed_u32(p.pagination.default_limit);
+    feed_u32(p.pagination.max_limit);
+    feed_u8(p.pagination.upstream_supports_pagination ? 1 : 0);
+    feed_u32(p.pagination.max_response_bytes_warning);
+
+    // compression
+    feed_u8(p.compression.enabled ? 1 : 0);
+    feed_u32(p.compression.min_size_bytes);
+    feed_u32(static_cast<uint32_t>(p.compression.eligible_content_type_count));
+    for (std::size_t i = 0; i < p.compression.eligible_content_type_count; ++i) {
+        feed_str(p.compression.eligible_content_types[i]);
+    }
+    feed_u32(static_cast<uint32_t>(p.compression.preferred_algorithm_count));
+    for (std::size_t i = 0; i < p.compression.preferred_algorithm_count; ++i) {
+        feed_u8(static_cast<uint8_t>(p.compression.preferred_algorithms[i]));
+    }
+    feed_u8(static_cast<uint8_t>(p.compression.already_encoded_behavior));
+
+    // coalescing
+    feed_u8(p.coalescing.enabled ? 1 : 0);
+    feed_u8(static_cast<uint8_t>(p.coalescing.mode));
+    feed_u32(p.coalescing.backend_timeout_ms);
+    feed_u32(p.coalescing.handoff_buffer_ms);
+    feed_u32(p.coalescing.result_ready_retention_ms);
+    feed_u32(p.coalescing.max_waiters_per_key);
+    feed_u8(p.coalescing.require_cache_enabled ? 1 : 0);
+    feed_u8(p.coalescing.allow_authenticated ? 1 : 0);
+
+    // Write as 16-char lowercase hex
+    static const char kHex[] = "0123456789abcdef";
+    for (int i = 15; i >= 0 && out_size > 1; --i, --out_size) {
+        *out++ = kHex[h & 0xF];
+        h >>= 4;
+    }
+    *out = '\0';
+}
+
 // Parse a single route node into a PolicyFileResult slot. Returns false on error.
 bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size_t index) {
     if (!node["id"] || !node["id"].IsScalar()) {
@@ -400,6 +497,9 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
             }
         }
     }
+
+    compute_route_policy_identity(policy, policy.policy_identity,
+                                  bytetaper::policy::kPolicyIdentityMaxLen);
 
     return true;
 }

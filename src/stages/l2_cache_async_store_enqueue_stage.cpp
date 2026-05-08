@@ -86,6 +86,8 @@ apg::StageOutput l2_cache_async_store_enqueue_stage(apg::ApgTransformContext& co
                 sizeof(job.entry.content_type));
     job.entry.body = context.response_body; // Original body source
     job.entry.body_len = context.response_body_len;
+    job.entry.original_body_len = context.input_payload_bytes;
+    job.entry.removed_fields = static_cast<std::uint16_t>(context.removed_field_count);
     job.entry.created_at_epoch_ms = context.request_epoch_ms;
     job.entry.expires_at_epoch_ms =
         (context.request_epoch_ms > 0) ? context.request_epoch_ms + ttl_ms : 0;

@@ -36,14 +36,8 @@ namespace {
 constexpr const char* kPathHeader = ":path";
 constexpr const char* kContentTypeHeader = "content-type";
 constexpr const char* kContentLengthHeader = "content-length";
-constexpr const char* kResponseBodyHeader = "x-bytetaper-extproc-response-body";
-constexpr const char* kOriginalResponseBytesHeader = "x-bytetaper-original-response-bytes";
-constexpr const char* kWasteRemovedFieldsHeader = "x-bytetaper-waste-removed-fields";
-constexpr const char* kWasteSavedBytesHeader = "x-bytetaper-waste-saved-bytes";
-constexpr const char* kOptimizedResponseBytesHeader = "x-bytetaper-optimized-response-bytes";
 constexpr const char* kOriginalBytesHeader = "x-bytetaper-original-bytes";
 constexpr const char* kOptimizedBytesHeader = "x-bytetaper-optimized-bytes";
-constexpr const char* kTransformAppliedHeader = "x-bytetaper-transform-applied";
 constexpr const char* kRoutePolicyHeader = "x-bytetaper-route-policy";
 
 enum class ReportingHeaderMode {
@@ -264,20 +258,17 @@ bool build_filtered_body_response(const envoy::service::ext_proc::v3::Processing
                                   StreamFilterState& state,
                                   envoy::service::ext_proc::v3::ProcessingResponse* response_out,
                                   safety::FailOpenReason* out_reason) {
-    std::printf("[BODY RESP] Entering build_filtered_body_response...\n");
     if (out_reason != nullptr) {
         *out_reason = safety::FailOpenReason::None;
     }
 
     if (response_out == nullptr || !request.has_response_body()) {
-        std::printf("[BODY RESP] Failed: no response body\n");
         if (out_reason != nullptr) {
             *out_reason = safety::FailOpenReason::SkipUnsupported;
         }
         return false;
     }
     if (state.matched_policy == nullptr) {
-        std::printf("[BODY RESP] Failed: no matched policy\n");
         if (out_reason != nullptr) {
             *out_reason = safety::FailOpenReason::PolicyNotFound;
         }
@@ -285,22 +276,18 @@ bool build_filtered_body_response(const envoy::service::ext_proc::v3::Processing
     }
     const char* reason_err = nullptr;
     if (!policy::validate_route_policy(*state.matched_policy, &reason_err)) {
-        std::printf("[BODY RESP] Failed: invalid policy reason=%s\n",
-                    reason_err ? reason_err : "unknown");
         if (out_reason != nullptr) {
             *out_reason = safety::FailOpenReason::InvalidPolicy;
         }
         return false;
     }
     if (state.matched_policy->mutation != policy::MutationMode::Full) {
-        std::printf("[BODY RESP] Failed: observe mode (not full)\n");
         if (out_reason != nullptr) {
             *out_reason = safety::FailOpenReason::ObserveMode;
         }
         return false;
     }
     if (state.is_non_2xx_response) {
-        std::printf("[BODY RESP] Failed: non 2xx\n");
         if (out_reason != nullptr) {
             *out_reason = safety::FailOpenReason::Non2xxResponse;
         }
@@ -311,7 +298,6 @@ bool build_filtered_body_response(const envoy::service::ext_proc::v3::Processing
 
     if (filtering_active) {
         if (state.response_kind != json_transform::JsonResponseKind::EligibleJson) {
-            std::printf("[BODY RESP] Failed: non json response in filtering mode\n");
             if (out_reason != nullptr) {
                 *out_reason = safety::FailOpenReason::NonJsonResponse;
             }
@@ -319,7 +305,6 @@ bool build_filtered_body_response(const envoy::service::ext_proc::v3::Processing
         }
     } else {
         if (state.matched_policy->cache.behavior != policy::CacheBehavior::Store) {
-            std::printf("[BODY RESP] Failed: cache behavior not store\n");
             if (out_reason != nullptr) {
                 *out_reason = safety::FailOpenReason::SkipUnsupported;
             }
@@ -328,7 +313,6 @@ bool build_filtered_body_response(const envoy::service::ext_proc::v3::Processing
     }
 
     if (!request.response_body().end_of_stream()) {
-        std::printf("[BODY RESP] Failed: not end of stream\n");
         if (out_reason != nullptr) {
             *out_reason = safety::FailOpenReason::SkipUnsupported;
         }
