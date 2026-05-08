@@ -30,10 +30,18 @@ apg::StageOutput l2_cache_async_lookup_enqueue_stage(apg::ApgTransformContext& c
         return apg::StageOutput{ apg::StageResult::Continue, "no-worker-queue" };
     }
 
-    if (!context.cache_key_ready) {
+    const char* key = context.cache_key;
+    if (context.selected_field_count > 0 && context.matched_policy->cache.field_variant.enabled) {
+        if (context.variant_cache_key_ready && context.variant_admission_passed) {
+            key = context.variant_cache_key;
+        } else {
+            return apg::StageOutput{ apg::StageResult::Continue,
+                                     "has-query-selection-not-admitted-skip" };
+        }
+    } else if (!context.cache_key_ready) {
         return apg::StageOutput{ apg::StageResult::Continue, "key-not-ready" };
     }
-    const char* key = context.cache_key;
+
     // 4. Enqueue
     runtime::L2LookupJob job{};
     std::strncpy(job.key, key, cache::kCacheKeyMaxLen - 1);

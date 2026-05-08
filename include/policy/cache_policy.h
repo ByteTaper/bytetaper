@@ -4,6 +4,8 @@
 #ifndef BYTETAPER_POLICY_CACHE_POLICY_H
 #define BYTETAPER_POLICY_CACHE_POLICY_H
 
+#include "policy/field_filter_policy.h"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -35,6 +37,7 @@ struct CachePolicy {
     CacheL2Policy l2{};
     bool private_cache = false;      // opt-in: allows caching of authenticated requests
     char auth_scope_header[64] = {}; // required when private_cache=true; names the source header
+    FieldVariantCachePolicy field_variant{};
 };
 
 // Returns nullptr on success, or a static error string on invalid configuration.

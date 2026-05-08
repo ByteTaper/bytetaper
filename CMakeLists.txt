@@ -278,6 +278,9 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
     src/metrics/coalescing_metrics.cpp
     src/extproc/header_view.cpp
     src/stages/cache_key_prepare_stage.cpp
+    src/stages/field_variant_admission_stage.cpp
+    src/stages/l1_variant_lookup_stage.cpp
+    src/stages/l1_variant_store_stage.cpp
   )
   target_include_directories(bytetaper_extproc_grpc_server
     PUBLIC
@@ -561,6 +564,40 @@ if(BUILD_TESTING)
         gtest_main
     )
     add_test(NAME cache_key_prepare_stage_test COMMAND cache_key_prepare_stage_test)
+
+    add_executable(field_variant_admission_stage_test
+      tests/field_variant_admission_stage_test.cpp
+      src/stages/field_variant_admission_stage.cpp
+      src/cache/cache_key.cpp
+    )
+    target_include_directories(field_variant_admission_stage_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(field_variant_admission_stage_test
+      PRIVATE
+        gtest_main
+    )
+    add_test(NAME field_variant_admission_stage_test COMMAND field_variant_admission_stage_test)
+
+    add_executable(l1_variant_stage_test
+      tests/l1_variant_stage_test.cpp
+      src/stages/l1_variant_lookup_stage.cpp
+      src/stages/l1_variant_store_stage.cpp
+      src/cache/l1_cache.cpp
+      src/cache/cache_key.cpp
+      src/cache/cache_entry.cpp
+    )
+    target_include_directories(l1_variant_stage_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(l1_variant_stage_test
+      PRIVATE
+        gtest_main
+        bytetaper_prometheus_registry
+    )
+    add_test(NAME l1_variant_stage_test COMMAND l1_variant_stage_test)
 
     add_executable(l1_cache_store_stage_test
       tests/l1_cache_store_stage_test.cpp

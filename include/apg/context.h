@@ -127,6 +127,13 @@ struct ApgTransformContext {
     // --- Background runtime inputs (set by caller for async stages) ---
     runtime::WorkerQueue* worker_queue = nullptr;
 
+    // --- Materialized Field-Filtered Variant Cache ---
+    char variant_cache_key[cache::kCacheKeyMaxLen] = {};
+    bool variant_cache_key_ready = false;
+    bool variant_admission_passed = false;
+    char sanitized_query[kRawQueryBufferSize] = {};
+    bool sanitized_query_ready = false;
+
     // --- Metrics (optional pointers to central registry counters) ---
     metrics::PaginationMetrics* pagination_metrics = nullptr;
     metrics::CacheMetrics* cache_metrics = nullptr;

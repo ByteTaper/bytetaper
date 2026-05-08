@@ -21,14 +21,19 @@ struct CacheKeyInput {
     const char* policy_version = nullptr;
     bool private_cache = false;       // when true, auth_scope is required
     const char* auth_scope = nullptr; // opaque derived scope — never the raw token
+    bool variant = false;             // when true, emits "var:" namespace prefix
 };
 
 // Writes a deterministic null-terminated key into out_buf[out_size].
 // Returns false if: method is not Get, route_id or path is null,
 // out_buf is null, or the key would overflow out_buf.
-// selected_fields are sorted alphabetically so {"id","name"} and
-// {"name","id"} produce the same key.
+// selected_fields are sorted alphabetically and deduplicated.
 bool build_cache_key(const CacheKeyInput& input, char* out_buf, std::size_t out_size);
+
+// Strips the ?fields=... parameter from a query string.
+// Writes result into out_buf[out_size]. Returns bytes written.
+std::size_t sanitize_query_strip_fields_param(const char* query, char* out_buf,
+                                              std::size_t out_size);
 
 } // namespace bytetaper::cache
 

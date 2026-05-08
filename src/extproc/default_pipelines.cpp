@@ -8,8 +8,11 @@
 #include "stages/coalescing_follower_wait_stage.h"
 #include "stages/coalescing_leader_completion_stage.h"
 #include "stages/compression_decision_stage.h"
+#include "stages/field_variant_admission_stage.h"
 #include "stages/l1_cache_lookup_stage.h"
 #include "stages/l1_cache_store_stage.h"
+#include "stages/l1_variant_lookup_stage.h"
+#include "stages/l1_variant_store_stage.h"
 #include "stages/l2_cache_async_lookup_enqueue_stage.h"
 #include "stages/l2_cache_async_store_enqueue_stage.h"
 #include "stages/pagination_request_mutation_stage.h"
@@ -29,7 +32,9 @@ namespace bytetaper::extproc {
  */
 const apg::ApgStage kLookupStages[] = {
     stages::cache_key_prepare_stage,
+    stages::field_variant_admission_stage,
     stages::l1_cache_lookup_stage,
+    stages::l1_variant_lookup_stage,
     stages::coalescing_decision_stage,
     stages::coalescing_follower_wait_stage,
     stages::l2_cache_async_lookup_enqueue_stage,
@@ -51,6 +56,7 @@ const std::size_t kLookupStageCount = std::size(kLookupStages);
  */
 const apg::ApgStage kStoreStages[] = {
     stages::l1_cache_store_stage,
+    stages::l1_variant_store_stage,
     stages::l2_cache_async_store_enqueue_stage,
     stages::coalescing_leader_completion_stage,
 };
@@ -67,7 +73,13 @@ void compile_route_runtime(const policy::RoutePolicy& policy, CompiledRouteRunti
     // 1. Lookup stages (preserving default relative ordering)
     if (policy.cache.behavior == policy::CacheBehavior::Store) {
         runtime->lookup_stages[runtime->lookup_count++] = stages::cache_key_prepare_stage;
+        if (policy.cache.field_variant.enabled) {
+            runtime->lookup_stages[runtime->lookup_count++] = stages::field_variant_admission_stage;
+        }
         runtime->lookup_stages[runtime->lookup_count++] = stages::l1_cache_lookup_stage;
+        if (policy.cache.field_variant.enabled) {
+            runtime->lookup_stages[runtime->lookup_count++] = stages::l1_variant_lookup_stage;
+        }
     }
     if (policy.coalescing.enabled) {
         runtime->lookup_stages[runtime->lookup_count++] = stages::coalescing_decision_stage;
@@ -84,6 +96,9 @@ void compile_route_runtime(const policy::RoutePolicy& policy, CompiledRouteRunti
     // 2. Store stages (preserving default relative ordering)
     if (policy.cache.behavior == policy::CacheBehavior::Store) {
         runtime->store_stages[runtime->store_count++] = stages::l1_cache_store_stage;
+        if (policy.cache.field_variant.enabled) {
+            runtime->store_stages[runtime->store_count++] = stages::l1_variant_store_stage;
+        }
         runtime->store_stages[runtime->store_count++] = stages::l2_cache_async_store_enqueue_stage;
     }
     if (policy.coalescing.enabled) {

@@ -209,6 +209,10 @@ See [Compression Policy](docs/compression-policy.md) for a complete reference on
 
 See [Request Coalescing](docs/coalescing-policy.md) for a complete reference on request coalescing.
 
+## Variant Caching Policy
+
+See [Materialized Field-Filtered Variant Cache](docs/materialized-filed-filtered-variant-cache.policy) for a complete reference on variant caching.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for details on our development process and how to contribute.

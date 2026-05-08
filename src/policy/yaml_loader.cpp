@@ -187,6 +187,32 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
         if (cache_node["enabled"]) {
             policy.cache.enabled = cache_node["enabled"].as<bool>();
         }
+
+        if (cache_node["field_variant"]) {
+            const YAML::Node& fv_node = cache_node["field_variant"];
+            if (fv_node["enabled"]) {
+                policy.cache.field_variant.enabled = fv_node["enabled"].as<bool>();
+            }
+            if (fv_node["max_variants_per_route"]) {
+                policy.cache.field_variant.max_variants_per_route =
+                    fv_node["max_variants_per_route"].as<std::uint32_t>();
+            }
+            if (fv_node["min_field_count"]) {
+                policy.cache.field_variant.min_field_count =
+                    fv_node["min_field_count"].as<std::uint32_t>();
+            }
+            if (fv_node["max_field_count"]) {
+                policy.cache.field_variant.max_field_count =
+                    fv_node["max_field_count"].as<std::uint32_t>();
+            }
+            if (fv_node["admission_threshold"]) {
+                policy.cache.field_variant.admission_threshold =
+                    fv_node["admission_threshold"].as<std::uint32_t>();
+            }
+            if (fv_node["ttl_max_ms"]) {
+                policy.cache.field_variant.ttl_max_ms = fv_node["ttl_max_ms"].as<std::uint32_t>();
+            }
+        }
     }
 
     if (node["failure_mode"]) {

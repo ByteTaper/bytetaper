@@ -109,4 +109,81 @@ TEST(CacheKeyTest, EmptyFieldsAndQueryStillValid) {
     EXPECT_NE(key[0], '\0');
 }
 
+TEST(CacheKeyTest, FieldDeduplication) {
+    char key1[512] = {};
+    char key2[512] = {};
+
+    char fields_dup[3][policy::kMaxFieldNameLen] = {};
+    std::strncpy(fields_dup[0], "id", policy::kMaxFieldNameLen - 1);
+    std::strncpy(fields_dup[1], "id", policy::kMaxFieldNameLen - 1);
+    std::strncpy(fields_dup[2], "name", policy::kMaxFieldNameLen - 1);
+
+    char fields_unique[2][policy::kMaxFieldNameLen] = {};
+    std::strncpy(fields_unique[0], "id", policy::kMaxFieldNameLen - 1);
+    std::strncpy(fields_unique[1], "name", policy::kMaxFieldNameLen - 1);
+
+    CacheKeyInput input = make_basic_input();
+
+    input.selected_fields = fields_dup;
+    input.selected_field_count = 3;
+    EXPECT_TRUE(build_cache_key(input, key1, sizeof(key1)));
+
+    input.selected_fields = fields_unique;
+    input.selected_field_count = 2;
+    EXPECT_TRUE(build_cache_key(input, key2, sizeof(key2)));
+
+    EXPECT_STREQ(key1, key2);
+}
+
+TEST(CacheKeyTest, VariantPrefixEmitted) {
+    char key_raw[512] = {};
+    char key_var[512] = {};
+
+    CacheKeyInput input = make_basic_input();
+    EXPECT_TRUE(build_cache_key(input, key_raw, sizeof(key_raw)));
+
+    input.variant = true;
+    EXPECT_TRUE(build_cache_key(input, key_var, sizeof(key_var)));
+
+    // key_var should be "var:" + key_raw
+    char expected[520];
+    std::snprintf(expected, sizeof(expected), "var:%s", key_raw);
+    EXPECT_STREQ(key_var, expected);
+}
+
+TEST(CacheKeyTest, SanitizeQueryStripFieldsParam) {
+    char out[128] = {};
+
+    // 1. Only fields
+    EXPECT_EQ(sanitize_query_strip_fields_param("fields=id,name", out, sizeof(out)), 0u);
+    EXPECT_STREQ(out, "");
+
+    EXPECT_EQ(sanitize_query_strip_fields_param("?fields=id,name", out, sizeof(out)), 0u);
+    EXPECT_STREQ(out, "");
+
+    // 2. Middle fields
+    std::memset(out, 0, sizeof(out));
+    EXPECT_GT(
+        sanitize_query_strip_fields_param("?foo=bar&fields=id,name&baz=qux", out, sizeof(out)), 0u);
+    EXPECT_STREQ(out, "?foo=bar&baz=qux");
+
+    // 3. Leading fields
+    std::memset(out, 0, sizeof(out));
+    EXPECT_GT(sanitize_query_strip_fields_param("?fields=id,name&foo=bar", out, sizeof(out)), 0u);
+    EXPECT_STREQ(out, "?foo=bar");
+
+    // 4. Trailing fields
+    std::memset(out, 0, sizeof(out));
+    EXPECT_GT(sanitize_query_strip_fields_param("?foo=bar&fields=id,name", out, sizeof(out)), 0u);
+    EXPECT_STREQ(out, "?foo=bar");
+
+    // 5. No fields
+    std::memset(out, 0, sizeof(out));
+    EXPECT_GT(sanitize_query_strip_fields_param("?foo=bar", out, sizeof(out)), 0u);
+    EXPECT_STREQ(out, "?foo=bar");
+
+    // 6. Null input
+    EXPECT_EQ(sanitize_query_strip_fields_param(nullptr, out, sizeof(out)), 0u);
+}
+
 } // namespace bytetaper::cache

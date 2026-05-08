@@ -122,13 +122,15 @@ TEST_F(DefaultPipelineOrderTest, DefaultPipelineContainsNoSyncRocksDB) {
     // The requirement is that no SYNCHRONOUS L2 lookup stage exists in the array.
 
     // Since we only have one kLookupStages definition, we'll just check for our known stages.
-    EXPECT_EQ(kLookupStageCount, 6u);
+    EXPECT_EQ(kLookupStageCount, 8u);
     // stages[0] = cache_key_prepare_stage
-    // stages[1] = l1_cache_lookup_stage
-    // stages[2] = coalescing_decision_stage
-    // stages[3] = coalescing_follower_wait_stage
-    // stages[4] = l2_cache_async_lookup_enqueue_stage
-    // stages[5] = pagination_request_mutation_stage
+    // stages[1] = field_variant_admission_stage
+    // stages[2] = l1_cache_lookup_stage
+    // stages[3] = l1_variant_lookup_stage
+    // stages[4] = coalescing_decision_stage
+    // stages[5] = coalescing_follower_wait_stage
+    // stages[6] = l2_cache_async_lookup_enqueue_stage
+    // stages[7] = pagination_request_mutation_stage
 
     // Check that none of these are a synchronous L2 lookup.
     // We don't even have a stages/l2_cache_lookup_stage.h anymore probably.
