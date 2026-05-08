@@ -53,6 +53,11 @@ fi
 
 echo "All targets are UP."
 
+# Cache-bust parameters — unique per script invocation, shared within each leg
+# so all N concurrent requests hit the same cold cache key, enabling coalescing.
+LEG_A_URL="${ENVOY_HOST}/products/fast/123?_b=${TIMESTAMP}a"
+LEG_B_URL="${ENVOY_HOST}/products/slow/123?_b=${TIMESTAMP}b"
+
 # Metric extraction function
 get_metric() {
     local name=$1
@@ -94,11 +99,11 @@ base_follower_expired=$(get_metric "bytetaper_coalescing_follower_expired_total"
 curl -s "${MOCK_HOST}/reset-count" > /dev/null
 
 N=50
-echo "Sending $N concurrent GET requests to ${ENVOY_HOST}/products/fast/123 ..."
+echo "Sending $N concurrent GET requests to ${LEG_A_URL} ..."
 
 # Concurrent execution loop
 for i in $(seq 1 "$N"); do
-    curl -s -o /dev/null "${ENVOY_HOST}/products/fast/123" &
+    curl -s -o /dev/null "${LEG_A_URL}" &
 done
 wait
 
@@ -150,7 +155,7 @@ delta_follower_expired=$((new_follower_expired - base_follower_expired))
 
 echo "Running wrk latency check on fast path..."
 WRK_COAL_A=$(mktemp)
-wrk -t2 -c5 -d3s -s benchmarks/lib/latency_reporter.lua --latency "${ENVOY_HOST}/products/fast/123" | tee "$WRK_COAL_A"
+wrk -t2 -c5 -d3s -s benchmarks/lib/latency_reporter.lua --latency "${LEG_A_URL}" | tee "$WRK_COAL_A"
 JSON_COAL_A=$(./benchmarks/lib/latency_parser.sh "$WRK_COAL_A")
 rm -f "$WRK_COAL_A"
 
@@ -289,11 +294,11 @@ base_follower_expired=$(get_metric "bytetaper_coalescing_follower_expired_total"
 # Reset mock api counter
 curl -s "${MOCK_HOST}/reset-count" > /dev/null
 
-echo "Sending $N concurrent GET requests to ${ENVOY_HOST}/products/slow/123 ..."
+echo "Sending $N concurrent GET requests to ${LEG_B_URL} ..."
 
 # Concurrent execution loop
 for i in $(seq 1 "$N"); do
-    curl -s -o /dev/null "${ENVOY_HOST}/products/slow/123" &
+    curl -s -o /dev/null "${LEG_B_URL}" &
 done
 wait
 
@@ -345,7 +350,7 @@ delta_follower_expired=$((new_follower_expired - base_follower_expired))
 
 echo "Running wrk latency check on slow path..."
 WRK_COAL_B=$(mktemp)
-wrk -t2 -c5 -d3s -s benchmarks/lib/latency_reporter.lua --latency "${ENVOY_HOST}/products/slow/123" | tee "$WRK_COAL_B"
+wrk -t2 -c5 -d3s -s benchmarks/lib/latency_reporter.lua --latency "${LEG_B_URL}" | tee "$WRK_COAL_B"
 JSON_COAL_B=$(./benchmarks/lib/latency_parser.sh "$WRK_COAL_B")
 JSON_COAL_TP_B=$(./benchmarks/lib/throughput_parser.sh "$WRK_COAL_B")
 rm -f "$WRK_COAL_B"
@@ -356,7 +361,7 @@ JSON_COAL_STATS_B=$(./benchmarks/lib/container_stats.sh all)
 
 # Extract response payload savings for Leg B
 echo "Extracting payload savings for Leg B..."
-coal_b_size=$(curl -s -o /dev/null -w "%{size_download}" "${ENVOY_HOST}/products/slow/123" || echo "0")
+coal_b_size=$(curl -s -o /dev/null -w "%{size_download}" "${LEG_B_URL}" || echo "0")
 JSON_COAL_SAVINGS_B=$(./benchmarks/lib/payload_savings_parser.sh "$coal_b_size" "$coal_b_size")
 
 COAL_B_RATIO=$(awk -v up="$mock_calls" -v total="$N" '

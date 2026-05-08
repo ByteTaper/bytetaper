@@ -202,6 +202,9 @@ rm -f "$WRK_A_OUT" "$WRK_B_OUT" /tmp/lega_1.txt /tmp/lega_2.txt /tmp/lega_3.txt 
 # Compile Markdown report
 ./benchmarks/report/generate_markdown_report.sh "${REPORT_FILE%.txt}.json"
 
+# Check thresholds
+./benchmarks/report/check_thresholds.sh "${REPORT_FILE%.txt}.json"
+
 echo ""
 echo "Benchmark scenario field_variant_cache completed successfully."
 echo "Results saved to: $REPORT_FILE"
