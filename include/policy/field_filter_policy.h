@@ -47,6 +47,15 @@ inline bool apply_field_filter(const FieldFilterPolicy& filter, const char* fiel
     return filter.mode == FieldFilterMode::Denylist;
 }
 
+struct FieldVariantCachePolicy {
+    bool enabled = false;
+    std::uint32_t max_variants_per_route = 8; // cardinality cap
+    std::uint32_t min_field_count = 1;        // ignore trivial single-field variants
+    std::uint32_t max_field_count = 8;        // ignore overly-specific combos
+    std::uint32_t admission_threshold = 2;    // requests before materializing
+    std::uint32_t ttl_max_ms = 0;             // 0 = use raw cache TTL
+};
+
 } // namespace bytetaper::policy
 
 #endif // BYTETAPER_POLICY_FIELD_FILTER_POLICY_H

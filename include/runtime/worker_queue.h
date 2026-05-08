@@ -23,7 +23,12 @@ struct RuntimeMetrics;
 }
 
 namespace bytetaper::runtime {
-static constexpr std::size_t kAsyncL2MaxBodySize = 65536; // 64 KB
+// Max body accepted by the async L2 store path — matches disk cache limit.
+static constexpr std::size_t kAsyncL2StoreMaxBodySize = cache::kL2MaxBodySize;
+
+// Lookup scratch buffer used for L2 → L1 body promotion. 64 KiB is sufficient
+// because L1 bodies are bounded by the same limit as coalescing snapshots.
+static constexpr std::size_t kAsyncL2LookupScratchSize = 65536;
 
 // Sharding configuration.
 static constexpr std::size_t kRuntimeShardCount = 256;
@@ -45,12 +50,13 @@ struct L2StoreJob {
 };
 
 struct StoreBodyPool {
-    char bodies[kRuntimeQueueSlotsPerShard][kAsyncL2MaxBodySize] = {};
+    char* heap_bodies[kRuntimeQueueSlotsPerShard] = {}; // malloc'd per enqueue
+    std::size_t heap_body_sizes[kRuntimeQueueSlotsPerShard] = {};
     bool occupied[kRuntimeQueueSlotsPerShard] = {};
 };
 
 struct WorkerScratch {
-    char l2_lookup_body[kAsyncL2MaxBodySize] = {};
+    char l2_lookup_body[kAsyncL2LookupScratchSize] = {};
 };
 
 struct WorkerReadyQueue {

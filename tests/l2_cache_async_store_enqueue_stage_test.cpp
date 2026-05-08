@@ -79,7 +79,7 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, EligibleResponseEnqueuesL2Store) {
         if (worker_queue.shards[i].store_count > 0) {
             auto& slot = worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head];
             std::uint32_t body_slot = slot.body_slot;
-            EXPECT_STREQ(worker_queue.shards[i].body_pool.bodies[body_slot], "hello");
+            EXPECT_STREQ(worker_queue.shards[i].body_pool.heap_bodies[body_slot], "hello");
             EXPECT_EQ(slot.body_len, 5u);
             found = true;
             break;
@@ -133,7 +133,7 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, L2StoreJobOwnsBodyMemory) {
         if (worker_queue.shards[i].store_count > 0) {
             auto& slot = worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head];
             std::uint32_t body_slot = slot.body_slot;
-            EXPECT_STREQ(worker_queue.shards[i].body_pool.bodies[body_slot], "world");
+            EXPECT_STREQ(worker_queue.shards[i].body_pool.heap_bodies[body_slot], "world");
             found = true;
             break;
         }
@@ -141,8 +141,17 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, L2StoreJobOwnsBodyMemory) {
     EXPECT_TRUE(found);
 }
 
+TEST_F(L2CacheAsyncStoreEnqueueStageTest, Large65KBBodyEnqueuesSuccessfully) {
+    ctx.response_body_len = runtime::kAsyncL2LookupScratchSize + 1;
+    cache_key_prepare_stage(ctx);
+    auto output = l2_cache_async_store_enqueue_stage(ctx);
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+    EXPECT_STREQ(output.note, "enqueued");
+    EXPECT_EQ(metrics.l2_async_store_total.load(), 1);
+}
+
 TEST_F(L2CacheAsyncStoreEnqueueStageTest, OversizedBodySkipsAsyncL2Store) {
-    ctx.response_body_len = runtime::kAsyncL2MaxBodySize + 1;
+    ctx.response_body_len = runtime::kAsyncL2StoreMaxBodySize + 1;
     cache_key_prepare_stage(ctx);
     auto output = l2_cache_async_store_enqueue_stage(ctx);
     EXPECT_EQ(output.result, apg::StageResult::Continue);

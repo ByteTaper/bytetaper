@@ -51,18 +51,33 @@ apg::StageOutput l2_cache_async_store_enqueue_stage(apg::ApgTransformContext& co
     }
 
     // 8. Body size cap
-    if (context.response_body_len > runtime::kAsyncL2MaxBodySize) {
+    if (context.response_body_len > runtime::kAsyncL2StoreMaxBodySize) {
         metrics::record_runtime_event(context.runtime_metrics,
                                       metrics::RuntimeMetricEvent::L2StoreOversizedSkipped);
         return { apg::StageResult::Continue, "body-too-large" };
     }
 
-    if (!context.cache_key_ready) {
+    const char* key = context.cache_key;
+    std::int64_t ttl_ms =
+        static_cast<std::int64_t>(context.matched_policy->cache.ttl_seconds) * 1000;
+
+    if (context.selected_field_count > 0 && context.matched_policy->cache.field_variant.enabled) {
+        if (context.variant_cache_key_ready && context.variant_admission_passed) {
+            key = context.variant_cache_key;
+            const auto& fv_policy = context.matched_policy->cache.field_variant;
+            if (fv_policy.ttl_max_ms > 0 && ttl_ms > fv_policy.ttl_max_ms) {
+                ttl_ms = fv_policy.ttl_max_ms;
+            }
+        } else {
+            return { apg::StageResult::Continue, "has-query-selection-not-admitted-skip" };
+        }
+    } else if (!context.cache_key_ready) {
         return { apg::StageResult::Continue, "key-not-ready" };
     }
 
     runtime::L2StoreJob job{};
-    std::memcpy(job.key, context.cache_key, cache::kCacheKeyMaxLen);
+    std::strncpy(job.key, key, cache::kCacheKeyMaxLen - 1);
+    job.key[cache::kCacheKeyMaxLen - 1] = '\0';
 
     // 10. Populate CacheEntry metadata
     std::memcpy(job.entry.key, job.key, sizeof(job.key));
@@ -73,8 +88,7 @@ apg::StageOutput l2_cache_async_store_enqueue_stage(apg::ApgTransformContext& co
     job.entry.body_len = context.response_body_len;
     job.entry.created_at_epoch_ms = context.request_epoch_ms;
     job.entry.expires_at_epoch_ms =
-        context.request_epoch_ms +
-        static_cast<std::int64_t>(context.matched_policy->cache.ttl_seconds) * 1000;
+        (context.request_epoch_ms > 0) ? context.request_epoch_ms + ttl_ms : 0;
 
     job.body_len = context.response_body_len;
 

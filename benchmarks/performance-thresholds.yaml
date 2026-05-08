@@ -27,6 +27,17 @@ compression_coordination:
   min_payload_reduction_ratio: 0.00
 
 coalescing_burst:
+  max_p95_overhead_ms: 800.0      # was 150; slow path includes follower fallbacks
+  max_error_rate: 0.05
+  min_payload_reduction_ratio: 0.00
+  # Coalescing correctness thresholds (Leg A fast path)
+  min_coalescing_ratio_leg_a: 0.80       # >= 80% coalescing on fast path
+  max_follower_unaccounted_leg_a: 0      # zero unaccounted followers required
+  max_follower_missing_leg_a: 0          # zero missing followers on fast path
+  # Leg B slow path
+  min_fallbacks_leg_b: 1                 # at least some fallbacks expected on slow path
+
+field_variant_cache:
   max_p95_overhead_ms: 150.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00

@@ -106,8 +106,8 @@ TEST_F(RuntimePartitionedQueueTest, AsyncL2StoreStillOwnsBodyMemory) {
     L2StoreJob& slot = q_->shards[shard_idx].store_slots[q_->shards[shard_idx].store_head];
     std::uint32_t body_slot = slot.body_slot;
 
-    EXPECT_STREQ(q_->shards[shard_idx].body_pool.bodies[body_slot], test_data);
-    EXPECT_EQ(slot.entry.body, q_->shards[shard_idx].body_pool.bodies[body_slot]);
+    EXPECT_STREQ(q_->shards[shard_idx].body_pool.heap_bodies[body_slot], test_data);
+    EXPECT_EQ(slot.entry.body, q_->shards[shard_idx].body_pool.heap_bodies[body_slot]);
 }
 
 TEST_F(RuntimePartitionedQueueTest, AsyncL2LookupStalePromotionStillRejected) {

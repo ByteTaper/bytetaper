@@ -96,7 +96,7 @@ TEST_F(WorkerQueueConcurrencyTest, WorkerDoesNotReadExpiredRequestPointer) {
             if (worker_queue.shards[i].store_count > 0) {
                 std::uint32_t body_slot =
                     worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head].body_slot;
-                EXPECT_EQ(worker_queue.shards[i].body_pool.bodies[body_slot][0], (char) 0xAA);
+                EXPECT_EQ(worker_queue.shards[i].body_pool.heap_bodies[body_slot][0], (char) 0xAA);
                 found = true;
                 break;
             }

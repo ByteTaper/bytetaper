@@ -22,11 +22,18 @@ apg::StageOutput l2_cache_lookup_stage(apg::ApgTransformContext& context) {
         return { apg::StageResult::Continue, "no-l2-cache" };
     }
 
-    if (!context.cache_key_ready) {
+    const char* key_buf = context.cache_key;
+    bool is_variant = false;
+    if (context.selected_field_count > 0 && context.matched_policy->cache.field_variant.enabled) {
+        if (context.variant_cache_key_ready && context.variant_admission_passed) {
+            key_buf = context.variant_cache_key;
+            is_variant = true;
+        } else {
+            return { apg::StageResult::Continue, "has-query-selection-not-admitted-skip" };
+        }
+    } else if (!context.cache_key_ready) {
         return { apg::StageResult::Continue, "key-not-ready" };
     }
-
-    const char* key_buf = context.cache_key;
 
     // L2 lookup
     cache::CacheEntry hit{};
@@ -41,11 +48,11 @@ apg::StageOutput l2_cache_lookup_stage(apg::ApgTransformContext& context) {
     }
 
     context.cache_hit = true;
-    context.cache_layer = "L2";
+    context.cache_layer = is_variant ? "L2_VAR" : "L2";
     context.should_return_immediate_response = true;
     context.cached_response = hit;
 
-    return { apg::StageResult::SkipRemaining, "l2-hit" };
+    return { apg::StageResult::SkipRemaining, is_variant ? "l2-variant-hit" : "l2-hit" };
 }
 
 } // namespace bytetaper::stages

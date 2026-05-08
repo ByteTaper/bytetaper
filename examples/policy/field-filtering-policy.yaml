@@ -4,9 +4,25 @@ routes:
       kind: exact
       prefix: /medium-json
     mutation: full
+    cache:
+      behavior: store
+      ttl_seconds: 60
+      field_variant:
+        enabled: true
+        max_variants_per_route: 8
+        admission_threshold: 2
+        ttl_max_ms: 10000
 
   - id: "large-filtering"
     match:
       kind: exact
       prefix: /large-json
     mutation: full
+    cache:
+      behavior: store
+      ttl_seconds: 60
+      field_variant:
+        enabled: true
+        max_variants_per_route: 8
+        admission_threshold: 2
+        ttl_max_ms: 10000

@@ -65,11 +65,7 @@ max_p95=$(get_threshold "$scenario" "max_p95_overhead_ms")
 max_error=$(get_threshold "$scenario" "max_error_rate")
 min_ratio=$(get_threshold "$scenario" "min_payload_reduction_ratio")
 
-# Since coalescing timeout is configurable and includes fallbacks and upstream retries, 
-# we allow up to 800.0 ms P95 latency for the coalescing_burst scenario.
-if [ "$scenario" = "coalescing_burst" ]; then
-    max_p95="800.0"
-fi
+
 
 # If no thresholds configured, exit success
 if [ -z "$max_p95" ]; then
@@ -138,6 +134,60 @@ while IFS= read -r leg; do
     echo ""
 
 done < <(jq -r '.latency_ms | keys[]' "$JSON_FILE" || echo "main")
+
+# Coalescing correctness checks (coalescing_burst only)
+if [ "$scenario" = "coalescing_burst" ]; then
+    min_coal_ratio=$(get_threshold "$scenario" "min_coalescing_ratio_leg_a")
+    max_unaccounted=$(get_threshold "$scenario" "max_follower_unaccounted_leg_a")
+    max_missing=$(get_threshold "$scenario" "max_follower_missing_leg_a")
+    min_fb_b=$(get_threshold "$scenario" "min_fallbacks_leg_b")
+
+    for leg in "Leg A" "Leg B"; do
+        coal_ratio=$(jq -r --arg l "$leg" '.coalescing[$l].coalescing_ratio // "n/a"' "$JSON_FILE")
+        unaccounted=$(jq -r --arg l "$leg" '.coalescing[$l].follower_unaccounted // "n/a"' "$JSON_FILE")
+        missing=$(jq -r --arg l "$leg" '.coalescing[$l].follower_missing // "n/a"' "$JSON_FILE")
+        fallbacks=$(jq -r --arg l "$leg" '.coalescing[$l].fallbacks // "n/a"' "$JSON_FILE")
+
+        if [ "$leg" = "Leg A" ]; then
+            # Min coalescing ratio
+            if [ "$coal_ratio" != "n/a" ] && [ -n "$min_coal_ratio" ] && [ "$coal_ratio" != "null" ]; then
+                if is_less "$coal_ratio" "$min_coal_ratio"; then
+                    echo "  [FAIL] $leg coalescing_ratio: $coal_ratio (min $min_coal_ratio)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg coalescing_ratio: $coal_ratio (Threshold: min $min_coal_ratio)"
+                fi
+            fi
+            # Max unaccounted
+            if [ "$unaccounted" != "n/a" ] && [ -n "$max_unaccounted" ] && [ "$unaccounted" != "null" ]; then
+                if [ "$unaccounted" -gt "$max_unaccounted" ]; then
+                    echo "  [FAIL] $leg follower_unaccounted: $unaccounted (max $max_unaccounted)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg follower_unaccounted: $unaccounted (Threshold: max $max_unaccounted)"
+                fi
+            fi
+            # Max missing
+            if [ "$missing" != "n/a" ] && [ -n "$max_missing" ] && [ "$missing" != "null" ]; then
+                if [ "$missing" -gt "$max_missing" ]; then
+                    echo "  [FAIL] $leg follower_missing: $missing (max $max_missing)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg follower_missing: $missing (Threshold: max $max_missing)"
+                fi
+            fi
+        fi
+
+        if [ "$leg" = "Leg B" ] && [ -n "$min_fb_b" ] && [ "$min_fb_b" != "null" ]; then
+            if [ "$fallbacks" != "n/a" ] && [ "$fallbacks" != "null" ] && [ "$fallbacks" -lt "$min_fb_b" ]; then
+                echo "  [FAIL] $leg fallbacks: $fallbacks (expected >= $min_fb_b on slow path)" >&2
+                failed_checks=$((failed_checks + 1))
+            else
+                echo "  [PASS] $leg fallbacks: $fallbacks (Threshold: >= $min_fb_b)"
+            fi
+        fi
+    done
+fi
 
 if [ "$failed_checks" -gt 0 ]; then
     echo "=== Threshold Validation FAILED ($failed_checks breaches detected) ===" >&2

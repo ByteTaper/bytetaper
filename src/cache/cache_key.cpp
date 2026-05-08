@@ -43,30 +43,49 @@ bool build_cache_key(const CacheKeyInput& input, char* out_buf, std::size_t out_
         return false;
     }
 
-    // Copy and sort selected_fields pointers (selection sort, max 16 elements).
-    const std::size_t count = input.selected_field_count < policy::kMaxFields
-                                  ? input.selected_field_count
-                                  : policy::kMaxFields;
-    const char* sorted[policy::kMaxFields];
-    for (std::size_t i = 0; i < count; ++i) {
-        sorted[i] = (input.selected_fields != nullptr) ? input.selected_fields[i] : "";
+    // Copy and sort/dedup selected_fields pointers (max 16 elements).
+    const std::size_t input_count = input.selected_field_count < policy::kMaxFields
+                                        ? input.selected_field_count
+                                        : policy::kMaxFields;
+    const char* temp_sorted[policy::kMaxFields];
+    for (std::size_t i = 0; i < input_count; ++i) {
+        temp_sorted[i] = (input.selected_fields != nullptr) ? input.selected_fields[i] : "";
     }
-    for (std::size_t i = 0; i < count; ++i) {
+
+    // First sort them alphabetically
+    for (std::size_t i = 0; i < input_count; ++i) {
         std::size_t min_idx = i;
-        for (std::size_t j = i + 1; j < count; ++j) {
-            if (std::strncmp(sorted[j], sorted[min_idx], policy::kMaxFieldNameLen) < 0) {
+        for (std::size_t j = i + 1; j < input_count; ++j) {
+            if (std::strncmp(temp_sorted[j], temp_sorted[min_idx], policy::kMaxFieldNameLen) < 0) {
                 min_idx = j;
             }
         }
         if (min_idx != i) {
-            const char* tmp = sorted[i];
-            sorted[i] = sorted[min_idx];
-            sorted[min_idx] = tmp;
+            const char* tmp = temp_sorted[i];
+            temp_sorted[i] = temp_sorted[min_idx];
+            temp_sorted[min_idx] = tmp;
+        }
+    }
+
+    // Now deduplicate adjacent duplicates
+    const char* sorted[policy::kMaxFields];
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < input_count; ++i) {
+        if (i == 0 ||
+            std::strncmp(temp_sorted[i], temp_sorted[i - 1], policy::kMaxFieldNameLen) != 0) {
+            sorted[count++] = temp_sorted[i];
         }
     }
 
     char* pos = out_buf;
     std::size_t remaining = out_size - 1;
+
+    // Emit "var:" prefix for variant keys
+    if (input.variant) {
+        if (!key_append(&pos, &remaining, "var:", 4)) {
+            return false;
+        }
+    }
 
     // Format: GET|{route_id}|{path}|{query}|{f1},{f2}|{policy_version}
     if (!key_append(&pos, &remaining, "GET|", 4)) {
@@ -131,6 +150,80 @@ bool build_cache_key(const CacheKeyInput& input, char* out_buf, std::size_t out_
 
     *pos = '\0';
     return true;
+}
+
+std::size_t sanitize_query_strip_fields_param(const char* query, char* out_buf,
+                                              std::size_t out_size) {
+    if (query == nullptr || out_buf == nullptr || out_size == 0) {
+        if (out_buf != nullptr && out_size > 0) {
+            out_buf[0] = '\0';
+        }
+        return 0;
+    }
+
+    const char* p = query;
+    bool has_leading_q = (*p == '?');
+    if (has_leading_q) {
+        p++;
+    }
+
+    char* dest = out_buf;
+    std::size_t dest_remaining = out_size - 1; // reserve for null terminator
+
+    char* dest_start = dest;
+    if (has_leading_q) {
+        dest++;
+        dest_remaining--;
+    }
+
+    bool first = true;
+    while (*p != '\0') {
+        const char* param_start = p;
+        while (*p != '\0' && *p != '&') {
+            p++;
+        }
+        std::size_t param_len = p - param_start;
+
+        bool is_fields = false;
+        if (param_len >= 7 && std::strncmp(param_start, "fields=", 7) == 0) {
+            is_fields = true;
+        }
+
+        if (!is_fields && param_len > 0) {
+            std::size_t needed = param_len;
+            if (!first) {
+                needed += 1; // for '&'
+            }
+            if (needed > dest_remaining) {
+                out_buf[0] = '\0';
+                return 0; // overflow
+            }
+            if (!first) {
+                *dest++ = '&';
+                dest_remaining--;
+            }
+            std::memcpy(dest, param_start, param_len);
+            dest += param_len;
+            dest_remaining -= param_len;
+            first = false;
+        }
+
+        if (*p == '&') {
+            p++;
+        }
+    }
+
+    if (dest == (has_leading_q ? dest_start + 1 : dest_start)) {
+        dest_start[0] = '\0';
+        return 0;
+    }
+
+    if (has_leading_q) {
+        dest_start[0] = '?';
+    }
+
+    *dest = '\0';
+    return dest - dest_start;
 }
 
 } // namespace bytetaper::cache
