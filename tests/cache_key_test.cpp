@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
 #include "cache/cache_key.h"
+#include "cache/cache_safety.h"
 
 #include <cstring>
 #include <gtest/gtest.h>
@@ -184,6 +185,65 @@ TEST(CacheKeyTest, SanitizeQueryStripFieldsParam) {
 
     // 6. Null input
     EXPECT_EQ(sanitize_query_strip_fields_param(nullptr, out, sizeof(out)), 0u);
+}
+
+TEST(CacheKeyTest, VaryHeader_DifferentValues_DifferentKeys) {
+    char key1[512] = {};
+    char key2[512] = {};
+    CacheKeyInput input = make_basic_input();
+
+    input.vary_headers[0] = { "accept-language", "abcd1234" };
+    input.vary_header_count = 1;
+    EXPECT_TRUE(build_cache_key(input, key1, sizeof(key1)));
+
+    input.vary_headers[0] = { "accept-language", "5678efgh" };
+    EXPECT_TRUE(build_cache_key(input, key2, sizeof(key2)));
+
+    EXPECT_NE(std::strcmp(key1, key2), 0);
+    EXPECT_NE(std::strstr(key1, "vary:accept-language=abcd1234"), nullptr);
+    EXPECT_NE(std::strstr(key2, "vary:accept-language=5678efgh"), nullptr);
+}
+
+TEST(CacheKeyTest, VaryHeader_SameValues_SameKeys) {
+    char key1[512] = {};
+    char key2[512] = {};
+    CacheKeyInput input = make_basic_input();
+
+    input.vary_headers[0] = { "accept-language", "abcd1234" };
+    input.vary_header_count = 1;
+    EXPECT_TRUE(build_cache_key(input, key1, sizeof(key1)));
+    EXPECT_TRUE(build_cache_key(input, key2, sizeof(key2)));
+
+    EXPECT_STREQ(key1, key2);
+}
+
+TEST(CacheKeyTest, VaryHeader_NoHeadersConfigured_NoSegment) {
+    char key[512] = {};
+    CacheKeyInput input = make_basic_input();
+    input.vary_header_count = 0;
+    EXPECT_TRUE(build_cache_key(input, key, sizeof(key)));
+    EXPECT_EQ(std::strstr(key, "vary:"), nullptr);
+}
+
+TEST(CacheKeyTest, VaryHeader_MultipleHeaders_AllIncluded) {
+    char key[512] = {};
+    CacheKeyInput input = make_basic_input();
+
+    input.vary_headers[0] = { "accept-language", "abcd1234" };
+    input.vary_headers[1] = { "x-api-version", "9999" };
+    input.vary_header_count = 2;
+    EXPECT_TRUE(build_cache_key(input, key, sizeof(key)));
+
+    EXPECT_NE(std::strstr(key, "vary:accept-language=abcd1234,x-api-version=9999"), nullptr);
+}
+
+TEST(CacheKeyTest, VaryHeader_EmptyValueSentinelDiffersFromMissingSentinel) {
+    // Proves the two sentinels used by prepare_cache_vary_context() hash differently.
+    char h_missing[17] = {};
+    char h_empty[17] = {};
+    EXPECT_TRUE(build_cache_vary_value_hash("<missing>", 9, h_missing, sizeof(h_missing)));
+    EXPECT_TRUE(build_cache_vary_value_hash("<empty>", 7, h_empty, sizeof(h_empty)));
+    EXPECT_STRNE(h_missing, h_empty);
 }
 
 } // namespace bytetaper::cache

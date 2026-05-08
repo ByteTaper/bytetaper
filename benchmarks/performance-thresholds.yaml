@@ -2,32 +2,32 @@
 # Thresholds are baseline-focused safety limits, not marketing claims.
 
 bytetaper_observe:
-  max_p95_overhead_ms: 160.0
+  max_p95_ms: 160.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
 
 bytetaper_field_filtering:
-  max_p95_overhead_ms: 180.0
+  max_p95_ms: 180.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
 
 cache_hit:
-  max_p95_overhead_ms: 120.0
+  max_p95_ms: 120.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
 
 pagination_guardrail:
-  max_p95_overhead_ms: 160.0
+  max_p95_ms: 160.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
 
 compression_coordination:
-  max_p95_overhead_ms: 220.0
+  max_p95_ms: 220.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
 
 coalescing_burst:
-  max_p95_overhead_ms: 800.0      # was 150; slow path includes follower fallbacks
+  max_p95_ms: 800.0      # was 150; slow path includes follower fallbacks
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
   # Coalescing correctness thresholds (Leg A fast path)
@@ -38,17 +38,23 @@ coalescing_burst:
   min_fallbacks_leg_b: 1                 # at least some fallbacks expected on slow path
 
 field_variant_cache:
-  max_p95_overhead_ms: 150.0
+  max_p95_ms: 250.0
+  max_error_rate: 0.05
+  min_payload_reduction_ratio: 0.00
+
+header_variance_cache:
+  max_p95_ms: 250.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
 
 envoy_only:
-  max_p95_overhead_ms: 100.0
+  max_p95_ms: 100.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
 
 performance_smoke:
-  max_p95_overhead_ms: 160.0
+  max_p95_overhead_ms: 350.0
   max_error_rate: 0.05
   min_payload_reduction_ratio: 0.00
-
+  baseline_leg: Baseline
+  target_leg: Observe

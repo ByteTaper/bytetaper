@@ -4,12 +4,18 @@
 #ifndef BYTETAPER_CACHE_CACHE_KEY_H
 #define BYTETAPER_CACHE_CACHE_KEY_H
 
+#include "policy/cache_policy.h"
 #include "policy/field_filter_policy.h"
 #include "policy/method_matcher.h"
 
 #include <cstddef>
 
 namespace bytetaper::cache {
+
+struct CacheVaryKeyPart {
+    const char* name = nullptr;
+    const char* value_hash = nullptr;
+};
 
 struct CacheKeyInput {
     policy::HttpMethod method = policy::HttpMethod::Get;
@@ -19,6 +25,8 @@ struct CacheKeyInput {
     const char (*selected_fields)[policy::kMaxFieldNameLen] = nullptr;
     std::size_t selected_field_count = 0;
     const char* policy_version = nullptr;
+    CacheVaryKeyPart vary_headers[policy::kMaxCacheVaryHeaders] = {};
+    std::size_t vary_header_count = 0;
     bool private_cache = false;       // when true, auth_scope is required
     const char* auth_scope = nullptr; // opaque derived scope — never the raw token
     bool variant = false;             // when true, emits "var:" namespace prefix

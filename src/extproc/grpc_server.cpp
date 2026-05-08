@@ -154,6 +154,48 @@ static void prepare_cache_auth_context(const envoy::config::core::v3::HeaderMap&
     }
 }
 
+static void prepare_cache_vary_context(const envoy::config::core::v3::HeaderMap& headers,
+                                       const policy::RoutePolicy* pol,
+                                       apg::ApgTransformContext* ctx) {
+    ctx->cache_vary_count = 0;
+    ctx->cache_vary_ready = false;
+
+    if (pol == nullptr || pol->cache.vary_headers.count == 0) {
+        ctx->cache_vary_ready = true;
+        return;
+    }
+
+    for (std::size_t i = 0; i < pol->cache.vary_headers.count; ++i) {
+        const char* hdr_name = pol->cache.vary_headers.names[i];
+        const char* raw_val = nullptr;
+        std::size_t raw_len = 0;
+
+        std::strncpy(ctx->cache_vary_names[i], hdr_name, policy::kMaxCacheVaryHeaderNameLen - 1);
+
+        const bool found =
+            extproc::read_header_value_case_insensitive(headers, hdr_name, &raw_val, &raw_len);
+
+        if (found && raw_val != nullptr && raw_len > 0) {
+            cache::build_cache_vary_value_hash(raw_val, raw_len, ctx->cache_vary_value_hashes[i],
+                                               sizeof(ctx->cache_vary_value_hashes[i]));
+        } else if (found) {
+            // Header present but empty: stable sentinel
+            static constexpr char kEmpty[] = "<empty>";
+            cache::build_cache_vary_value_hash(kEmpty, sizeof(kEmpty) - 1,
+                                               ctx->cache_vary_value_hashes[i],
+                                               sizeof(ctx->cache_vary_value_hashes[i]));
+        } else {
+            // Missing header: stable sentinel so absent != empty-string
+            static constexpr char kMissing[] = "<missing>";
+            cache::build_cache_vary_value_hash(kMissing, sizeof(kMissing) - 1,
+                                               ctx->cache_vary_value_hashes[i],
+                                               sizeof(ctx->cache_vary_value_hashes[i]));
+        }
+        ++ctx->cache_vary_count;
+    }
+    ctx->cache_vary_ready = true;
+}
+
 RequestHeaderView
 apply_request_headers_selection(const envoy::service::ext_proc::v3::ProcessingRequest& request,
                                 StreamFilterState* state) {
@@ -530,6 +572,8 @@ public:
                     filter_state.context.matched_policy = filter_state.matched_policy;
                     prepare_cache_auth_context(request.request_headers().headers(), req_view,
                                                &filter_state.context);
+                    prepare_cache_vary_context(request.request_headers().headers(),
+                                               filter_state.matched_policy, &filter_state.context);
                     filter_state.context.l1_cache = l1_cache;
                     filter_state.context.l2_cache = l2_cache;
                     filter_state.context.coalescing_registry = coalescing_registry;

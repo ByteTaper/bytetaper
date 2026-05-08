@@ -237,4 +237,43 @@ TEST_F(CacheKeyPrepareStageTest, PrivateCache_DifferentScopes_DifferentKeys) {
     EXPECT_STRNE(key1, context.cache_key);
 }
 
+TEST_F(CacheKeyPrepareStageTest, VaryHeader_IncludedInRawKey) {
+    context.cache_vary_ready = true;
+    context.cache_vary_count = 1;
+    std::strncpy(context.cache_vary_names[0], "accept-language",
+                 sizeof(context.cache_vary_names[0]) - 1);
+    std::strncpy(context.cache_vary_value_hashes[0], "abcd1234abcd1234",
+                 sizeof(context.cache_vary_value_hashes[0]) - 1);
+
+    auto result = cache_key_prepare_stage(context);
+    EXPECT_EQ(result.result, apg::StageResult::Continue);
+    EXPECT_TRUE(context.cache_key_ready);
+    EXPECT_NE(std::strstr(context.cache_key, "vary:accept-language=abcd1234abcd1234"), nullptr);
+}
+
+TEST_F(CacheKeyPrepareStageTest, VaryHeader_IncludedInVariantKey) {
+    policy.cache.field_variant.enabled = true;
+    context.cache_vary_ready = true;
+    context.cache_vary_count = 1;
+    std::strncpy(context.cache_vary_names[0], "accept-language",
+                 sizeof(context.cache_vary_names[0]) - 1);
+    std::strncpy(context.cache_vary_value_hashes[0], "abcd1234abcd1234",
+                 sizeof(context.cache_vary_value_hashes[0]) - 1);
+
+    auto result = cache_key_prepare_stage(context);
+    EXPECT_EQ(result.result, apg::StageResult::Continue);
+    EXPECT_TRUE(context.cache_key_ready);
+    EXPECT_TRUE(context.variant_cache_key_ready);
+    EXPECT_NE(std::strstr(context.variant_cache_key, "vary:accept-language=abcd1234abcd1234"),
+              nullptr);
+}
+
+TEST_F(CacheKeyPrepareStageTest, VaryHeader_NotReady_ZeroCount) {
+    context.cache_vary_ready = false;
+    auto result = cache_key_prepare_stage(context);
+    EXPECT_EQ(result.result, apg::StageResult::Continue);
+    EXPECT_TRUE(context.cache_key_ready);
+    EXPECT_EQ(std::strstr(context.cache_key, "vary:"), nullptr);
+}
+
 } // namespace bytetaper::stages

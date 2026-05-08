@@ -152,7 +152,8 @@ TEST_F(WorkerQueueConcurrencyTest, L1StoreBeforeLeaderCompletion) {
     cache::CacheEntry hit{};
     char body_buf[cache::kL1MaxBodySize];
     EXPECT_TRUE(cache::l1_get(this->l1_cache.get(), key_buf, 0, &hit, body_buf, sizeof(body_buf)));
-    EXPECT_STREQ((const char*) hit.body, "test_body");
+    EXPECT_EQ(hit.body_len, 9);
+    EXPECT_EQ(std::string_view((const char*) hit.body, hit.body_len), "test_body");
 }
 
 TEST_F(WorkerQueueConcurrencyTest, FollowerCanReadL1AfterLeaderCompletion) {

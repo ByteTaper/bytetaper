@@ -33,4 +33,18 @@ bool build_private_cache_scope_hash(const char* raw_scope, std::size_t raw_scope
     return true;
 }
 
+bool build_cache_vary_value_hash(const char* raw_value, std::size_t raw_value_len, char* out,
+                                 std::size_t out_size) {
+    if (raw_value == nullptr || raw_value_len == 0 || out == nullptr || out_size < 17) {
+        return false;
+    }
+    std::uint64_t h = 14695981039346656037ULL;
+    for (std::size_t i = 0; i < raw_value_len; ++i) {
+        h ^= static_cast<std::uint8_t>(raw_value[i]);
+        h *= 1099511628211ULL;
+    }
+    std::snprintf(out, out_size, "%016llx", static_cast<unsigned long long>(h));
+    return true;
+}
+
 } // namespace bytetaper::cache

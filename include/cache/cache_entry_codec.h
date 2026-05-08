@@ -11,14 +11,20 @@
 namespace bytetaper::cache {
 
 // Fixed overhead bytes in an encoded entry (header without body).
-// char[512] key
-// uint16_t status_code
-// char[64] content_type
-// uint64_t body_len
-// int64_t created_at_epoch_ms
-// int64_t expires_at_epoch_ms
-// Total = 512 + 2 + 64 + 8 + 8 + 8 = 602 bytes
-static constexpr std::size_t kCacheEntryEncodedOverhead = 602;
+// char[kCacheKeyMaxLen]          key
+// uint16_t                       status_code
+// char[kCacheContentTypeMaxLen]  content_type
+// uint64_t                       body_len
+// int64_t                        created_at_epoch_ms
+// int64_t                        expires_at_epoch_ms
+static constexpr std::size_t kCacheEntryEncodedOverhead =
+    kCacheKeyMaxLen           // 1024
+    + sizeof(std::uint16_t)   //    2
+    + kCacheContentTypeMaxLen //   64
+    + sizeof(std::uint64_t)   //    8
+    + sizeof(std::int64_t)    //    8
+    + sizeof(std::int64_t);   //    8
+                              // = 1114 bytes with current constants
 
 // Encodes entry into buf[buf_size]. Returns bytes written, or 0 on failure
 // (buf too small or entry.body_len + kCacheEntryEncodedOverhead > buf_size).

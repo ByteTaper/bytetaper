@@ -44,8 +44,9 @@ get_threshold() {
         $0 ~ "^" s ":" { in_scen=1; next }
         in_scen && /^[^ ]/ { in_scen=0 }
         in_scen && $1 ~ k {
-            sub(/:/, "", $1)
-            print $2
+            sub(/^[^:]*:[[:space:]]*/, "", $0)
+            gsub(/^"|"$|^'\''|'\''$/, "", $0)
+            print $0
             exit
         }
     ' "$THRESHOLDS_FILE"
@@ -56,30 +57,76 @@ is_greater() {
     awk -v a="$1" -v b="$2" 'BEGIN { exit (a > b ? 0 : 1) }'
 }
 
+# Helper to compare floats using AWK
 is_less() {
     awk -v a="$1" -v b="$2" 'BEGIN { exit (a < b ? 0 : 1) }'
 }
 
 # Fetch configured thresholds
-max_p95=$(get_threshold "$scenario" "max_p95_overhead_ms")
+max_p95_ms=$(get_threshold "$scenario" "max_p95_ms")
+max_p95_overhead_ms=$(get_threshold "$scenario" "max_p95_overhead_ms")
 max_error=$(get_threshold "$scenario" "max_error_rate")
 min_ratio=$(get_threshold "$scenario" "min_payload_reduction_ratio")
 
-
-
 # If no thresholds configured, exit success
-if [ -z "$max_p95" ]; then
+if [ -z "$max_p95_ms" ] && [ -z "$max_p95_overhead_ms" ] && [ -z "$max_error" ] && [ -z "$min_ratio" ]; then
     echo "WARNING: No performance thresholds configured for scenario '$scenario'."
     exit 0
 fi
 
 echo "Configured Thresholds for '$scenario':"
-echo "  - Max P95 Latency: ${max_p95} ms"
+if [ -n "$max_p95_ms" ]; then
+    echo "  - Max P95 Latency (Absolute): ${max_p95_ms} ms"
+fi
+if [ -n "$max_p95_overhead_ms" ]; then
+    echo "  - Max P95 Overhead: ${max_p95_overhead_ms} ms"
+    baseline_leg_cfg=$(get_threshold "$scenario" "baseline_leg")
+    target_leg_cfg=$(get_threshold "$scenario" "target_leg")
+    baseline_leg_cfg="${baseline_leg_cfg:-Baseline}"
+    target_leg_cfg="${target_leg_cfg:-Observe}"
+    echo "    - Baseline Leg: '${baseline_leg_cfg}'"
+    echo "    - Target Leg: '${target_leg_cfg}'"
+fi
 echo "  - Max Error Rate: ${max_error}"
 echo "  - Min Payload Reduction Ratio: ${min_ratio}%"
 echo ""
 
 failed_checks=0
+
+# 1. P95 Overhead Latency Check (done once outside the per-leg loop)
+if [ -n "$max_p95_overhead_ms" ]; then
+    baseline_leg_cfg=$(get_threshold "$scenario" "baseline_leg")
+    target_leg_cfg=$(get_threshold "$scenario" "target_leg")
+    baseline_leg_cfg="${baseline_leg_cfg:-Baseline}"
+    target_leg_cfg="${target_leg_cfg:-Observe}"
+
+    baseline_p95=$(jq -r ".latency_ms.\"$baseline_leg_cfg\".latency_ms.p95" "$JSON_FILE" || echo "null")
+    target_p95=$(jq -r ".latency_ms.\"$target_leg_cfg\".latency_ms.p95" "$JSON_FILE" || echo "null")
+
+    if [ "$baseline_p95" = "null" ] || [ -z "$baseline_p95" ] || [ "$baseline_p95" = "unavailable" ]; then
+        echo "ERROR: Overhead threshold configured but baseline leg '$baseline_leg_cfg' data is missing or unavailable." >&2
+        failed_checks=$((failed_checks + 1))
+    elif [ "$target_p95" = "null" ] || [ -z "$target_p95" ] || [ "$target_p95" = "unavailable" ]; then
+        echo "ERROR: Overhead threshold configured but target leg '$target_leg_cfg' data is missing or unavailable." >&2
+        failed_checks=$((failed_checks + 1))
+    else
+        overhead_ms=$(awk -v t="$target_p95" -v b="$baseline_p95" 'BEGIN {
+            diff = t - b
+            if (diff < 0) diff = 0.0
+            print diff
+        }')
+
+        if is_greater "$overhead_ms" "$max_p95_overhead_ms"; then
+            echo "Checking Overhead for target leg '$target_leg_cfg' against baseline leg '$baseline_leg_cfg':"
+            echo "  [FAIL] P95 Overhead: ${overhead_ms} ms (Baseline: ${baseline_p95} ms, Target: ${target_p95} ms) (Threshold exceeded: max ${max_p95_overhead_ms} ms)" >&2
+            failed_checks=$((failed_checks + 1))
+        else
+            echo "Checking Overhead for target leg '$target_leg_cfg' against baseline leg '$baseline_leg_cfg':"
+            echo "  [PASS] P95 Overhead: ${overhead_ms} ms (Baseline: ${baseline_p95} ms, Target: ${target_p95} ms) (Threshold: max ${max_p95_overhead_ms} ms)"
+        fi
+    fi
+    echo ""
+fi
 
 # Iterate through legs
 legs=$(jq -r '.latency_ms | keys[]' "$JSON_FILE" || echo "main")
@@ -88,17 +135,19 @@ while IFS= read -r leg; do
     if [ -z "$leg" ]; then continue; fi
     echo "Checking metrics for Leg: '$leg'..."
 
-    # 1. P95 Latency Check
-    p95=$(jq -r ".latency_ms.\"$leg\".latency_ms.p95" "$JSON_FILE" || echo "unavailable")
-    if [ "$p95" != "unavailable" ] && [ -n "$p95" ] && [ "$p95" != "null" ]; then
-        if is_greater "$p95" "$max_p95"; then
-            echo "  [FAIL] P95 Latency: ${p95} ms (Threshold exceeded: max ${max_p95} ms)" >&2
-            failed_checks=$((failed_checks + 1))
+    # 1. Absolute P95 Latency Check (if max_p95_ms is configured)
+    if [ -n "$max_p95_ms" ]; then
+        p95=$(jq -r ".latency_ms.\"$leg\".latency_ms.p95" "$JSON_FILE" || echo "unavailable")
+        if [ "$p95" != "unavailable" ] && [ -n "$p95" ] && [ "$p95" != "null" ]; then
+            if is_greater "$p95" "$max_p95_ms"; then
+                echo "  [FAIL] P95 Latency: ${p95} ms (Threshold exceeded: max ${max_p95_ms} ms)" >&2
+                failed_checks=$((failed_checks + 1))
+            else
+                echo "  [PASS] P95 Latency: ${p95} ms (Threshold: max ${max_p95_ms} ms)"
+            fi
         else
-            echo "  [PASS] P95 Latency: ${p95} ms (Threshold: max ${max_p95} ms)"
+            echo "  [SKIP] P95 Latency is unavailable."
         fi
-    else
-        echo "  [SKIP] P95 Latency is unavailable."
     fi
 
     # 2. Error Rate Check

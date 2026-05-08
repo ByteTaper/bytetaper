@@ -111,4 +111,48 @@ routes:
     EXPECT_EQ(fv.ttl_max_ms, 150000u);
 }
 
+TEST(YamlLoaderCacheTest, ValidYamlCacheVaryHeaders) {
+    const char* yaml = R"(
+routes:
+  - id: "r1"
+    match: { kind: "prefix", prefix: "/" }
+    cache:
+      behavior: "store"
+      ttl_seconds: 300
+      vary_headers:
+        - "Accept-Language"
+        - "X-Api-Version"
+        - "accept-language"  # Duplicate case variation for dedup test
+)";
+    PolicyFileResult result{};
+    EXPECT_TRUE(load_policy_from_string(yaml, &result));
+    const auto& vh = result.policies[0].cache.vary_headers;
+    EXPECT_EQ(vh.count, 2u);
+    EXPECT_STREQ(vh.names[0], "accept-language");
+    EXPECT_STREQ(vh.names[1], "x-api-version");
+}
+
+TEST(YamlLoaderCacheTest, InvalidYamlCacheVaryHeadersTooMany) {
+    const char* yaml = R"(
+routes:
+  - id: "r1"
+    match: { kind: "prefix", prefix: "/" }
+    cache:
+      behavior: "store"
+      ttl_seconds: 300
+      vary_headers:
+        - "h1"
+        - "h2"
+        - "h3"
+        - "h4"
+        - "h5"
+        - "h6"
+        - "h7"
+        - "h8"
+        - "h9"
+)";
+    PolicyFileResult result{};
+    EXPECT_FALSE(load_policy_from_string(yaml, &result));
+}
+
 } // namespace bytetaper::policy

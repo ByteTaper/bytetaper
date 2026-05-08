@@ -29,6 +29,14 @@ struct CacheL2Policy {
     char path[kMaxCachePathLen] = {}; // required when enabled
 };
 
+static constexpr std::size_t kMaxCacheVaryHeaders = 8;
+static constexpr std::size_t kMaxCacheVaryHeaderNameLen = 64;
+
+struct CacheVaryHeaderPolicy {
+    char names[kMaxCacheVaryHeaders][kMaxCacheVaryHeaderNameLen] = {};
+    std::size_t count = 0;
+};
+
 struct CachePolicy {
     CacheBehavior behavior = CacheBehavior::Default;
     std::uint32_t ttl_seconds = 0;
@@ -38,6 +46,7 @@ struct CachePolicy {
     bool private_cache = false;      // opt-in: allows caching of authenticated requests
     char auth_scope_header[64] = {}; // required when private_cache=true; names the source header
     FieldVariantCachePolicy field_variant{};
+    CacheVaryHeaderPolicy vary_headers{};
 };
 
 // Returns nullptr on success, or a static error string on invalid configuration.

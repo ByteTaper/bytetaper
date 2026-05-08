@@ -1,0 +1,12 @@
+routes:
+  - id: "cache-vary-medium"
+    match:
+      kind: prefix
+      prefix: /small-json
+    mutation: full
+    cache:
+      enabled: true
+      behavior: store
+      ttl_seconds: 3600
+      vary_headers:
+        - accept-language

@@ -3,6 +3,7 @@
 
 #include "policy/yaml_loader.h"
 
+#include <cctype>
 #include <cstring>
 #include <yaml-cpp/yaml.h>
 
@@ -64,6 +65,12 @@ static void compute_route_policy_identity(const RoutePolicy& p, char* out, std::
     feed_u32(p.cache.field_variant.max_field_count);
     feed_u32(p.cache.field_variant.admission_threshold);
     feed_u32(p.cache.field_variant.ttl_max_ms);
+
+    // vary_headers
+    feed_u32(static_cast<uint32_t>(p.cache.vary_headers.count));
+    for (std::size_t i = 0; i < p.cache.vary_headers.count; ++i) {
+        feed_str(p.cache.vary_headers.names[i]);
+    }
 
     // pagination
     feed_u8(p.pagination.enabled ? 1 : 0);
@@ -309,6 +316,53 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
             if (fv_node["ttl_max_ms"]) {
                 policy.cache.field_variant.ttl_max_ms = fv_node["ttl_max_ms"].as<std::uint32_t>();
             }
+        }
+
+        if (cache_node["vary_headers"]) {
+            const YAML::Node& vh = cache_node["vary_headers"];
+            if (!vh.IsSequence()) {
+                result->error = "cache.vary_headers must be a list";
+                return false;
+            }
+            if (vh.size() > policy::kMaxCacheVaryHeaders) {
+                result->error = "too many cache.vary_headers (max 8)";
+                return false;
+            }
+            std::size_t vh_count = 0;
+            for (const auto& item : vh) {
+                if (!item.IsScalar()) {
+                    result->error = "cache.vary_headers entries must be strings";
+                    return false;
+                }
+                const std::string raw = item.as<std::string>();
+                if (raw.empty()) {
+                    result->error = "cache.vary_headers entry must not be empty";
+                    return false;
+                }
+                if (raw.size() >= policy::kMaxCacheVaryHeaderNameLen) {
+                    result->error = "cache.vary_headers entry name too long";
+                    return false;
+                }
+                // Normalize to lowercase
+                char lc[policy::kMaxCacheVaryHeaderNameLen] = {};
+                for (std::size_t i = 0; i < raw.size(); ++i) {
+                    lc[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(raw[i])));
+                }
+                // Deduplicate: skip if already present
+                bool dup = false;
+                for (std::size_t j = 0; j < vh_count; ++j) {
+                    if (std::strncmp(policy.cache.vary_headers.names[j], lc,
+                                     policy::kMaxCacheVaryHeaderNameLen) == 0) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup) {
+                    std::strncpy(policy.cache.vary_headers.names[vh_count++], lc,
+                                 policy::kMaxCacheVaryHeaderNameLen - 1);
+                }
+            }
+            policy.cache.vary_headers.count = vh_count;
         }
     }
 

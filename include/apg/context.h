@@ -93,6 +93,14 @@ struct ApgTransformContext {
     bool private_cache_scope_ready = false;
     char private_cache_scope_hash[32] = {};
 
+    // --- Prepared header vary state (populated during request header handling) ---
+    static constexpr std::size_t kMaxPreparedVaryHeaders = policy::kMaxCacheVaryHeaders;
+    static constexpr std::size_t kPreparedVaryHashLen = 17; // 16 hex + null
+    std::size_t cache_vary_count = 0;
+    char cache_vary_names[kMaxPreparedVaryHeaders][policy::kMaxCacheVaryHeaderNameLen] = {};
+    char cache_vary_value_hashes[kMaxPreparedVaryHeaders][kPreparedVaryHashLen] = {};
+    bool cache_vary_ready = false;
+
     // --- Cache lookup outputs (written by l1_cache_lookup_stage) ---
     bool cache_hit = false;
     const char* cache_layer = nullptr; // "L1" on hit, nullptr on miss

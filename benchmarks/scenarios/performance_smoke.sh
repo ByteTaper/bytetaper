@@ -31,9 +31,14 @@ cat "$REPORT_FILE"
 
 # Check target availability
 echo "Checking target availability..."
+if ! curl -s --fail "http://envoy-baseline:10000/api/v1/cached/fast/bench" > /dev/null; then
+    echo "ERROR: Target endpoint http://envoy-baseline:10000/api/v1/cached/fast/bench is unavailable."
+    echo "Status: Baseline UNAVAILABLE" >> "$REPORT_FILE"
+    exit 1
+fi
 if ! curl -s --fail "${TARGET_HOST}/api/v1/cached/fast/bench" > /dev/null; then
     echo "ERROR: Target endpoint ${TARGET_HOST}/api/v1/cached/fast/bench is unavailable."
-    echo "Status: UNAVAILABLE" >> "$REPORT_FILE"
+    echo "Status: Observe UNAVAILABLE" >> "$REPORT_FILE"
     exit 1
 fi
 echo "Targets are UP."
@@ -49,51 +54,48 @@ if [ "$baseline_body" != "$observe_body" ]; then
 fi
 echo "Response body equivalence verified successfully (100% identical)."
 
-# Executing rapid load test
+# Executing baseline load test
+echo "Starting rapid 3-second wrk smoke load test on baseline target..."
+WRK_BASELINE_OUT=$(mktemp)
+wrk -t2 -c10 -d3s -s benchmarks/lib/latency_reporter.lua --latency "http://envoy-baseline:10000/api/v1/cached/fast/bench" > "$WRK_BASELINE_OUT"
+cat "$WRK_BASELINE_OUT"
+
+JSON_BASELINE_LATENCY=$(./benchmarks/lib/latency_parser.sh "$WRK_BASELINE_OUT")
+JSON_BASELINE_THROUGHPUT=$(./benchmarks/lib/throughput_parser.sh "$WRK_BASELINE_OUT")
+JSON_BASELINE_STATS=$(./benchmarks/lib/container_stats.sh all)
+
+# Executing observe load test
 echo "Starting rapid 3-second wrk smoke load test on observe target..."
-WRK_OUT=$(mktemp)
+WRK_OBSERVE_OUT=$(mktemp)
+wrk -t2 -c10 -d3s -s benchmarks/lib/latency_reporter.lua --latency "${TARGET_HOST}/api/v1/cached/fast/bench" > "$WRK_OBSERVE_OUT"
+cat "$WRK_OBSERVE_OUT"
 
-wrk -t2 -c10 -d3s -s benchmarks/lib/latency_reporter.lua --latency "${TARGET_HOST}/api/v1/cached/fast/bench" > "$WRK_OUT"
-
-cat "$WRK_OUT"
-
-# Retrieve parsed latency percentiles
-JSON_LATENCY=$(./benchmarks/lib/latency_parser.sh "$WRK_OUT")
-p50=$(echo "$JSON_LATENCY" | jq -r '.latency_ms.p50')
-p95=$(echo "$JSON_LATENCY" | jq -r '.latency_ms.p95')
-p99=$(echo "$JSON_LATENCY" | jq -r '.latency_ms.p99')
-
-# Retrieve parsed throughput metrics
-JSON_THROUGHPUT=$(./benchmarks/lib/throughput_parser.sh "$WRK_OUT")
-total_reqs=$(echo "$JSON_THROUGHPUT" | jq -r '.total_requests')
-success_count=$(echo "$JSON_THROUGHPUT" | jq -r '.successful_requests')
-bytes_read=$(echo "$JSON_THROUGHPUT" | jq -r '.throughput.bytes_read' 2>/dev/null || echo "N/A")
-transfer_rate=$(echo "$JSON_THROUGHPUT" | jq -r '.throughput.transfer_rate' 2>/dev/null || echo "N/A")
-
-# Fetch peak container stats (gracefully handles lack of Docker socket)
-JSON_STATS=$(./benchmarks/lib/container_stats.sh all)
+JSON_OBSERVE_LATENCY=$(./benchmarks/lib/latency_parser.sh "$WRK_OBSERVE_OUT")
+JSON_OBSERVE_THROUGHPUT=$(./benchmarks/lib/throughput_parser.sh "$WRK_OBSERVE_OUT")
+JSON_OBSERVE_STATS=$(./benchmarks/lib/container_stats.sh all)
 
 # Calculate payload savings
 original_size=$(echo -n "$baseline_body" | wc -c)
 optimized_size=$(echo -n "$observe_body" | wc -c)
-JSON_SAVINGS=$(./benchmarks/lib/payload_savings_parser.sh "$original_size" "$optimized_size")
+JSON_BASELINE_SAVINGS=$(./benchmarks/lib/payload_savings_parser.sh "$original_size" "$original_size")
+JSON_OBSERVE_SAVINGS=$(./benchmarks/lib/payload_savings_parser.sh "$original_size" "$optimized_size")
 
 # Append metrics block to human-readable text report
 {
     echo "=== Parsed Scenario Metrics ==="
-    echo "Total Requests: $total_reqs"
-    echo "Success Count: $success_count"
-    echo "Bytes Read: $bytes_read"
-    echo "Transfer Rate: $transfer_rate"
     echo "Body Equivalence Match: YES"
-    echo "Latency JSON: $JSON_LATENCY"
-    echo "Throughput JSON: $JSON_THROUGHPUT"
-    echo "Container Stats JSON: $JSON_STATS"
-    echo "Payload Savings JSON: $JSON_SAVINGS"
+    echo "Baseline Latency JSON: $JSON_BASELINE_LATENCY"
+    echo "Baseline Throughput JSON: $JSON_BASELINE_THROUGHPUT"
+    echo "Baseline Container Stats JSON: $JSON_BASELINE_STATS"
+    echo "Baseline Payload Savings JSON: $JSON_BASELINE_SAVINGS"
+    echo "Observe Latency JSON: $JSON_OBSERVE_LATENCY"
+    echo "Observe Throughput JSON: $JSON_OBSERVE_THROUGHPUT"
+    echo "Observe Container Stats JSON: $JSON_OBSERVE_STATS"
+    echo "Observe Payload Savings JSON: $JSON_OBSERVE_SAVINGS"
 } >> "$REPORT_FILE"
 
 # Cleanup
-rm -f "$WRK_OUT"
+rm -f "$WRK_BASELINE_OUT" "$WRK_OBSERVE_OUT"
 
 # Validate report fields correctness
 ./benchmarks/report/validate.sh "$REPORT_FILE"

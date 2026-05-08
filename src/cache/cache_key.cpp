@@ -135,6 +135,32 @@ bool build_cache_key(const CacheKeyInput& input, char* out_buf, std::size_t out_
         }
     }
 
+    if (input.vary_header_count > 0) {
+        if (!key_append(&pos, &remaining, "|vary:", 6)) {
+            return false;
+        }
+        for (std::size_t i = 0; i < input.vary_header_count; ++i) {
+            if (i > 0 && !key_append_char(&pos, &remaining, ',')) {
+                return false;
+            }
+            if (input.vary_headers[i].name == nullptr ||
+                input.vary_headers[i].value_hash == nullptr) {
+                return false;
+            }
+            const std::size_t nlen = std::strlen(input.vary_headers[i].name);
+            if (!key_append(&pos, &remaining, input.vary_headers[i].name, nlen)) {
+                return false;
+            }
+            if (!key_append_char(&pos, &remaining, '=')) {
+                return false;
+            }
+            const std::size_t vlen = std::strlen(input.vary_headers[i].value_hash);
+            if (!key_append(&pos, &remaining, input.vary_headers[i].value_hash, vlen)) {
+                return false;
+            }
+        }
+    }
+
     if (input.private_cache) {
         if (input.auth_scope == nullptr || input.auth_scope[0] == '\0') {
             return false; // missing scope rejects private cache

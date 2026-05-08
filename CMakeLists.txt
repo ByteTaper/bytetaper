@@ -1949,6 +1949,7 @@ if(BUILD_TESTING)
     add_executable(cache_key_test
       tests/cache_key_test.cpp
       src/cache/cache_key.cpp
+      src/cache/cache_safety.cpp
     )
     target_include_directories(cache_key_test
       PRIVATE

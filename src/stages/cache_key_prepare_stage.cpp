@@ -63,6 +63,8 @@ apg::StageOutput cache_key_prepare_stage(apg::ApgTransformContext& context) {
         auth_scope = context.private_cache_scope_hash;
     }
 
+    const std::size_t vary_count = context.cache_vary_ready ? context.cache_vary_count : 0;
+
     cache::CacheKeyInput ki_raw{};
     ki_raw.method = context.request_method;
     ki_raw.route_id = context.matched_policy->route_id;
@@ -81,6 +83,12 @@ apg::StageOutput cache_key_prepare_stage(apg::ApgTransformContext& context) {
     ki_raw.policy_version = policy_version;
     ki_raw.private_cache = pol_private;
     ki_raw.auth_scope = auth_scope;
+
+    for (std::size_t i = 0; i < vary_count; ++i) {
+        ki_raw.vary_headers[i] = { context.cache_vary_names[i],
+                                   context.cache_vary_value_hashes[i] };
+    }
+    ki_raw.vary_header_count = vary_count;
 
     if (cache::build_cache_key(ki_raw, context.cache_key, sizeof(context.cache_key))) {
         context.cache_key_ready = true;
@@ -101,6 +109,12 @@ apg::StageOutput cache_key_prepare_stage(apg::ApgTransformContext& context) {
         ki_var.variant = true;
         ki_var.private_cache = pol_private;
         ki_var.auth_scope = auth_scope;
+
+        for (std::size_t i = 0; i < vary_count; ++i) {
+            ki_var.vary_headers[i] = { context.cache_vary_names[i],
+                                       context.cache_vary_value_hashes[i] };
+        }
+        ki_var.vary_header_count = vary_count;
 
         if (cache::build_cache_key(ki_var, context.variant_cache_key,
                                    sizeof(context.variant_cache_key))) {

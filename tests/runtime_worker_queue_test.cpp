@@ -242,8 +242,8 @@ TEST_F(WorkerQueueTest, RuntimeQueueShardFullDoesNotAffectOtherShard) {
 
 TEST_F(WorkerQueueTest, LookupJobDoesNotTouchBodyPool) {
     // Assert structural memory budget constraints
-    EXPECT_LT(sizeof(L2LookupJob), 1024u);
-    EXPECT_LT(sizeof(L2StoreJob), 2048u);
+    EXPECT_LT(sizeof(L2LookupJob), 1500u);
+    EXPECT_LT(sizeof(L2StoreJob), 3000u);
 
     WorkerQueueConfig cfg;
     cfg.worker_count = 1;

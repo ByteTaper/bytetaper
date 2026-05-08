@@ -25,6 +25,9 @@ bool cache_auth_bypass(bool has_authorization, bool has_cookie, bool private_cac
 bool build_private_cache_scope_hash(const char* raw_scope, std::size_t raw_scope_len, char* out,
                                     std::size_t out_size);
 
+bool build_cache_vary_value_hash(const char* raw_value, std::size_t raw_value_len, char* out,
+                                 std::size_t out_size);
+
 } // namespace bytetaper::cache
 
 #endif // BYTETAPER_CACHE_CACHE_SAFETY_H

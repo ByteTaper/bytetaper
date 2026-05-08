@@ -27,6 +27,9 @@ cache:
       path: "/var/cache/bytetaper/global"
   private_cache: false
   auth_scope_header: "Authorization"
+  vary_headers:
+    - "Accept-Language"
+    - "X-Client-Platform"
 ```
 
 ### Fields
@@ -42,6 +45,26 @@ cache:
 | `layers.l2.path` | string | Filesystem path for the RocksDB database (L2 only). |
 | `private_cache` | boolean | Allows caching of requests containing authentication headers. |
 | `auth_scope_header` | string | Header used to partition the cache (e.g., `Authorization`). |
+| `vary_headers` | list of strings | Optional list of headers to generate distinct cache key variants (max 8 headers). |
+
+## Header Variance (Cache Vary)
+
+For APIs that serve multi-tenant or multi-representation content depending on specific request headers (such as `Accept-Language`, `Accept-Encoding`, or platform-specific custom headers), ByteTaper provides an ultra-high performance Cache Vary partitioning implementation.
+
+### How it Works
+
+1. **Header Identification**: During the request-processing phase, the cache prepare stage extracts the values of the headers defined in the `vary_headers` array of the matched route policy.
+2. **Cache Key Variant Generation**: These extracted values are mapped alongside their header names directly into the computed Cache Key buffer, isolating the variants.
+3. **Collision Isolation Sentinels**:
+   - **Missing Headers**: If a configured vary header is completely absent from the client request, it is resolved to a special, unique `<missing>` sentinel hash.
+   - **Empty Headers**: If a vary header is present but possesses an empty string value, it is resolved to a special `<empty>` sentinel hash.
+   - This ensures strict collision safety, preventing cross-variant cache poisoning.
+
+### Validation Constraints
+
+- **Capacity Limit**: Up to **8** distinct vary headers can be configured per route policy. Duplicates in the list are automatically ignored.
+- **Name Constraints**: Each vary header name must be string-scalar, non-empty, and must not exceed **64 characters** in length.
+- **Normalization**: All configured header names are automatically normalized to lowercase internally to prevent case-based lookup discrepancies.
 
 ## Tiered Cache Lifecycle
 

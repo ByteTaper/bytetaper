@@ -9,7 +9,7 @@
 
 namespace bytetaper::cache {
 
-static constexpr std::size_t kCacheKeyMaxLen = 512;
+static constexpr std::size_t kCacheKeyMaxLen = 1024;
 static constexpr std::size_t kCacheContentTypeMaxLen = 64;
 
 struct CacheEntry {
