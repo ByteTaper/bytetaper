@@ -38,7 +38,6 @@ std::string_view get_rejection_reason_string(CoalescingRejectionReason reason);
 /**
  * @brief Evaluates if a request is eligible for coalescing based on its HTTP method.
  *
- * Per spec BT-130-003, only GET requests are eligible.
  *
  * @param method The HTTP method of the request.
  * @return CoalescingEligibility The eligibility result.

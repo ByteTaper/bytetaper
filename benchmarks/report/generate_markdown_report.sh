@@ -165,8 +165,8 @@ if jq -e '.coalescing and (.coalescing | length > 0)' "$JSON_FILE" > /dev/null 2
 
         echo "### 👥 Follower Outcome Breakdown"
         echo ""
-        echo "| Leg | Shared Response | L1 Hit | L1 Ready | L1 Ready But Miss | Timeout | Missing Entry | Stored (No Snapshot) | Not Cacheable | Failed | Queue Full | Unaccounted |"
-        echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+        echo "| Leg | Shared Response | L1 Hit | L1 Ready | L1 Ready But Miss | Timeout | Registered Expired | Missing Entry | Stored (No Snapshot) | Not Cacheable | Failed | Queue Full | Unaccounted |"
+        echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
 
         while IFS= read -r leg; do
             fsr=$(jq -r --arg l "$leg" '.coalescing[$l].follower_shared_response // "0"' "$JSON_FILE")
@@ -174,13 +174,14 @@ if jq -e '.coalescing and (.coalescing | length > 0)' "$JSON_FILE" > /dev/null 2
             flr=$(jq -r --arg l "$leg" '.coalescing[$l].follower_l1_ready        // "0"' "$JSON_FILE")
             flm=$(jq -r --arg l "$leg" '.coalescing[$l].follower_l1_ready_but_miss // "0"' "$JSON_FILE")
             fto=$(jq -r --arg l "$leg" '.coalescing[$l].follower_timeout         // "0"' "$JSON_FILE")
+            fex=$(jq -r --arg l "$leg" '.coalescing[$l].follower_expired         // "0"' "$JSON_FILE")
             fmi=$(jq -r --arg l "$leg" '.coalescing[$l].follower_missing         // "0"' "$JSON_FILE")
             fss=$(jq -r --arg l "$leg" '.coalescing[$l].follower_stored_but_no_snapshot // "0"' "$JSON_FILE")
             fnc=$(jq -r --arg l "$leg" '.coalescing[$l].follower_not_cacheable   // "0"' "$JSON_FILE")
             ffa=$(jq -r --arg l "$leg" '.coalescing[$l].follower_failed          // "0"' "$JSON_FILE")
             fqu=$(jq -r --arg l "$leg" '.coalescing[$l].follower_pool_queue_full // "0"' "$JSON_FILE")
             fun=$(jq -r --arg l "$leg" '.coalescing[$l].follower_unaccounted     // "0"' "$JSON_FILE")
-            echo "| $leg | $fsr | $fl1 | $flr | $flm | $fto | $fmi | $fss | $fnc | $ffa | $fqu | $fun |"
+            echo "| $leg | $fsr | $fl1 | $flr | $flm | $fto | $fex | $fmi | $fss | $fnc | $ffa | $fqu | $fun |"
         done < <(jq -r '.coalescing | keys[]' "$JSON_FILE" 2>/dev/null || true)
     } >> "$OUT_MD_FILE"
 fi

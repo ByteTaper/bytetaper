@@ -10,7 +10,7 @@
 namespace bytetaper::stages {
 
 // APG pipeline stage: follower wait — polls L1 cache until hit or timeout.
-// L2/RocksDB is never consulted; async L2-to-L1 promotion (BT-035-005) lets
+// L2/RocksDB is never consulted; async L2-to-L1 promotion lets
 // followers observe L2 results via L1 poll.
 // On L1 hit: returns StageResult::SkipRemaining.
 // On timeout: falls back upstream, returns StageResult::Continue.

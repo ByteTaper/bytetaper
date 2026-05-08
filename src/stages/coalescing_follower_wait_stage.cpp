@@ -210,6 +210,31 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
         coalescing::handle_timeout_fallback(context.coalescing_registry,
                                             context.coalescing_decision);
         return { apg::StageResult::Continue, "missing-fallback" };
+    } else if (wait_result == coalescing::RegistryWaitResult::Expired) {
+        // Registered follower whose leader entry was replaced/recycled before completion.
+        // Try L1 first — leader may have completed L1 store before being replaced.
+        apg::StageOutput l1 = l1_cache_lookup_stage(context);
+        if (l1.result == apg::StageResult::SkipRemaining) {
+            if (context.coalescing_registry != nullptr) {
+                coalescing::registry_remove_waiter(context.coalescing_registry,
+                                                   context.coalescing_decision.key);
+            }
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerL1Hit);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerCacheHit);
+            return l1;
+        }
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerExpired);
+        record_coalescing_event(
+            context.coalescing_metrics,
+            metrics::CoalescingMetricEvent::FollowerTimeout); // keep backward compat
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::Fallback);
+        coalescing::handle_timeout_fallback(context.coalescing_registry,
+                                            context.coalescing_decision);
+        return { apg::StageResult::Continue, "expired-fallback" };
     } else if (wait_result == coalescing::RegistryWaitResult::NotCacheable) {
         record_coalescing_event(context.coalescing_metrics,
                                 metrics::CoalescingMetricEvent::FollowerNotCacheable);

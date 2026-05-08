@@ -148,6 +148,7 @@ enum class RegistryWaitResult : std::uint8_t {
     Timeout = 4,
     Missing = 5,
     L1Ready = 6, // leader marked L1Ready; follower should do L1 lookup
+    Expired = 7, // follower had valid registered generation, but entry replaced/recycled
 };
 
 /**

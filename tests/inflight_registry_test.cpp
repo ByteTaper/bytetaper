@@ -179,12 +179,81 @@ TEST_F(InFlightRegistryTest, RemoveWaiterDecrementsCount) {
     auto res2 = registry_register(&registry, key, now, window, max_waiters);
     EXPECT_EQ(res2.role, InFlightRole::Reject);
 
-    // 4. Remove Follower 1
+    // 5. Remove Follower 1
     registry_remove_waiter(&registry, key);
 
-    // 5. Follower 2 can now join
+    // 6. Follower 2 can now join
     auto res3 = registry_register(&registry, key, now, window, max_waiters);
     EXPECT_EQ(res3.role, InFlightRole::Follower);
+}
+
+TEST_F(InFlightRegistryTest, ExpiredReturnedOnGenMismatch) {
+    const char* key = "test-key";
+    std::uint64_t now = 1000;
+    std::uint32_t window = 100;
+    std::uint32_t max_waiters = 5;
+
+    auto res = registry_register(&registry, key, now, window, max_waiters);
+    EXPECT_EQ(res.role, InFlightRole::Leader);
+
+    // Mismatched expected generation should return Expired
+    RegistrySharedResponseOutput resp{};
+    auto wait_res =
+        registry_wait_for_completion(&registry, key, 50, res.lifecycle_generation + 1, &resp);
+    EXPECT_EQ(wait_res, RegistryWaitResult::Expired);
+}
+
+TEST_F(InFlightRegistryTest, ExpiredReturnedWhenInactiveDuringWait) {
+    const char* key = "test-key";
+    std::uint64_t now = 1000;
+    std::uint32_t window = 100;
+    std::uint32_t max_waiters = 5;
+
+    auto res = registry_register(&registry, key, now, window, max_waiters);
+    EXPECT_EQ(res.role, InFlightRole::Leader);
+
+    // Start a background thread to wait for completion
+    std::atomic<RegistryWaitResult> wait_res{ RegistryWaitResult::Timeout };
+    std::atomic<bool> wait_done{ false };
+    std::thread t([this, key, res, &wait_res, &wait_done]() {
+        RegistrySharedResponseOutput resp{};
+        wait_res =
+            registry_wait_for_completion(&registry, key, 1000, res.lifecycle_generation, &resp);
+        wait_done = true;
+    });
+
+    // Let the other thread enter the wait
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    // Simulate entry deactivation (active = false) or generation mismatch during the wait
+    {
+        std::uint64_t hash = 14695981039346656037ULL;
+        for (const char* p = key; *p; ++p) {
+            hash ^= static_cast<std::uint64_t>(*p);
+            hash *= 1099511628211ULL;
+        }
+        auto& shard = registry.shards[hash % kInFlightShards];
+        {
+            std::lock_guard<std::mutex> lock(shard.mutex);
+            for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
+                if (shard.slots[j].active && std::strcmp(shard.slots[j].key, key) == 0) {
+                    shard.slots[j].lifecycle_generation++; // change generation
+                }
+            }
+        }
+        shard.cv.notify_all();
+    }
+
+    t.join();
+    EXPECT_TRUE(wait_done);
+    EXPECT_EQ(wait_res.load(), RegistryWaitResult::Expired);
+}
+
+TEST_F(InFlightRegistryTest, MissingStillReturnedWhenNoEntryFound) {
+    const char* key = "nonexistent-key";
+    RegistrySharedResponseOutput resp{};
+    auto wait_res = registry_wait_for_completion(&registry, key, 50, 1, &resp);
+    EXPECT_EQ(wait_res, RegistryWaitResult::Missing);
 }
 
 } // namespace bytetaper::coalescing

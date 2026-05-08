@@ -16,7 +16,7 @@ struct CoalescingPolicy {
     bool enabled = false;
     CoalescingMode mode = CoalescingMode::CacheAssisted;
 
-    // Budget-aware follower wait policy (BT-037H-03)
+    // Budget-aware follower wait policy
     std::uint32_t backend_timeout_ms = 500;       // expected max leader upstream latency
     std::uint32_t handoff_buffer_ms = 250;        // extra time for notify + wakeup path
     std::uint32_t result_ready_retention_ms = 50; // InFlightEntry result retention (not cache TTL)

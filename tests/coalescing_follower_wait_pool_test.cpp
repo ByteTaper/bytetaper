@@ -117,4 +117,31 @@ TEST(CoalescingFollowerWaitPoolTest, QueueFullSafety) {
     t2.join();
 }
 
+TEST(CoalescingFollowerWaitPoolTest, ExpiredPropagatedThroughPool) {
+    FollowerWaitPool pool{};
+    FollowerWaitPoolConfig cfg{};
+    cfg.worker_count = 1;
+    cfg.queue_capacity = 10;
+    follower_wait_pool_init(&pool, cfg);
+
+    auto registry = std::make_unique<InFlightRegistry>();
+    registry_init(registry.get());
+    metrics::CoalescingMetrics metrics{};
+    follower_wait_pool_start(&pool, { registry.get(), &metrics });
+
+    // Register a key as leader first
+    auto reg_res = registry_register(registry.get(), "test-key-expired", 1000, 100, 128);
+    EXPECT_EQ(reg_res.role, InFlightRole::Leader);
+
+    // Submit with mismatched expected generation to force Expired immediately
+    RegistrySharedResponseOutput out{};
+    RegistryWaitResult result = RegistryWaitResult::Missing;
+    bool ok = follower_wait_pool_submit_and_wait(&pool, "test-key-expired", 1000,
+                                                 reg_res.lifecycle_generation + 1, &out, &result);
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(result, RegistryWaitResult::Expired);
+
+    follower_wait_pool_shutdown(&pool);
+}
+
 } // namespace bytetaper::coalescing

@@ -88,6 +88,7 @@ base_leader_l1_store_success=$(get_metric "bytetaper_coalescing_leader_l1_store_
 base_leader_l1_store_failed=$(get_metric "bytetaper_coalescing_leader_l1_store_failed_total")
 base_follower_l1_ready=$(get_metric "bytetaper_coalescing_follower_l1_ready_total")
 base_follower_l1_ready_but_miss=$(get_metric "bytetaper_coalescing_follower_l1_ready_but_miss_total")
+base_follower_expired=$(get_metric "bytetaper_coalescing_follower_expired_total")
 
 # Reset mock api counter
 curl -s "${MOCK_HOST}/reset-count" > /dev/null
@@ -123,6 +124,7 @@ new_leader_l1_store_success=$(get_metric "bytetaper_coalescing_leader_l1_store_s
 new_leader_l1_store_failed=$(get_metric "bytetaper_coalescing_leader_l1_store_failed_total")
 new_follower_l1_ready=$(get_metric "bytetaper_coalescing_follower_l1_ready_total")
 new_follower_l1_ready_but_miss=$(get_metric "bytetaper_coalescing_follower_l1_ready_but_miss_total")
+new_follower_expired=$(get_metric "bytetaper_coalescing_follower_expired_total")
 mock_calls=$(curl -s "${MOCK_HOST}/call-count")
 
 # Compute delta
@@ -144,6 +146,7 @@ delta_leader_l1_store_success=$((new_leader_l1_store_success - base_leader_l1_st
 delta_leader_l1_store_failed=$((new_leader_l1_store_failed - base_leader_l1_store_failed))
 delta_follower_l1_ready=$((new_follower_l1_ready - base_follower_l1_ready))
 delta_follower_l1_ready_but_miss=$((new_follower_l1_ready_but_miss - base_follower_l1_ready_but_miss))
+delta_follower_expired=$((new_follower_expired - base_follower_expired))
 
 echo "Running wrk latency check on fast path..."
 WRK_COAL_A=$(mktemp)
@@ -187,6 +190,7 @@ JSON_COAL_A_DATA=$(jq -c -n \
     --argjson leader_l1_store_failed   "$delta_leader_l1_store_failed" \
     --argjson follower_l1_ready        "$delta_follower_l1_ready" \
     --argjson follower_l1_ready_but_miss "$delta_follower_l1_ready_but_miss" \
+    --argjson follower_expired         "$delta_follower_expired" \
     '{
         client_requests_sent: $client_requests_sent,
         upstream_mock_calls:   $upstream_mock_calls,
@@ -209,7 +213,8 @@ JSON_COAL_A_DATA=$(jq -c -n \
         leader_l1_store_success:  $leader_l1_store_success,
         leader_l1_store_failed:   $leader_l1_store_failed,
         follower_l1_ready:        $follower_l1_ready,
-        follower_l1_ready_but_miss: $follower_l1_ready_but_miss
+        follower_l1_ready_but_miss: $follower_l1_ready_but_miss,
+        follower_expired:         $follower_expired
     }')
 
 {
@@ -233,6 +238,7 @@ JSON_COAL_A_DATA=$(jq -c -n \
     echo "Delta Leader L1 Store Failed: $delta_leader_l1_store_failed"
     echo "Delta Follower L1 Ready: $delta_follower_l1_ready"
     echo "Delta Follower L1 Ready But Miss: $delta_follower_l1_ready_but_miss"
+    echo "Delta Follower Expired: $delta_follower_expired"
     echo "Leg A Latency JSON: $JSON_COAL_A"
     echo "Leg A Coalescing JSON: $JSON_COAL_A_DATA"
     echo ""
@@ -278,6 +284,7 @@ base_leader_l1_store_success=$(get_metric "bytetaper_coalescing_leader_l1_store_
 base_leader_l1_store_failed=$(get_metric "bytetaper_coalescing_leader_l1_store_failed_total")
 base_follower_l1_ready=$(get_metric "bytetaper_coalescing_follower_l1_ready_total")
 base_follower_l1_ready_but_miss=$(get_metric "bytetaper_coalescing_follower_l1_ready_but_miss_total")
+base_follower_expired=$(get_metric "bytetaper_coalescing_follower_expired_total")
 
 # Reset mock api counter
 curl -s "${MOCK_HOST}/reset-count" > /dev/null
@@ -312,6 +319,7 @@ new_leader_l1_store_success=$(get_metric "bytetaper_coalescing_leader_l1_store_s
 new_leader_l1_store_failed=$(get_metric "bytetaper_coalescing_leader_l1_store_failed_total")
 new_follower_l1_ready=$(get_metric "bytetaper_coalescing_follower_l1_ready_total")
 new_follower_l1_ready_but_miss=$(get_metric "bytetaper_coalescing_follower_l1_ready_but_miss_total")
+new_follower_expired=$(get_metric "bytetaper_coalescing_follower_expired_total")
 mock_calls=$(curl -s "${MOCK_HOST}/call-count")
 
 # Compute delta
@@ -333,6 +341,7 @@ delta_leader_l1_store_success=$((new_leader_l1_store_success - base_leader_l1_st
 delta_leader_l1_store_failed=$((new_leader_l1_store_failed - base_leader_l1_store_failed))
 delta_follower_l1_ready=$((new_follower_l1_ready - base_follower_l1_ready))
 delta_follower_l1_ready_but_miss=$((new_follower_l1_ready_but_miss - base_follower_l1_ready_but_miss))
+delta_follower_expired=$((new_follower_expired - base_follower_expired))
 
 echo "Running wrk latency check on slow path..."
 WRK_COAL_B=$(mktemp)
@@ -386,6 +395,7 @@ JSON_COAL_B_DATA=$(jq -c -n \
     --argjson leader_l1_store_failed   "$delta_leader_l1_store_failed" \
     --argjson follower_l1_ready        "$delta_follower_l1_ready" \
     --argjson follower_l1_ready_but_miss "$delta_follower_l1_ready_but_miss" \
+    --argjson follower_expired         "$delta_follower_expired" \
     '{
         client_requests_sent: $client_requests_sent,
         upstream_mock_calls:   $upstream_mock_calls,
@@ -408,7 +418,8 @@ JSON_COAL_B_DATA=$(jq -c -n \
         leader_l1_store_success:  $leader_l1_store_success,
         leader_l1_store_failed:   $leader_l1_store_failed,
         follower_l1_ready:        $follower_l1_ready,
-        follower_l1_ready_but_miss: $follower_l1_ready_but_miss
+        follower_l1_ready_but_miss: $follower_l1_ready_but_miss,
+        follower_expired:         $follower_expired
     }')
 
 {
@@ -432,6 +443,7 @@ JSON_COAL_B_DATA=$(jq -c -n \
     echo "Delta Leader L1 Store Failed: $delta_leader_l1_store_failed"
     echo "Delta Follower L1 Ready: $delta_follower_l1_ready"
     echo "Delta Follower L1 Ready But Miss: $delta_follower_l1_ready_but_miss"
+    echo "Delta Follower Expired: $delta_follower_expired"
     echo "Leg B Latency JSON: $JSON_COAL_B"
     echo "Leg B Throughput JSON: $JSON_COAL_TP_B"
     echo "Leg B Container Stats JSON: $JSON_COAL_STATS_B"

@@ -130,7 +130,7 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
         }
     }
 
-    // [BT-130-005] Shard full, instantly drop traffic
+    // Shard full, instantly drop traffic
     return { InFlightRole::Reject, 0 };
 }
 
@@ -254,7 +254,7 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
 
     if (expected_lifecycle_generation != 0 &&
         entry->lifecycle_generation != expected_lifecycle_generation) {
-        return RegistryWaitResult::Missing;
+        return RegistryWaitResult::Expired;
     }
 
     // 2. Already completed?
@@ -298,6 +298,9 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
 
     if (!entry->active || (expected_lifecycle_generation != 0 &&
                            entry->lifecycle_generation != expected_lifecycle_generation)) {
+        if (expected_lifecycle_generation != 0) {
+            return RegistryWaitResult::Expired;
+        }
         return RegistryWaitResult::Missing;
     }
 

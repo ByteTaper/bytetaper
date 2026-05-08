@@ -33,6 +33,7 @@ enum class CoalescingMetricEvent : std::uint8_t {
     LeaderL1StoreFailed,    // leader could not commit to L1 (non-cacheable or no cache_key)
     FollowerL1Ready,        // follower woke because of L1Ready signal
     FollowerL1ReadyButMiss, // L1Ready wakeup but L1 lookup still missed
+    FollowerExpired,        // registered follower, entry replaced/recycled before completion
 };
 
 struct CoalescingMetrics {
@@ -59,6 +60,7 @@ struct CoalescingMetrics {
     std::atomic<std::uint64_t> leader_l1_store_failed_total{ 0 };
     std::atomic<std::uint64_t> follower_l1_ready_total{ 0 };
     std::atomic<std::uint64_t> follower_l1_ready_but_miss_total{ 0 };
+    std::atomic<std::uint64_t> follower_expired_total{ 0 };
 };
 
 void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent event);
