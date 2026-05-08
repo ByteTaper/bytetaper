@@ -24,6 +24,12 @@ RequestHeaderView scan_request_headers(const envoy::config::core::v3::HeaderMap&
         } else if (key == "accept-encoding") {
             view.accept_encoding = val.c_str();
             view.accept_encoding_len = val.size();
+        } else if (key == "authorization") {
+            view.authorization = val.c_str();
+            view.authorization_len = val.size();
+        } else if (key == "cookie") {
+            view.cookie = val.c_str();
+            view.cookie_len = val.size();
         }
     }
     return view;
@@ -50,6 +56,43 @@ ResponseHeaderView scan_response_headers(const envoy::config::core::v3::HeaderMa
         }
     }
     return view;
+}
+
+static bool ascii_case_insensitive_equal(const std::string& a, const char* b) {
+    if (b == nullptr)
+        return false;
+    std::size_t len_a = a.size();
+    for (std::size_t i = 0; i < len_a; ++i) {
+        if (b[i] == '\0')
+            return false;
+        char ca = a[i];
+        char cb = b[i];
+        if (ca >= 'A' && ca <= 'Z')
+            ca += 32;
+        if (cb >= 'A' && cb <= 'Z')
+            cb += 32;
+        if (ca != cb)
+            return false;
+    }
+    return b[len_a] == '\0';
+}
+
+bool read_header_value_case_insensitive(const envoy::config::core::v3::HeaderMap& headers,
+                                        const char* header_name, const char** value_out,
+                                        std::size_t* value_len_out) {
+    if (header_name == nullptr || value_out == nullptr || value_len_out == nullptr) {
+        return false;
+    }
+    for (const auto& header : headers.headers()) {
+        if (ascii_case_insensitive_equal(header.key(), header_name)) {
+            const std::string& val =
+                header.raw_value().empty() ? header.value() : header.raw_value();
+            *value_out = val.c_str();
+            *value_len_out = val.size();
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace bytetaper::extproc

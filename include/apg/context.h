@@ -84,6 +84,15 @@ struct ApgTransformContext {
     bool cache_key_ready = false; // true iff build_cache_key succeeded
     bool cache_eligible = false;  // true iff method==GET and policy.cache==Store
 
+    // --- Request auth state (populated during request header handling) ---
+    bool request_has_authorization = false;
+    bool request_has_cookie = false;
+    bool cache_auth_bypass = false;
+
+    // --- Private cache scope (populated during request header handling) ---
+    bool private_cache_scope_ready = false;
+    char private_cache_scope_hash[32] = {};
+
     // --- Cache lookup outputs (written by l1_cache_lookup_stage) ---
     bool cache_hit = false;
     const char* cache_layer = nullptr; // "L1" on hit, nullptr on miss

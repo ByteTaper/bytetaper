@@ -4,6 +4,8 @@
 #ifndef BYTETAPER_CACHE_CACHE_SAFETY_H
 #define BYTETAPER_CACHE_CACHE_SAFETY_H
 
+#include <cstddef>
+
 namespace bytetaper::cache {
 
 /**
@@ -19,6 +21,9 @@ namespace bytetaper::cache {
  * @param private_cache_enabled True if the route policy explicitly allows private caching.
  */
 bool cache_auth_bypass(bool has_authorization, bool has_cookie, bool private_cache_enabled);
+
+bool build_private_cache_scope_hash(const char* raw_scope, std::size_t raw_scope_len, char* out,
+                                    std::size_t out_size);
 
 } // namespace bytetaper::cache
 

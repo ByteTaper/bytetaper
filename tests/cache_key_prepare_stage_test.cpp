@@ -183,4 +183,58 @@ TEST_F(CacheKeyPrepareStageTest, SamePolicyIdentityStableKey) {
     EXPECT_STREQ(key1, key2);
 }
 
+TEST_F(CacheKeyPrepareStageTest, AuthBypass_AuthorizationHeader_PublicCache) {
+    context.cache_auth_bypass = true;
+    auto result = cache_key_prepare_stage(context);
+    EXPECT_STREQ(result.note, "auth-cache-bypass");
+    EXPECT_FALSE(context.cache_eligible);
+    EXPECT_FALSE(context.cache_key_ready);
+}
+
+TEST_F(CacheKeyPrepareStageTest, AuthBypass_CookieHeader_PublicCache) {
+    context.request_has_cookie = true;
+    context.cache_auth_bypass = true;
+    auto result = cache_key_prepare_stage(context);
+    EXPECT_STREQ(result.note, "auth-cache-bypass");
+    EXPECT_FALSE(context.cache_eligible);
+}
+
+TEST_F(CacheKeyPrepareStageTest, PrivateCache_ScopeReady_BuildsKeyWithScope) {
+    policy.cache.private_cache = true;
+    std::strncpy(policy.cache.auth_scope_header, "x-tenant-id",
+                 sizeof(policy.cache.auth_scope_header) - 1);
+    context.private_cache_scope_ready = true;
+    std::strncpy(context.private_cache_scope_hash, "0011223344556677",
+                 sizeof(context.private_cache_scope_hash) - 1);
+    auto result = cache_key_prepare_stage(context);
+    EXPECT_TRUE(context.cache_key_ready);
+    EXPECT_NE(std::strstr(context.cache_key, "scope:"), nullptr);
+}
+
+TEST_F(CacheKeyPrepareStageTest, PrivateCache_ScopeNotReady_Skips) {
+    policy.cache.private_cache = true;
+    context.private_cache_scope_ready = false;
+    auto result = cache_key_prepare_stage(context);
+    EXPECT_STREQ(result.note, "private-scope-not-ready");
+    EXPECT_FALSE(context.cache_key_ready);
+}
+
+TEST_F(CacheKeyPrepareStageTest, PrivateCache_DifferentScopes_DifferentKeys) {
+    policy.cache.private_cache = true;
+    std::strncpy(policy.cache.auth_scope_header, "x-tenant-id",
+                 sizeof(policy.cache.auth_scope_header) - 1);
+    context.private_cache_scope_ready = true;
+
+    std::strncpy(context.private_cache_scope_hash, "aaaa000000000001",
+                 sizeof(context.private_cache_scope_hash) - 1);
+    cache_key_prepare_stage(context);
+    char key1[cache::kCacheKeyMaxLen];
+    std::memcpy(key1, context.cache_key, cache::kCacheKeyMaxLen);
+
+    std::strncpy(context.private_cache_scope_hash, "bbbb000000000002",
+                 sizeof(context.private_cache_scope_hash) - 1);
+    cache_key_prepare_stage(context);
+    EXPECT_STRNE(key1, context.cache_key);
+}
+
 } // namespace bytetaper::stages

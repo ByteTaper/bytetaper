@@ -4,6 +4,7 @@
 #include "extproc/grpc_server.h"
 
 #include "apg/pipeline.h"
+#include "cache/cache_safety.h"
 #include "coalescing/follower_wait_pool.h"
 #include "compression/accept_encoding.h"
 #include "compression/content_encoding.h"
@@ -113,10 +114,51 @@ bool read_header_value(const envoy::config::core::v3::HeaderMap& headers, const 
     return false;
 }
 
-void apply_request_headers_selection(const envoy::service::ext_proc::v3::ProcessingRequest& request,
-                                     StreamFilterState* state) {
-    if (state == nullptr || !request.has_request_headers()) {
+static void prepare_cache_auth_context(const envoy::config::core::v3::HeaderMap& headers,
+                                       const extproc::RequestHeaderView& view,
+                                       apg::ApgTransformContext* ctx) {
+    ctx->request_has_authorization = (view.authorization != nullptr && view.authorization_len > 0);
+    ctx->request_has_cookie = (view.cookie != nullptr && view.cookie_len > 0);
+
+    const policy::RoutePolicy* pol = ctx->matched_policy;
+    if (pol == nullptr) {
         return;
+    }
+
+    ctx->cache_auth_bypass = cache::cache_auth_bypass(
+        ctx->request_has_authorization, ctx->request_has_cookie, pol->cache.private_cache);
+
+    if (ctx->cache_auth_bypass || !pol->cache.private_cache) {
+        return;
+    }
+
+    if (pol->cache.auth_scope_header[0] == '\0') {
+        ctx->cache_auth_bypass = true;
+        return;
+    }
+
+    const char* scope_val = nullptr;
+    std::size_t scope_len = 0;
+    if (!extproc::read_header_value_case_insensitive(headers, pol->cache.auth_scope_header,
+                                                     &scope_val, &scope_len) ||
+        scope_val == nullptr || scope_len == 0) {
+        ctx->cache_auth_bypass = true;
+        return;
+    }
+
+    if (cache::build_private_cache_scope_hash(scope_val, scope_len, ctx->private_cache_scope_hash,
+                                              sizeof(ctx->private_cache_scope_hash))) {
+        ctx->private_cache_scope_ready = true;
+    } else {
+        ctx->cache_auth_bypass = true;
+    }
+}
+
+RequestHeaderView
+apply_request_headers_selection(const envoy::service::ext_proc::v3::ProcessingRequest& request,
+                                StreamFilterState* state) {
+    if (state == nullptr || !request.has_request_headers()) {
+        return {};
     }
 
     state->context = apg::ApgTransformContext{};
@@ -126,18 +168,18 @@ void apply_request_headers_selection(const envoy::service::ext_proc::v3::Process
     const auto view = scan_request_headers(request.request_headers().headers());
 
     if (view.path == nullptr) {
-        return;
+        return view;
     }
 
     if (!field_selection::extract_raw_path_and_query(view.path, &state->context)) {
-        return;
+        return view;
     }
     apg::parse_query_view(state->context.raw_query, state->context.raw_query_length,
                           &state->context.request_query_view);
     state->context.request_query_view_ready = true;
 
     if (!field_selection::parse_and_store_selected_fields(&state->context)) {
-        return;
+        return view;
     }
 
     if (view.method != nullptr) {
@@ -155,6 +197,7 @@ void apply_request_headers_selection(const envoy::service::ext_proc::v3::Process
     }
 
     state->has_query_selection = state->context.selected_field_count > 0;
+    return view;
 }
 
 void apply_response_content_type(const envoy::service::ext_proc::v3::ProcessingRequest& request,
@@ -456,7 +499,7 @@ public:
             }
 
             if (kind == ProcessingRequestKind::RequestHeaders) {
-                apply_request_headers_selection(request, &filter_state);
+                const auto req_view = apply_request_headers_selection(request, &filter_state);
                 filter_state.matched_policy = nullptr;
                 if (policies != nullptr && filter_state.context.raw_path_length > 0) {
                     filter_state.matched_policy = policy::match_route_by_path(
@@ -485,6 +528,8 @@ public:
                 // Run lookup pipeline
                 if (filter_state.matched_policy != nullptr) {
                     filter_state.context.matched_policy = filter_state.matched_policy;
+                    prepare_cache_auth_context(request.request_headers().headers(), req_view,
+                                               &filter_state.context);
                     filter_state.context.l1_cache = l1_cache;
                     filter_state.context.l2_cache = l2_cache;
                     filter_state.context.coalescing_registry = coalescing_registry;

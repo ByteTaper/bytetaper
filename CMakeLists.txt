@@ -244,6 +244,7 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
     src/cache/cache_key.cpp
     src/runtime/worker_queue.cpp
     src/cache/cache_ttl.cpp
+    src/cache/cache_safety.cpp
     src/safety/fail_open.cpp
     src/policy/pagination_policy.cpp
     src/stages/pagination_request_mutation_stage.cpp

@@ -17,6 +17,10 @@ struct RequestHeaderView {
     std::size_t method_len = 0;
     const char* accept_encoding = nullptr;
     std::size_t accept_encoding_len = 0;
+    const char* authorization = nullptr;
+    std::size_t authorization_len = 0;
+    const char* cookie = nullptr;
+    std::size_t cookie_len = 0;
 };
 
 // Non-owning view of interesting response headers.
@@ -41,6 +45,10 @@ namespace bytetaper::extproc {
 
 RequestHeaderView scan_request_headers(const envoy::config::core::v3::HeaderMap& headers);
 ResponseHeaderView scan_response_headers(const envoy::config::core::v3::HeaderMap& headers);
+
+bool read_header_value_case_insensitive(const envoy::config::core::v3::HeaderMap& headers,
+                                        const char* header_name, const char** value_out,
+                                        std::size_t* value_len_out);
 
 } // namespace bytetaper::extproc
 
