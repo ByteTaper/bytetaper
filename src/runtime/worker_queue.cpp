@@ -8,6 +8,7 @@
 #include "metrics/runtime_metrics.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 
 namespace bytetaper::runtime {
@@ -159,8 +160,12 @@ static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& j
     // Free body pool slot occupancy
     {
         std::lock_guard<std::mutex> lock(shard->mu);
-        if (job.body_slot < kRuntimeQueueSlotsPerShard) {
-            shard->body_pool.occupied[job.body_slot] = false;
+        const std::uint32_t slot = job.body_slot;
+        if (slot < kRuntimeQueueSlotsPerShard) {
+            std::free(shard->body_pool.heap_bodies[slot]);
+            shard->body_pool.heap_bodies[slot] = nullptr;
+            shard->body_pool.heap_body_sizes[slot] = 0;
+            shard->body_pool.occupied[slot] = false;
         }
     }
 }
@@ -183,7 +188,7 @@ static void worker_loop(WorkerQueue* q, std::size_t worker_id) {
                         if (job.kind == DequeuedJobKind::Lookup) {
                             execute_lookup_job(q, &q->shards[s_idx], job.lookup_job,
                                                q->worker_scratch[worker_id].l2_lookup_body,
-                                               kAsyncL2MaxBodySize);
+                                               kAsyncL2LookupScratchSize);
                         } else if (job.kind == DequeuedJobKind::Store) {
                             execute_store_job(q, &q->shards[s_idx], job.store_job);
                         }
@@ -203,7 +208,7 @@ static void worker_loop(WorkerQueue* q, std::size_t worker_id) {
             if (job.kind == DequeuedJobKind::Lookup) {
                 execute_lookup_job(q, &q->shards[shard_idx], job.lookup_job,
                                    q->worker_scratch[worker_id].l2_lookup_body,
-                                   kAsyncL2MaxBodySize);
+                                   kAsyncL2LookupScratchSize);
             } else if (job.kind == DequeuedJobKind::Store) {
                 execute_store_job(q, &q->shards[shard_idx], job.store_job);
             }
@@ -371,6 +376,11 @@ const char* worker_queue_init(WorkerQueue* q, const WorkerQueueConfig& config) {
             q->shards[i].pending_occupied[j] = false;
         }
         for (std::size_t j = 0; j < kRuntimeQueueSlotsPerShard; j++) {
+            if (q->shards[i].body_pool.heap_bodies[j] != nullptr) {
+                std::free(q->shards[i].body_pool.heap_bodies[j]);
+                q->shards[i].body_pool.heap_bodies[j] = nullptr;
+                q->shards[i].body_pool.heap_body_sizes[j] = 0;
+            }
             q->shards[i].body_pool.occupied[j] = false;
         }
         q->shards[i].ready_enqueued = false;
@@ -487,6 +497,24 @@ bool worker_queue_try_enqueue_store(WorkerQueue* q, const L2StoreJob& job) {
             return false;
         }
 
+        // Copy body into shard body pool slot on the heap
+        char* buf = nullptr;
+        std::size_t copy_len = 0;
+        if (job.entry.body != nullptr && job.body_len > 0) {
+            copy_len =
+                (job.body_len > kAsyncL2StoreMaxBodySize) ? kAsyncL2StoreMaxBodySize : job.body_len;
+            buf = static_cast<char*>(std::malloc(copy_len + 1));
+            if (buf == nullptr) {
+                // malloc failed — treat as queue-full / drop
+                ::bytetaper::metrics::record_runtime_event(
+                    q->resources.runtime_metrics,
+                    ::bytetaper::metrics::RuntimeMetricEvent::EnqueueDropped);
+                return false;
+            }
+            std::memcpy(buf, job.entry.body, copy_len);
+            buf[copy_len] = '\0';
+        }
+
         ::bytetaper::metrics::record_runtime_event(
             q->resources.runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::Enqueue);
         if (q->resources.runtime_metrics != nullptr) {
@@ -496,19 +524,12 @@ bool worker_queue_try_enqueue_store(WorkerQueue* q, const L2StoreJob& job) {
 
         shard.store_slots[shard.store_tail] = job;
         shard.store_slots[shard.store_tail].body_slot = static_cast<std::uint32_t>(free_slot);
-
-        // Copy body into shard body pool slot
-        if (job.entry.body != nullptr && job.body_len > 0) {
-            std::size_t copy_len =
-                (job.body_len > kAsyncL2MaxBodySize) ? kAsyncL2MaxBodySize : job.body_len;
-            std::memcpy(shard.body_pool.bodies[free_slot], job.entry.body, copy_len);
-            shard.store_slots[shard.store_tail].body_len = copy_len;
-            shard.store_slots[shard.store_tail].entry.body_len = copy_len;
-        }
+        shard.body_pool.heap_bodies[free_slot] = buf;
+        shard.body_pool.heap_body_sizes[free_slot] = copy_len;
+        shard.store_slots[shard.store_tail].body_len = copy_len;
+        shard.store_slots[shard.store_tail].entry.body_len = copy_len;
+        shard.store_slots[shard.store_tail].entry.body = buf;
         shard.body_pool.occupied[free_slot] = true;
-
-        // Fix entry pointer to point directly to shard-local body pool
-        shard.store_slots[shard.store_tail].entry.body = shard.body_pool.bodies[free_slot];
 
         shard.store_tail = (shard.store_tail + 1) % kRuntimeQueueSlotsPerShard;
         shard.store_count++;
@@ -571,7 +592,7 @@ bool worker_queue_execute_one_for_test(WorkerQueue* q) {
 
             lock.unlock(); // Release lock before executing I/O
             execute_lookup_job(q, &shard, job, q->worker_scratch[0].l2_lookup_body,
-                               kAsyncL2MaxBodySize);
+                               kAsyncL2LookupScratchSize);
             return true;
         }
 

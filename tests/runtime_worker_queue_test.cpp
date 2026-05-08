@@ -121,9 +121,9 @@ TEST_F(WorkerQueueTest, BodyPointerFixedInSlot) {
     // Check that slot entry body points inside shard body pool
     std::uint32_t slot_idx = q_->shards[found_shard].store_slots[0].body_slot;
     EXPECT_EQ(q_->shards[found_shard].store_slots[0].entry.body,
-              q_->shards[found_shard].body_pool.bodies[slot_idx]);
+              q_->shards[found_shard].body_pool.heap_bodies[slot_idx]);
     EXPECT_NE(q_->shards[found_shard].store_slots[0].entry.body, original_body);
-    EXPECT_STREQ(q_->shards[found_shard].body_pool.bodies[slot_idx], original_body);
+    EXPECT_STREQ(q_->shards[found_shard].body_pool.heap_bodies[slot_idx], original_body);
 }
 
 TEST_F(WorkerQueueTest, InitInvalidWorkerCountZero) {

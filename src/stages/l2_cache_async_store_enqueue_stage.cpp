@@ -51,7 +51,7 @@ apg::StageOutput l2_cache_async_store_enqueue_stage(apg::ApgTransformContext& co
     }
 
     // 8. Body size cap
-    if (context.response_body_len > runtime::kAsyncL2MaxBodySize) {
+    if (context.response_body_len > runtime::kAsyncL2StoreMaxBodySize) {
         metrics::record_runtime_event(context.runtime_metrics,
                                       metrics::RuntimeMetricEvent::L2StoreOversizedSkipped);
         return { apg::StageResult::Continue, "body-too-large" };
