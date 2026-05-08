@@ -23,6 +23,25 @@ struct RuntimeMetrics;
 }
 
 namespace bytetaper::runtime {
+
+enum class WorkerEventKind : std::uint8_t {
+    ReadyShard,
+    Shutdown,
+};
+
+struct WorkerEvent {
+    WorkerEventKind kind;
+    std::size_t shard_id; // valid only when kind == ReadyShard
+};
+
+enum class WorkerState : std::uint8_t {
+    Running,
+    Draining,
+    Stopped,
+};
+
+static constexpr std::size_t kAsyncL2MaxBodySize = 65536; // 64 KB
+
 // Max body accepted by the async L2 store path — matches disk cache limit.
 static constexpr std::size_t kAsyncL2StoreMaxBodySize = cache::kL2MaxBodySize;
 
@@ -161,6 +180,16 @@ bool worker_queue_execute_one_for_test(WorkerQueue* q);
 bool worker_queue_shard_try_pop_for_test(WorkerQueue* q, std::size_t shard_idx,
                                          DequeuedRuntimeJob* job_out);
 void worker_queue_shard_requeue_or_clear_for_test(WorkerQueue* q, std::size_t shard_idx);
+
+/**
+ * Drain all owned shards once without waiting for events.
+ */
+bool worker_drain_owned_once(WorkerQueue* q, std::size_t worker_id);
+
+/**
+ * Process exactly one event for the given worker (non-blocking if queue is empty).
+ */
+bool worker_test_run_one_event(WorkerQueue* q, std::size_t worker_id);
 
 } // namespace bytetaper::runtime
 
