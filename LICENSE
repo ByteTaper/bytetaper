@@ -1,0 +1,36 @@
+ByteTaper License
+
+SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
+
+Copyright (c) 2026 Haluan Irsad
+
+ByteTaper is available under a dual-license model:
+
+    AGPL-3.0-only OR LicenseRef-Commercial
+
+You may use, copy, modify, and distribute ByteTaper under the terms of the
+GNU Affero General Public License version 3 only. See:
+
+    LICENSES/AGPL-3.0-only.txt
+
+Alternatively, you may use ByteTaper under a separate commercial license
+agreement granted by Haluan Irsad. See:
+
+    LICENSES/LicenseRef-Commercial.txt
+
+Commercial license rights are not granted by cloning this repository,
+downloading a release, receiving a copy of the source code, or possessing this
+file. Commercial license rights are granted only through a separate written
+agreement signed or otherwise explicitly authorized by Haluan Irsad.
+
+Unless a separate commercial license agreement has been granted, all use of the
+ByteTaper source code must comply with AGPL-3.0-only.
+
+Third-party dependencies, vendored interface definitions, container base images,
+build tools, and test tools remain under their own licenses. See:
+
+    THIRD_PARTY_NOTICES.md
+
+This file is a licensing summary. The applicable license text, source SPDX
+headers, and any separate written commercial agreement control if there is a
+conflict.

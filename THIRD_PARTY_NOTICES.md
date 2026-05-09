@@ -1,189 +1,63 @@
 # Third-Party Notices
 
-ByteTaper incorporates, links against, generates code from, or uses during
-build/test the third-party software listed below.
+This file records third-party software, interface definitions, container images,
+build tools, and test tools that ByteTaper may use during development,
+testing, or distribution.
 
-This file is provided for attribution and license-notice purposes. It is not
-legal advice. If ByteTaper is distributed as a source archive, binary, package,
-or container image, the final distribution should include all applicable full
-license texts and any notices required by the exact dependency versions included
-in that distribution.
-
-## Summary
-
-| Component | Use in ByteTaper | License |
-|---|---|---|
-| RocksDB | L2 persistent cache backend | Apache-2.0 or GPL-2.0; ByteTaper uses the Apache-2.0 option |
-| Envoy API / data-plane-api proto definitions | Envoy `ext_proc` protobuf service definitions | Apache-2.0 |
-| gRPC | Envoy ExternalProcessor gRPC service implementation | Apache-2.0 |
-| Protocol Buffers | Protobuf compiler/runtime for generated Envoy API bindings | BSD-3-Clause |
-| yaml-cpp | YAML policy loading and validation | MIT |
-| GoogleTest | Unit/integration test framework | BSD-3-Clause |
-
-## RocksDB
-
-Homepage: https://rocksdb.org/  
-Repository: https://github.com/facebook/rocksdb  
-License: Apache-2.0 or GPL-2.0
-License text (copied): [LICENSES/Apache-2.0.txt]([LICENSES/Apache-2.0.txt])
-
-ByteTaper uses RocksDB under the Apache License, Version 2.0 option.
-
-Notice:
+ByteTaper's own source code is licensed separately under:
 
 ```text
-RocksDB
-Copyright (c) 2011-present, Facebook, Inc. All rights reserved.
-Licensed under the Apache License, Version 2.0, at ByteTaper's option.
+AGPL-3.0-only OR LicenseRef-Commercial
 ```
 
-RocksDB also contains code derived from LevelDB. If RocksDB source code or
-source-derived files are redistributed with ByteTaper, preserve the original
-upstream headers and notices.
+Third-party components remain under their own licenses. A ByteTaper commercial
+license does not relicense third-party components.
 
-## Envoy API / data-plane-api proto definitions
+## Runtime and linked components
 
-Homepage: [https://www.envoyproxy.io/](https://www.envoyproxy.io/)
-Repository: [https://github.com/envoyproxy/data-plane-api](https://github.com/envoyproxy/data-plane-api)
-License: Apache-2.0
-License text (copied): [LICENSES/Apache-2.0.txt]([LICENSES/Apache-2.0.txt])
+| Component | Use in ByteTaper | License | License text in this repo |
+| --- | --- | --- | --- |
+| RocksDB | L2 persistent cache backend | Apache-2.0 or GPL-2.0; ByteTaper selects the Apache-2.0 option for commercial-compatible builds | `LICENSES/Apache-2.0.txt` |
+| Quill | C++ logging library, fetched by CMake at `v11.1.0` | MIT | `LICENSES/MIT-quill.txt` |
+| yaml-cpp | YAML policy loading and validation | MIT | `LICENSES/MIT-yaml-cpp.txt` |
+| gRPC C++ | Envoy ExternalProcessor gRPC service implementation | Apache-2.0 | `LICENSES/Apache-2.0.txt` |
+| Protocol Buffers | Protobuf compiler/runtime for generated Envoy API bindings | BSD-3-Clause | `LICENSES/BSD-3-Clause-Protocol-Buffers.txt` |
+| Envoy Proxy image | Local examples, integration tests, and demo proxy container | Apache-2.0 | `LICENSES/Apache-2.0.txt` |
 
-ByteTaper uses Envoy API protobuf definitions, including the External Processor
-API, to generate C++ protobuf/gRPC bindings for Envoy `ext_proc` integration.
+## Vendored or compatibility interface definitions
 
-Notice:
+| Component | Path | License | Notes |
+| --- | --- | --- | --- |
+| Envoy API proto snapshot | `proto/envoy/**` | Apache-2.0 | Vendored for ExtProc code generation. Preserve upstream Envoy API copyright, license, and notice metadata when refreshing these files. |
+| xDS/UDPA proto snapshot | `proto/xds/**`, `proto/udpa/**` | Apache-2.0 | Used by Envoy API protos. Preserve upstream copyright, license, and notice metadata when refreshing these files. |
+| Protoc validation compatibility subset | `proto/validate/validate.proto` | AGPL-3.0-only OR LicenseRef-Commercial | ByteTaper-maintained compatibility subset for the protoc options required by vendored Envoy API protos. If replaced with upstream PGV sources, record the upstream license here. |
 
-```text
-Envoy API / data-plane-api
-Copyright Envoy Project Authors.
-Licensed under the Apache License, Version 2.0.
-```
+## Build, development, and test tools
 
-If Envoy `.proto` files are vendored in this repository, their original
-copyright and license headers must be preserved.
+| Component | Use in ByteTaper | License | Notes |
+| --- | --- | --- | --- |
+| GoogleTest | Unit and integration tests, fetched by CMake when tests are enabled | BSD-3-Clause | Test dependency only unless test binaries are distributed. |
+| Ubuntu base image | Development/build image | Mixed Ubuntu package licenses | Commercial distribution should include an SBOM or image-layer license report. |
+| Alpine base image | Benchmark image | Mixed Alpine package licenses | Commercial distribution should include an SBOM or image-layer license report. |
+| ccache, CMake, Ninja, clang-format, pkg-config, make, curl, bash, Python, jq, wrk | Build/test/dev tooling from container packages | Mixed licenses | Development/test dependencies unless included in a distributed image. |
+| Compression/system libraries: zlib, bzip2, lz4, snappy, zstd, gflags | RocksDB build/runtime dependencies in the development image | Mixed permissive licenses | Preserve package license notices if distributed in a ByteTaper image or appliance. |
 
-## gRPC
+## Release packaging expectations
 
-Homepage: [https://grpc.io/](https://grpc.io/)
-Repository: [https://github.com/grpc/grpc](https://github.com/grpc/grpc)
-License: Apache-2.0
-License text (copied): [LICENSES/Apache-2.0.txt]([LICENSES/Apache-2.0.txt])
+For a commercial ByteTaper release, include at minimum:
 
-ByteTaper links against gRPC C++ libraries for the Envoy ExternalProcessor
-service implementation.
+1. `LICENSE`
+2. `LICENSES/AGPL-3.0-only.txt`
+3. `LICENSES/LicenseRef-Commercial.txt`
+4. `THIRD_PARTY_NOTICES.md`
+5. full license texts and notices for bundled third-party components
+6. an SBOM or container image license report for distributed container images
 
-Notice:
+Commercial customers should receive a separate written commercial license
+agreement. Possessing this repository, this notice file, or a release artifact
+does not grant commercial license rights to ByteTaper itself.
 
-```text
-gRPC
-Copyright 2015 gRPC authors.
-Licensed under the Apache License, Version 2.0.
-```
+## Refresh rule
 
-## Protocol Buffers
-
-Homepage: [https://protobuf.dev/](https://protobuf.dev/)
-Repository: [https://github.com/protocolbuffers/protobuf](https://github.com/protocolbuffers/protobuf)
-License: BSD-3-Clause
-License text (copied): [LICENSES/BSD-3-Clause-Protocol-Buffers.txt]([LICENSES/BSD-3-Clause-Protocol-Buffers.txt])
-
-ByteTaper uses Protocol Buffers for generated C++ bindings from Envoy API
-`.proto` definitions.
-
-Notice:
-
-```text
-Protocol Buffers
-Copyright 2008 Google LLC.
-Licensed under the BSD 3-Clause License.
-```
-
-## Quill
-
-Repository: https://github.com/odygrd/quill
-License: MIT License
-License text (copied): [LICENSES/MIT-quill.txt]([LICENSES/MIT-quill.txt])
-
-## yaml-cpp
-
-Repository: [https://github.com/jbeder/yaml-cpp](https://github.com/jbeder/yaml-cpp)
-License: MIT
-License text (copied): [LICENSES/MIT-yaml-cpp.txt]([LICENSES/MIT-yaml-cpp.txt])
-
-ByteTaper uses yaml-cpp for YAML route policy loading and validation.
-
-Notice:
-
-```text
-yaml-cpp
-Copyright (c) 2008-2015 Jesse Beder.
-Licensed under the MIT License.
-```
-
-## GoogleTest
-
-Repository: [https://github.com/google/googletest](https://github.com/google/googletest)
-License: BSD-3-Clause
-
-ByteTaper uses GoogleTest for unit and integration tests. GoogleTest is a
-build/test dependency and is not required by the ByteTaper runtime unless test
-binaries are distributed.
-
-Notice:
-
-```text
-GoogleTest
-Copyright 2008 Google Inc.
-Licensed under the BSD 3-Clause License.
-```
-
-## Transitive and system dependencies
-
-ByteTaper may also link against transitive or system libraries depending on the
-build environment, package manager, and final distribution format.
-
-These may include, but are not limited to:
-
-* C and C++ runtime libraries
-* pthread / system threading libraries
-* zlib
-* bzip2
-* lz4
-* snappy
-* zstd
-* OpenSSL or another TLS/crypto provider
-* Abseil
-* c-ares
-* RE2
-* other gRPC, Protobuf, RocksDB, or distribution-level dependencies
-
-The exact transitive dependency set can differ between local builds, CI builds,
-Linux distribution packages, and container images.
-
-Before releasing a binary or container image, inspect the final artifact and
-include any additional required notices.
-
-## Vendored source files
-
-If ByteTaper vendors any third-party source files, generated files, `.proto`
-definitions, headers, or patches, the original copyright notices and license
-headers must be preserved.
-
-Do not replace upstream license headers with ByteTaper headers.
-
-If a third-party file is modified, add a clear modification notice where
-appropriate, while preserving the original upstream notice.
-
-## Distribution note
-
-This notice file is intended to describe ByteTaper's direct third-party
-dependencies. It does not replace a full dependency audit of the final release
-artifact.
-
-For every source, binary, package, or container distribution, ensure that:
-
-1. The applicable full license texts are included.
-2. Required copyright notices are preserved.
-3. Required NOTICE or attribution files from upstream projects are retained.
-4. The final dependency inventory or SBOM matches the actual released artifact.
-
+When dependencies, container images, vendored `.proto` files, or generated-code
+inputs change, update this file in the same pull request.

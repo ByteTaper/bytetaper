@@ -1,0 +1,27 @@
+GNU Affero General Public License v3.0 only
+
+SPDX-License-Identifier: AGPL-3.0-only
+
+ByteTaper source files that are marked with:
+
+    SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
+
+may be used under the GNU Affero General Public License version 3 only unless a
+separate commercial license agreement has been granted.
+
+The canonical license text for AGPL-3.0-only is published by the Free Software
+Foundation and listed by SPDX as AGPL-3.0-only.
+
+Canonical references:
+
+    https://www.gnu.org/licenses/agpl-3.0.txt
+    https://spdx.org/licenses/AGPL-3.0-only.html
+
+Important AGPL network-use note:
+
+If you modify ByteTaper and run the modified version as a network service, AGPL
+section 13 may require offering the Corresponding Source of your modified
+version to users interacting with it over the network.
+
+This file is an index/reference for the AGPL-3.0-only licensing path. The
+canonical FSF license text controls for the AGPL path.
