@@ -30,8 +30,7 @@ FetchContent_MakeAvailable(quill)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
 
-add_library(policy_yaml_loader STATIC
-  src/policy/yaml_loader.cpp
+add_library(bytetaper_policy STATIC
   src/policy/pagination_policy.cpp
   src/policy/compression_policy.cpp
   src/policy/cache_policy.cpp
@@ -40,6 +39,11 @@ add_library(policy_yaml_loader STATIC
   src/policy/compression_policy_validator.cpp
   src/policy/cache_policy_validator.cpp
   src/policy/coalescing_policy_validator.cpp
+)
+target_include_directories(bytetaper_policy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(policy_yaml_loader STATIC
+  src/policy/yaml_loader.cpp
 )
 set_source_files_properties(src/policy/yaml_loader.cpp
   PROPERTIES COMPILE_OPTIONS "-fexceptions"
@@ -54,6 +58,7 @@ target_include_directories(policy_yaml_loader
 )
 target_link_libraries(policy_yaml_loader
   PUBLIC
+    bytetaper_policy
     ${YAML_CPP_LIBRARIES}
 )
 
@@ -109,6 +114,107 @@ target_link_libraries(bytetaper_metrics_http_server
   PRIVATE
     bytetaper_prometheus_registry
     Threads::Threads
+)
+
+add_library(bytetaper_apg STATIC
+  src/apg/pipeline.cpp
+  src/apg/query_view.cpp
+)
+target_include_directories(bytetaper_apg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(bytetaper_cache STATIC
+  src/cache/l1_cache.cpp
+  src/cache/l2_rocksdb_cache.cpp
+  src/cache/cache_entry_codec.cpp
+  src/cache/cache_entry.cpp
+  src/cache/cache_key.cpp
+  src/cache/cache_ttl.cpp
+  src/cache/cache_safety.cpp
+)
+target_include_directories(bytetaper_cache PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(bytetaper_cache PUBLIC bytetaper_hash RocksDB::RocksDB)
+
+add_library(bytetaper_coalescing STATIC
+  src/coalescing/coalescing_key.cpp
+  src/coalescing/coalescing_eligibility.cpp
+  src/coalescing/coalescing_safety.cpp
+  src/coalescing/inflight_registry.cpp
+  src/coalescing/coalescing_decision.cpp
+  src/coalescing/wait_window.cpp
+  src/coalescing/coalescing_timeout.cpp
+  src/coalescing/coalescing_completion_handoff.cpp
+)
+target_include_directories(bytetaper_coalescing PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(bytetaper_coalescing PUBLIC bytetaper_cache bytetaper_prometheus_registry bytetaper_hash)
+
+add_library(bytetaper_runtime STATIC
+  src/runtime/worker_queue.cpp
+)
+target_include_directories(bytetaper_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(bytetaper_runtime PUBLIC bytetaper_cache bytetaper_coalescing bytetaper_prometheus_registry Threads::Threads)
+
+add_library(bytetaper_pagination STATIC
+  src/pagination/pagination_decision.cpp
+  src/pagination/pagination_mutation.cpp
+  src/pagination/pagination_query.cpp
+  src/pagination/oversized_response_guard.cpp
+)
+target_include_directories(bytetaper_pagination PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(bytetaper_pagination PUBLIC bytetaper_apg)
+
+add_library(bytetaper_compression STATIC
+  src/compression/accept_encoding.cpp
+  src/compression/content_encoding.cpp
+  src/compression/compression_eligibility.cpp
+  src/compression/compression_size.cpp
+  src/compression/compression_decision.cpp
+)
+target_include_directories(bytetaper_compression PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(bytetaper_safety STATIC
+  src/safety/fail_open.cpp
+)
+target_include_directories(bytetaper_safety PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(bytetaper_field_selection STATIC
+  src/field_selection/request_target.cpp
+)
+target_include_directories(bytetaper_field_selection PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(bytetaper_json_transform STATIC
+  src/json_transform/content_type.cpp
+  src/json_transform/flat_json.cpp
+  src/json_transform/filter_flat_json.cpp
+)
+target_include_directories(bytetaper_json_transform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(bytetaper_stages STATIC
+  src/stages/l1_cache_lookup_stage.cpp
+  src/stages/l1_cache_store_stage.cpp
+  src/stages/l2_cache_lookup_stage.cpp
+  src/stages/l2_cache_store_stage.cpp
+  src/stages/pagination_request_mutation_stage.cpp
+  src/stages/l2_cache_async_lookup_enqueue_stage.cpp
+  src/stages/l2_cache_async_store_enqueue_stage.cpp
+  src/stages/coalescing_follower_wait_stage.cpp
+  src/stages/coalescing_leader_completion_stage.cpp
+  src/stages/coalescing_decision_stage.cpp
+  src/stages/compression_decision_stage.cpp
+  src/stages/cache_key_prepare_stage.cpp
+  src/stages/field_variant_admission_stage.cpp
+  src/stages/l1_variant_lookup_stage.cpp
+  src/stages/l1_variant_store_stage.cpp
+)
+target_include_directories(bytetaper_stages PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(bytetaper_stages PUBLIC
+  bytetaper_apg
+  bytetaper_cache
+  bytetaper_runtime
+  bytetaper_coalescing
+  bytetaper_pagination
+  bytetaper_compression
+  bytetaper_policy
+  bytetaper_prometheus_registry
 )
 
 add_executable(bytetaper-validate-policy
@@ -253,66 +359,37 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
   target_include_directories(bytetaper_trace PUBLIC include)
   target_link_libraries(bytetaper_trace PRIVATE bytetaper_logger)
 
-  add_library(bytetaper_extproc_grpc_server STATIC
-    src/extproc/grpc_server.cpp
+  add_library(bytetaper_extproc_adapter STATIC
     src/extproc/request_runtime.cpp
     src/extproc/bytetaper_to_envoy.cpp
     src/extproc/default_pipelines.cpp
-    src/apg/pipeline.cpp
-    src/apg/query_view.cpp
-    src/stages/l1_cache_lookup_stage.cpp
-    src/stages/l1_cache_store_stage.cpp
-    src/stages/l2_cache_lookup_stage.cpp
-    src/stages/l2_cache_store_stage.cpp
-    src/field_selection/request_target.cpp
-    src/json_transform/content_type.cpp
-    src/json_transform/flat_json.cpp
-    src/json_transform/filter_flat_json.cpp
-    src/cache/l1_cache.cpp
-    src/cache/l2_rocksdb_cache.cpp
-    src/cache/cache_entry_codec.cpp
-    src/cache/cache_entry.cpp
-    src/cache/cache_key.cpp
-    src/runtime/worker_queue.cpp
-    src/cache/cache_ttl.cpp
-    src/cache/cache_safety.cpp
-    src/safety/fail_open.cpp
-    src/policy/pagination_policy.cpp
-    src/stages/pagination_request_mutation_stage.cpp
-    src/stages/l2_cache_async_lookup_enqueue_stage.cpp
-    src/stages/l2_cache_async_store_enqueue_stage.cpp
-    src/stages/coalescing_follower_wait_stage.cpp
-    src/stages/coalescing_leader_completion_stage.cpp
-    src/stages/coalescing_decision_stage.cpp
-    src/pagination/pagination_decision.cpp
-    src/pagination/pagination_mutation.cpp
-    src/pagination/pagination_query.cpp
-    src/policy/compression_policy.cpp
-    src/policy/coalescing_policy.cpp
-    src/stages/compression_decision_stage.cpp
-    src/compression/accept_encoding.cpp
-    src/compression/content_encoding.cpp
-    src/compression/compression_eligibility.cpp
-    src/compression/compression_size.cpp
-    src/compression/compression_decision.cpp
-    src/policy/pagination_policy_validator.cpp
-    src/policy/compression_policy_validator.cpp
-    src/policy/cache_policy_validator.cpp
-    src/policy/coalescing_policy_validator.cpp
-    src/coalescing/coalescing_key.cpp
-    src/coalescing/coalescing_eligibility.cpp
-    src/coalescing/coalescing_safety.cpp
-    src/coalescing/inflight_registry.cpp
-    src/coalescing/coalescing_decision.cpp
-    src/coalescing/wait_window.cpp
-    src/coalescing/coalescing_timeout.cpp
-    src/coalescing/coalescing_completion_handoff.cpp
-    src/metrics/coalescing_metrics.cpp
     src/extproc/header_view.cpp
-    src/stages/cache_key_prepare_stage.cpp
-    src/stages/field_variant_admission_stage.cpp
-    src/stages/l1_variant_lookup_stage.cpp
-    src/stages/l1_variant_store_stage.cpp
+  )
+  target_include_directories(bytetaper_extproc_adapter
+    PUBLIC
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+      ${BYTETAPER_GENERATED_PROTO_DIR}
+  )
+  target_link_libraries(bytetaper_extproc_adapter PUBLIC
+    bytetaper_stages
+    bytetaper_apg
+    bytetaper_cache
+    bytetaper_runtime
+    bytetaper_coalescing
+    bytetaper_pagination
+    bytetaper_compression
+    bytetaper_policy
+    bytetaper_field_selection
+    bytetaper_json_transform
+    bytetaper_safety
+    bytetaper_extproc_proto_boundary
+    bytetaper_logger
+    bytetaper_trace
+  )
+
+  add_library(bytetaper_extproc_grpc_server STATIC
+    src/extproc/grpc_server.cpp
   )
   target_include_directories(bytetaper_extproc_grpc_server
     PUBLIC
@@ -322,11 +399,17 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
   )
   target_link_libraries(bytetaper_extproc_grpc_server
     PUBLIC
+      bytetaper_extproc_adapter
+      bytetaper_stages
+      bytetaper_cache
+      bytetaper_runtime
+      bytetaper_coalescing
       bytetaper_prometheus_registry
       bytetaper_trace
     PRIVATE
       bytetaper_extproc_grpc
       RocksDB::RocksDB
+      Threads::Threads
       bytetaper_hash
   )
 
@@ -455,7 +538,6 @@ if(BUILD_TESTING)
 
     add_executable(apg_pipeline_runner_test
       tests/apg_pipeline_runner_test.cpp
-      src/apg/pipeline.cpp
     )
     target_include_directories(apg_pipeline_runner_test
       PRIVATE
@@ -464,6 +546,7 @@ if(BUILD_TESTING)
     target_link_libraries(apg_pipeline_runner_test
       PRIVATE
         gtest_main
+        bytetaper_apg
     )
 
     add_test(
@@ -473,8 +556,6 @@ if(BUILD_TESTING)
 
     add_executable(field_selection_test
       tests/field_selection_test.cpp
-      src/field_selection/request_target.cpp
-      src/apg/query_view.cpp
     )
     target_include_directories(field_selection_test
       PRIVATE
@@ -483,6 +564,8 @@ if(BUILD_TESTING)
     target_link_libraries(field_selection_test
       PRIVATE
         gtest_main
+        bytetaper_field_selection
+        bytetaper_apg
     )
 
     add_test(
@@ -492,7 +575,6 @@ if(BUILD_TESTING)
 
     add_executable(apg_query_view_test
       tests/apg_query_view_test.cpp
-      src/apg/query_view.cpp
     )
     target_include_directories(apg_query_view_test
       PRIVATE
@@ -501,6 +583,7 @@ if(BUILD_TESTING)
     target_link_libraries(apg_query_view_test
       PRIVATE
         gtest_main
+        bytetaper_apg
     )
 
     add_test(
@@ -510,8 +593,6 @@ if(BUILD_TESTING)
 
     add_executable(l1_cache_test
       tests/l1_cache_test.cpp
-      src/cache/l1_cache.cpp
-      src/cache/cache_entry.cpp
     )
     target_include_directories(l1_cache_test
       PRIVATE
@@ -520,8 +601,9 @@ if(BUILD_TESTING)
     target_link_libraries(l1_cache_test
       PRIVATE
         gtest_main
-        RocksDB::RocksDB
+        bytetaper_cache
         bytetaper_prometheus_registry
+        RocksDB::RocksDB
     )
 
     add_test(
@@ -531,16 +613,6 @@ if(BUILD_TESTING)
 
     add_executable(runtime_worker_queue_test
       tests/runtime_worker_queue_test.cpp
-      src/runtime/worker_queue.cpp
-      src/cache/cache_key.cpp
-      src/cache/cache_entry.cpp
-      src/cache/l1_cache.cpp
-      src/cache/l2_rocksdb_cache.cpp
-      src/cache/cache_entry_codec.cpp
-      src/cache/cache_ttl.cpp
-      src/coalescing/inflight_registry.cpp
-      src/coalescing/coalescing_completion_handoff.cpp
-      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(runtime_worker_queue_test
       PRIVATE
@@ -549,9 +621,12 @@ if(BUILD_TESTING)
     target_link_libraries(runtime_worker_queue_test
       PRIVATE
         gtest_main
+        bytetaper_runtime
+        bytetaper_cache
+        bytetaper_coalescing
+        bytetaper_prometheus_registry
         Threads::Threads
         RocksDB::RocksDB
-        bytetaper_prometheus_registry
     )
     add_test(
       NAME runtime_worker_queue_test
@@ -560,11 +635,6 @@ if(BUILD_TESTING)
 
     add_executable(l1_cache_lookup_stage_test
       tests/l1_cache_lookup_stage_test.cpp
-      src/stages/l1_cache_lookup_stage.cpp
-      src/stages/cache_key_prepare_stage.cpp
-      src/cache/cache_entry.cpp
-      src/cache/cache_key.cpp
-      src/cache/l1_cache.cpp
     )
     target_include_directories(l1_cache_lookup_stage_test
       PRIVATE
@@ -573,7 +643,7 @@ if(BUILD_TESTING)
     target_link_libraries(l1_cache_lookup_stage_test
       PRIVATE
         gtest_main
-        bytetaper_prometheus_registry
+        bytetaper_stages
     )
 
     add_test(
@@ -583,14 +653,6 @@ if(BUILD_TESTING)
 
     add_executable(l2_cache_lookup_stage_test
       tests/l2_cache_lookup_stage_test.cpp
-      src/stages/l2_cache_lookup_stage.cpp
-      src/stages/cache_key_prepare_stage.cpp
-      src/cache/l2_rocksdb_cache.cpp
-      src/cache/cache_entry_codec.cpp
-      src/cache/cache_entry.cpp
-      src/cache/cache_key.cpp
-      src/cache/cache_ttl.cpp
-      src/cache/l1_cache.cpp
     )
     target_include_directories(l2_cache_lookup_stage_test
       PRIVATE
@@ -599,7 +661,7 @@ if(BUILD_TESTING)
     target_link_libraries(l2_cache_lookup_stage_test
       PRIVATE
         gtest_main
-        RocksDB::RocksDB
+        bytetaper_stages
     )
 
     add_test(
@@ -609,8 +671,6 @@ if(BUILD_TESTING)
 
     add_executable(cache_key_prepare_stage_test
       tests/cache_key_prepare_stage_test.cpp
-      src/stages/cache_key_prepare_stage.cpp
-      src/cache/cache_key.cpp
     )
     target_include_directories(cache_key_prepare_stage_test
       PRIVATE
@@ -619,13 +679,12 @@ if(BUILD_TESTING)
     target_link_libraries(cache_key_prepare_stage_test
       PRIVATE
         gtest_main
+        bytetaper_stages
     )
     add_test(NAME cache_key_prepare_stage_test COMMAND cache_key_prepare_stage_test)
 
     add_executable(field_variant_admission_stage_test
       tests/field_variant_admission_stage_test.cpp
-      src/stages/field_variant_admission_stage.cpp
-      src/cache/cache_key.cpp
     )
     target_include_directories(field_variant_admission_stage_test
       PRIVATE
@@ -634,16 +693,12 @@ if(BUILD_TESTING)
     target_link_libraries(field_variant_admission_stage_test
       PRIVATE
         gtest_main
+        bytetaper_stages
     )
     add_test(NAME field_variant_admission_stage_test COMMAND field_variant_admission_stage_test)
 
     add_executable(l1_variant_stage_test
       tests/l1_variant_stage_test.cpp
-      src/stages/l1_variant_lookup_stage.cpp
-      src/stages/l1_variant_store_stage.cpp
-      src/cache/l1_cache.cpp
-      src/cache/cache_key.cpp
-      src/cache/cache_entry.cpp
     )
     target_include_directories(l1_variant_stage_test
       PRIVATE
@@ -652,17 +707,12 @@ if(BUILD_TESTING)
     target_link_libraries(l1_variant_stage_test
       PRIVATE
         gtest_main
-        bytetaper_prometheus_registry
+        bytetaper_stages
     )
     add_test(NAME l1_variant_stage_test COMMAND l1_variant_stage_test)
 
     add_executable(l1_cache_store_stage_test
       tests/l1_cache_store_stage_test.cpp
-      src/stages/l1_cache_store_stage.cpp
-      src/stages/cache_key_prepare_stage.cpp
-      src/cache/cache_entry.cpp
-      src/cache/cache_key.cpp
-      src/cache/l1_cache.cpp
     )
     target_include_directories(l1_cache_store_stage_test
       PRIVATE
@@ -671,7 +721,7 @@ if(BUILD_TESTING)
     target_link_libraries(l1_cache_store_stage_test
       PRIVATE
         gtest_main
-        bytetaper_prometheus_registry
+        bytetaper_stages
     )
 
     add_test(
@@ -681,8 +731,6 @@ if(BUILD_TESTING)
 
     add_executable(l1_put_if_newer_test
       tests/l1_put_if_newer_test.cpp
-      src/cache/l1_cache.cpp
-      src/cache/cache_entry.cpp
     )
     target_include_directories(l1_put_if_newer_test
       PRIVATE
@@ -691,8 +739,9 @@ if(BUILD_TESTING)
     target_link_libraries(l1_put_if_newer_test
       PRIVATE
         gtest_main
-        RocksDB::RocksDB
+        bytetaper_cache
         bytetaper_prometheus_registry
+        RocksDB::RocksDB
     )
     add_test(
       NAME l1_put_if_newer_test
@@ -701,12 +750,6 @@ if(BUILD_TESTING)
 
     add_executable(l2_cache_store_stage_test
       tests/l2_cache_store_stage_test.cpp
-      src/stages/l2_cache_store_stage.cpp
-      src/cache/l2_rocksdb_cache.cpp
-      src/cache/cache_entry_codec.cpp
-      src/cache/cache_entry.cpp
-      src/cache/cache_key.cpp
-      src/cache/cache_ttl.cpp
     )
     target_include_directories(l2_cache_store_stage_test
       PRIVATE
@@ -715,7 +758,7 @@ if(BUILD_TESTING)
     target_link_libraries(l2_cache_store_stage_test
       PRIVATE
         gtest_main
-        RocksDB::RocksDB
+        bytetaper_stages
     )
 
     add_test(
@@ -725,15 +768,6 @@ if(BUILD_TESTING)
 
     add_executable(l2_promotion_test
       tests/l2_promotion_test.cpp
-      src/stages/l2_cache_lookup_stage.cpp
-      src/stages/l1_cache_lookup_stage.cpp
-      src/stages/cache_key_prepare_stage.cpp
-      src/cache/l2_rocksdb_cache.cpp
-      src/cache/cache_entry_codec.cpp
-      src/cache/l1_cache.cpp
-      src/cache/cache_entry.cpp
-      src/cache/cache_key.cpp
-      src/cache/cache_ttl.cpp
     )
     target_include_directories(l2_promotion_test
       PRIVATE
@@ -742,6 +776,7 @@ if(BUILD_TESTING)
     target_link_libraries(l2_promotion_test
       PRIVATE
         gtest_main
+        bytetaper_stages
         RocksDB::RocksDB
         bytetaper_prometheus_registry
     )
@@ -847,7 +882,6 @@ if(BUILD_TESTING)
 
     add_executable(json_transform_content_type_test
       tests/json_transform_content_type_test.cpp
-      src/json_transform/content_type.cpp
     )
     target_include_directories(json_transform_content_type_test
       PRIVATE
@@ -856,6 +890,7 @@ if(BUILD_TESTING)
     target_link_libraries(json_transform_content_type_test
       PRIVATE
         gtest_main
+        bytetaper_json_transform
     )
 
     add_test(
@@ -865,7 +900,6 @@ if(BUILD_TESTING)
 
     add_executable(json_transform_flat_json_test
       tests/json_transform_flat_json_test.cpp
-      src/json_transform/flat_json.cpp
     )
     target_include_directories(json_transform_flat_json_test
       PRIVATE
@@ -874,6 +908,7 @@ if(BUILD_TESTING)
     target_link_libraries(json_transform_flat_json_test
       PRIVATE
         gtest_main
+        bytetaper_json_transform
     )
 
     add_test(
@@ -883,8 +918,6 @@ if(BUILD_TESTING)
 
     add_executable(json_transform_filter_flat_json_test
       tests/json_transform_filter_flat_json_test.cpp
-      src/json_transform/flat_json.cpp
-      src/json_transform/filter_flat_json.cpp
     )
     target_include_directories(json_transform_filter_flat_json_test
       PRIVATE
@@ -893,6 +926,7 @@ if(BUILD_TESTING)
     target_link_libraries(json_transform_filter_flat_json_test
       PRIVATE
         gtest_main
+        bytetaper_json_transform
     )
 
     add_test(
@@ -902,12 +936,6 @@ if(BUILD_TESTING)
 
     add_executable(policy_route_policy_test
       tests/policy_route_policy_test.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
-      src/policy/coalescing_policy.cpp
-      src/policy/pagination_policy_validator.cpp
-      src/policy/compression_policy_validator.cpp
-      src/policy/coalescing_policy_validator.cpp
     )
     target_include_directories(policy_route_policy_test
       PRIVATE
@@ -916,6 +944,7 @@ if(BUILD_TESTING)
     target_link_libraries(policy_route_policy_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -1066,7 +1095,6 @@ if(BUILD_TESTING)
 
     add_executable(policy_cache_policy_test
       tests/policy_cache_policy_test.cpp
-      src/policy/cache_policy.cpp
     )
     target_include_directories(policy_cache_policy_test
       PRIVATE
@@ -1075,6 +1103,7 @@ if(BUILD_TESTING)
     target_link_libraries(policy_cache_policy_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -1084,10 +1113,6 @@ if(BUILD_TESTING)
 
     add_executable(pagination_policy_test
       tests/pagination_policy_test.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
-      src/policy/coalescing_policy.cpp
-      src/policy/coalescing_policy_validator.cpp
     )
     target_include_directories(pagination_policy_test
       PRIVATE
@@ -1096,6 +1121,7 @@ if(BUILD_TESTING)
     target_link_libraries(pagination_policy_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -1105,7 +1131,6 @@ if(BUILD_TESTING)
 
     add_executable(compression_policy_test
       tests/compression_policy_test.cpp
-      src/policy/compression_policy.cpp
     )
     target_include_directories(compression_policy_test
       PRIVATE
@@ -1114,6 +1139,7 @@ if(BUILD_TESTING)
     target_link_libraries(compression_policy_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -1123,7 +1149,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_key_test
       tests/coalescing_key_test.cpp
-      src/coalescing/coalescing_key.cpp
     )
     target_include_directories(coalescing_key_test
       PRIVATE
@@ -1132,6 +1157,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_key_test
       PRIVATE
         gtest_main
+        bytetaper_coalescing
     )
 
     add_test(
@@ -1141,7 +1167,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_get_only_test
       tests/coalescing_get_only_test.cpp
-      src/coalescing/coalescing_eligibility.cpp
     )
     target_include_directories(coalescing_get_only_test
       PRIVATE
@@ -1150,6 +1175,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_get_only_test
       PRIVATE
         gtest_main
+        bytetaper_coalescing
     )
 
     add_test(
@@ -1159,8 +1185,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_auth_safety_test
       tests/coalescing_auth_safety_test.cpp
-      src/coalescing/coalescing_safety.cpp
-      src/coalescing/coalescing_eligibility.cpp
     )
     target_include_directories(coalescing_auth_safety_test
       PRIVATE
@@ -1169,6 +1193,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_auth_safety_test
       PRIVATE
         gtest_main
+        bytetaper_coalescing
     )
 
     add_test(
@@ -1178,7 +1203,6 @@ if(BUILD_TESTING)
 
     add_executable(inflight_registry_test
       tests/inflight_registry_test.cpp
-      src/coalescing/inflight_registry.cpp
     )
     target_include_directories(inflight_registry_test
       PRIVATE
@@ -1187,6 +1211,7 @@ if(BUILD_TESTING)
     target_link_libraries(inflight_registry_test
       PRIVATE
         gtest_main
+        bytetaper_coalescing
     )
 
     add_test(
@@ -1196,12 +1221,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_decision_test
       tests/coalescing_decision_test.cpp
-      src/coalescing/coalescing_decision.cpp
-      src/coalescing/inflight_registry.cpp
-      src/coalescing/coalescing_eligibility.cpp
-      src/coalescing/coalescing_safety.cpp
-      src/coalescing/coalescing_key.cpp
-      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(coalescing_decision_test
       PRIVATE
@@ -1210,6 +1229,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_decision_test
       PRIVATE
         gtest_main
+        bytetaper_coalescing
     )
 
     add_test(
@@ -1219,13 +1239,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_timeout_test
       tests/coalescing_timeout_test.cpp
-      src/coalescing/coalescing_timeout.cpp
-      src/coalescing/coalescing_decision.cpp
-      src/coalescing/inflight_registry.cpp
-      src/coalescing/coalescing_eligibility.cpp
-      src/coalescing/coalescing_safety.cpp
-      src/coalescing/coalescing_key.cpp
-      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(coalescing_timeout_test
       PRIVATE
@@ -1234,6 +1247,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_timeout_test
       PRIVATE
         gtest_main
+        bytetaper_coalescing
     )
 
     add_test(
@@ -1243,7 +1257,6 @@ if(BUILD_TESTING)
 
     add_executable(wait_window_test
       tests/wait_window_test.cpp
-      src/coalescing/wait_window.cpp
     )
     target_include_directories(wait_window_test
       PRIVATE
@@ -1252,6 +1265,7 @@ if(BUILD_TESTING)
     target_link_libraries(wait_window_test
       PRIVATE
         gtest_main
+        bytetaper_coalescing
     )
 
     add_test(
@@ -1318,18 +1332,6 @@ if(BUILD_TESTING)
 
     add_executable(l2_cache_async_lookup_enqueue_stage_test
       tests/l2_cache_async_lookup_enqueue_stage_test.cpp
-      src/stages/l2_cache_async_lookup_enqueue_stage.cpp
-      src/stages/cache_key_prepare_stage.cpp
-      src/runtime/worker_queue.cpp
-      src/cache/cache_key.cpp
-      src/cache/cache_entry.cpp
-      src/cache/l1_cache.cpp
-      src/cache/l2_rocksdb_cache.cpp
-      src/cache/cache_entry_codec.cpp
-      src/cache/cache_ttl.cpp
-      src/coalescing/inflight_registry.cpp
-      src/coalescing/coalescing_completion_handoff.cpp
-      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(l2_cache_async_lookup_enqueue_stage_test
       PRIVATE
@@ -1338,9 +1340,9 @@ if(BUILD_TESTING)
     target_link_libraries(l2_cache_async_lookup_enqueue_stage_test
       PRIVATE
         gtest_main
+        bytetaper_stages
         RocksDB::RocksDB
         Threads::Threads
-        bytetaper_prometheus_registry
     )
     add_test(
       NAME l2_cache_async_lookup_enqueue_stage_test
@@ -1349,18 +1351,6 @@ if(BUILD_TESTING)
 
     add_executable(l2_cache_async_store_enqueue_stage_test
       tests/l2_cache_async_store_enqueue_stage_test.cpp
-      src/stages/l2_cache_async_store_enqueue_stage.cpp
-      src/stages/cache_key_prepare_stage.cpp
-      src/runtime/worker_queue.cpp
-      src/cache/cache_key.cpp
-      src/cache/cache_entry.cpp
-      src/cache/l1_cache.cpp
-      src/cache/l2_rocksdb_cache.cpp
-      src/cache/cache_entry_codec.cpp
-      src/cache/cache_ttl.cpp
-      src/coalescing/inflight_registry.cpp
-      src/coalescing/coalescing_completion_handoff.cpp
-      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(l2_cache_async_store_enqueue_stage_test
       PRIVATE
@@ -1369,9 +1359,9 @@ if(BUILD_TESTING)
     target_link_libraries(l2_cache_async_store_enqueue_stage_test
       PRIVATE
         gtest_main
+        bytetaper_stages
         RocksDB::RocksDB
         Threads::Threads
-        bytetaper_prometheus_registry
     )
     add_test(
       NAME l2_cache_async_store_enqueue_stage_test
@@ -1380,10 +1370,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_leader_completion_test
       tests/coalescing_leader_completion_test.cpp
-      src/stages/coalescing_leader_completion_stage.cpp
-      src/coalescing/inflight_registry.cpp
-      src/coalescing/coalescing_completion_handoff.cpp
-      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(coalescing_leader_completion_test
       PRIVATE
@@ -1392,6 +1378,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_leader_completion_test
       PRIVATE
         gtest_main
+        bytetaper_stages
     )
 
     add_test(
@@ -1401,7 +1388,6 @@ if(BUILD_TESTING)
 
     add_executable(runtime_metrics_test
       tests/runtime_metrics_test.cpp
-      src/metrics/runtime_metrics.cpp
     )
     target_include_directories(runtime_metrics_test
       PRIVATE
@@ -1410,6 +1396,7 @@ if(BUILD_TESTING)
     target_link_libraries(runtime_metrics_test
       PRIVATE
         gtest_main
+        bytetaper_prometheus_registry
     )
     add_test(
       NAME runtime_metrics_test
@@ -1518,7 +1505,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_metrics_test
       tests/coalescing_metrics_test.cpp
-      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(coalescing_metrics_test
       PRIVATE
@@ -1527,6 +1513,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_metrics_test
       PRIVATE
         gtest_main
+        bytetaper_prometheus_registry
     )
 
     add_test(
@@ -1536,8 +1523,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_policy_validator_test
       tests/coalescing_policy_validator_test.cpp
-      src/policy/coalescing_policy_validator.cpp
-      src/policy/coalescing_policy.cpp
     )
     target_include_directories(coalescing_policy_validator_test
       PRIVATE
@@ -1546,6 +1531,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_policy_validator_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -1555,7 +1541,6 @@ if(BUILD_TESTING)
 
     add_executable(accept_encoding_test
       tests/accept_encoding_test.cpp
-      src/compression/accept_encoding.cpp
     )
     target_include_directories(accept_encoding_test
       PRIVATE
@@ -1564,6 +1549,7 @@ if(BUILD_TESTING)
     target_link_libraries(accept_encoding_test
       PRIVATE
         gtest_main
+        bytetaper_compression
     )
 
     add_test(
@@ -1573,8 +1559,6 @@ if(BUILD_TESTING)
 
     add_executable(content_encoding_test
       tests/content_encoding_test.cpp
-      src/compression/content_encoding.cpp
-      src/policy/compression_policy.cpp
     )
     target_include_directories(content_encoding_test
       PRIVATE
@@ -1583,6 +1567,7 @@ if(BUILD_TESTING)
     target_link_libraries(content_encoding_test
       PRIVATE
         gtest_main
+        bytetaper_compression
     )
 
     add_test(
@@ -1592,8 +1577,6 @@ if(BUILD_TESTING)
 
     add_executable(content_type_eligibility_test
       tests/content_type_eligibility_test.cpp
-      src/compression/compression_eligibility.cpp
-      src/policy/compression_policy.cpp
     )
     target_include_directories(content_type_eligibility_test
       PRIVATE
@@ -1602,6 +1585,7 @@ if(BUILD_TESTING)
     target_link_libraries(content_type_eligibility_test
       PRIVATE
         gtest_main
+        bytetaper_compression
     )
 
     add_test(
@@ -1611,7 +1595,6 @@ if(BUILD_TESTING)
 
     add_executable(compression_size_test
       tests/compression_size_test.cpp
-      src/compression/compression_size.cpp
     )
     target_include_directories(compression_size_test
       PRIVATE
@@ -1620,6 +1603,7 @@ if(BUILD_TESTING)
     target_link_libraries(compression_size_test
       PRIVATE
         gtest_main
+        bytetaper_compression
     )
 
     add_test(
@@ -1629,10 +1613,6 @@ if(BUILD_TESTING)
 
     add_executable(compression_decision_test
       tests/compression_decision_test.cpp
-      src/compression/compression_decision.cpp
-      src/compression/compression_eligibility.cpp
-      src/compression/compression_size.cpp
-      src/policy/compression_policy.cpp
     )
     target_include_directories(compression_decision_test
       PRIVATE
@@ -1641,6 +1621,7 @@ if(BUILD_TESTING)
     target_link_libraries(compression_decision_test
       PRIVATE
         gtest_main
+        bytetaper_compression
     )
 
     add_test(
@@ -1650,12 +1631,6 @@ if(BUILD_TESTING)
 
     add_executable(compression_decision_stage_test
       tests/compression_decision_stage_test.cpp
-      src/stages/compression_decision_stage.cpp
-      src/compression/compression_decision.cpp
-      src/compression/compression_eligibility.cpp
-      src/compression/compression_size.cpp
-      src/policy/compression_policy.cpp
-      src/metrics/compression_metrics.cpp
     )
     target_include_directories(compression_decision_stage_test
       PRIVATE
@@ -1664,6 +1639,7 @@ if(BUILD_TESTING)
     target_link_libraries(compression_decision_stage_test
       PRIVATE
         gtest_main
+        bytetaper_stages
     )
 
     add_test(
@@ -1673,9 +1649,6 @@ if(BUILD_TESTING)
 
     add_executable(pagination_policy_validator_test
       tests/pagination_policy_validator_test.cpp
-      src/policy/pagination_policy_validator.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
     )
     target_include_directories(pagination_policy_validator_test
       PRIVATE
@@ -1684,6 +1657,7 @@ if(BUILD_TESTING)
     target_link_libraries(pagination_policy_validator_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -1693,8 +1667,6 @@ if(BUILD_TESTING)
  
     add_executable(cache_policy_validator_test
       tests/cache_policy_validator_test.cpp
-      src/policy/cache_policy_validator.cpp
-      src/policy/cache_policy.cpp
     )
     target_include_directories(cache_policy_validator_test
       PRIVATE
@@ -1703,6 +1675,7 @@ if(BUILD_TESTING)
     target_link_libraries(cache_policy_validator_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
  
     add_test(
@@ -1712,8 +1685,6 @@ if(BUILD_TESTING)
 
     add_executable(compression_policy_validator_test
       tests/compression_policy_validator_test.cpp
-      src/policy/compression_policy_validator.cpp
-      src/policy/compression_policy.cpp
     )
     target_include_directories(compression_policy_validator_test
       PRIVATE
@@ -1722,6 +1693,7 @@ if(BUILD_TESTING)
     target_link_libraries(compression_policy_validator_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -1915,12 +1887,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_policy_test
       tests/coalescing_policy_test.cpp
-      src/policy/coalescing_policy.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
-      src/policy/pagination_policy_validator.cpp
-      src/policy/compression_policy_validator.cpp
-      src/policy/coalescing_policy_validator.cpp
     )
     target_include_directories(coalescing_policy_test
       PRIVATE
@@ -1929,6 +1895,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_policy_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -1938,12 +1905,6 @@ if(BUILD_TESTING)
 
     add_executable(coalescing_budget_policy_test
       tests/coalescing_budget_policy_test.cpp
-      src/policy/coalescing_policy.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
-      src/policy/pagination_policy_validator.cpp
-      src/policy/compression_policy_validator.cpp
-      src/policy/coalescing_policy_validator.cpp
     )
     target_include_directories(coalescing_budget_policy_test
       PRIVATE
@@ -1952,6 +1913,7 @@ if(BUILD_TESTING)
     target_link_libraries(coalescing_budget_policy_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -1979,7 +1941,6 @@ if(BUILD_TESTING)
 
     add_executable(cache_entry_test
       tests/cache_entry_test.cpp
-      src/cache/cache_entry.cpp
     )
     target_include_directories(cache_entry_test
       PRIVATE
@@ -1988,6 +1949,7 @@ if(BUILD_TESTING)
     target_link_libraries(cache_entry_test
       PRIVATE
         gtest_main
+        bytetaper_cache
     )
 
     add_test(
@@ -1997,8 +1959,6 @@ if(BUILD_TESTING)
 
     add_executable(cache_key_test
       tests/cache_key_test.cpp
-      src/cache/cache_key.cpp
-      src/cache/cache_safety.cpp
     )
     target_include_directories(cache_key_test
       PRIVATE
@@ -2007,6 +1967,7 @@ if(BUILD_TESTING)
     target_link_libraries(cache_key_test
       PRIVATE
         gtest_main
+        bytetaper_cache
     )
 
     add_test(
@@ -2016,7 +1977,6 @@ if(BUILD_TESTING)
 
     add_executable(cache_key_auth_scope_test
       tests/cache_key_auth_scope_test.cpp
-      src/cache/cache_key.cpp
     )
     target_include_directories(cache_key_auth_scope_test
       PRIVATE
@@ -2025,6 +1985,7 @@ if(BUILD_TESTING)
     target_link_libraries(cache_key_auth_scope_test
       PRIVATE
         gtest_main
+        bytetaper_cache
     )
 
     add_test(
@@ -2034,10 +1995,6 @@ if(BUILD_TESTING)
 
     add_executable(l2_rocksdb_cache_test
       tests/l2_rocksdb_cache_test.cpp
-      src/cache/l2_rocksdb_cache.cpp
-      src/cache/cache_entry_codec.cpp
-      src/cache/cache_entry.cpp
-      src/cache/cache_ttl.cpp
     )
     target_include_directories(l2_rocksdb_cache_test
       PRIVATE
@@ -2046,6 +2003,7 @@ if(BUILD_TESTING)
     target_link_libraries(l2_rocksdb_cache_test
       PRIVATE
         gtest_main
+        bytetaper_cache
         RocksDB::RocksDB
     )
 
@@ -2056,7 +2014,6 @@ if(BUILD_TESTING)
 
     add_executable(cache_ttl_test
       tests/cache_ttl_test.cpp
-      src/cache/cache_ttl.cpp
     )
     target_include_directories(cache_ttl_test
       PRIVATE
@@ -2065,6 +2022,7 @@ if(BUILD_TESTING)
     target_link_libraries(cache_ttl_test
       PRIVATE
         gtest_main
+        bytetaper_cache
     )
 
     add_test(
@@ -2074,7 +2032,6 @@ if(BUILD_TESTING)
 
     add_executable(cache_auth_safety_test
       tests/cache_auth_safety_test.cpp
-      src/cache/cache_safety.cpp
     )
     target_include_directories(cache_auth_safety_test
       PRIVATE
@@ -2083,6 +2040,7 @@ if(BUILD_TESTING)
     target_link_libraries(cache_auth_safety_test
       PRIVATE
         gtest_main
+        bytetaper_cache
     )
 
     add_test(
@@ -2092,8 +2050,6 @@ if(BUILD_TESTING)
 
     add_executable(pagination_query_test
       tests/pagination_query_test.cpp
-      src/pagination/pagination_query.cpp
-      src/apg/query_view.cpp
     )
     target_include_directories(pagination_query_test
       PRIVATE
@@ -2102,6 +2058,8 @@ if(BUILD_TESTING)
     target_link_libraries(pagination_query_test
       PRIVATE
         gtest_main
+        bytetaper_pagination
+        bytetaper_apg
     )
 
     add_test(
@@ -2111,11 +2069,6 @@ if(BUILD_TESTING)
 
     add_executable(missing_limit_decision_test
       tests/missing_limit_decision_test.cpp
-      src/pagination/pagination_decision.cpp
-      src/pagination/pagination_query.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
-      src/apg/query_view.cpp
     )
     target_include_directories(missing_limit_decision_test
       PRIVATE
@@ -2124,6 +2077,9 @@ if(BUILD_TESTING)
     target_link_libraries(missing_limit_decision_test
       PRIVATE
         gtest_main
+        bytetaper_pagination
+        bytetaper_policy
+        bytetaper_apg
     )
 
     add_test(
@@ -2133,12 +2089,6 @@ if(BUILD_TESTING)
 
     add_executable(default_limit_mutation_test
       tests/default_limit_mutation_test.cpp
-      src/pagination/pagination_mutation.cpp
-      src/pagination/pagination_decision.cpp
-      src/pagination/pagination_query.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
-      src/apg/query_view.cpp
     )
     target_include_directories(default_limit_mutation_test
       PRIVATE
@@ -2147,6 +2097,9 @@ if(BUILD_TESTING)
     target_link_libraries(default_limit_mutation_test
       PRIVATE
         gtest_main
+        bytetaper_pagination
+        bytetaper_policy
+        bytetaper_apg
     )
 
     add_test(
@@ -2156,12 +2109,6 @@ if(BUILD_TESTING)
 
     add_executable(max_limit_enforcement_test
       tests/max_limit_enforcement_test.cpp
-      src/pagination/pagination_decision.cpp
-      src/pagination/pagination_mutation.cpp
-      src/pagination/pagination_query.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
-      src/apg/query_view.cpp
     )
     target_include_directories(max_limit_enforcement_test
       PRIVATE
@@ -2170,6 +2117,9 @@ if(BUILD_TESTING)
     target_link_libraries(max_limit_enforcement_test
       PRIVATE
         gtest_main
+        bytetaper_pagination
+        bytetaper_policy
+        bytetaper_apg
     )
 
     add_test(
@@ -2179,12 +2129,6 @@ if(BUILD_TESTING)
 
     add_executable(preserve_valid_limit_test
       tests/preserve_valid_limit_test.cpp
-      src/pagination/pagination_decision.cpp
-      src/pagination/pagination_mutation.cpp
-      src/pagination/pagination_query.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
-      src/apg/query_view.cpp
     )
     target_include_directories(preserve_valid_limit_test
       PRIVATE
@@ -2193,6 +2137,9 @@ if(BUILD_TESTING)
     target_link_libraries(preserve_valid_limit_test
       PRIVATE
         gtest_main
+        bytetaper_pagination
+        bytetaper_policy
+        bytetaper_apg
     )
 
     add_test(
@@ -2202,8 +2149,6 @@ if(BUILD_TESTING)
 
     add_executable(offset_query_test
       tests/offset_query_test.cpp
-      src/pagination/pagination_query.cpp
-      src/apg/query_view.cpp
     )
     target_include_directories(offset_query_test
       PRIVATE
@@ -2212,6 +2157,8 @@ if(BUILD_TESTING)
     target_link_libraries(offset_query_test
       PRIVATE
         gtest_main
+        bytetaper_pagination
+        bytetaper_apg
     )
 
     add_test(
@@ -2221,8 +2168,6 @@ if(BUILD_TESTING)
 
     add_executable(pagination_cursor_placeholder_test
       tests/pagination_cursor_placeholder_test.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
     )
     target_include_directories(pagination_cursor_placeholder_test
       PRIVATE
@@ -2231,6 +2176,7 @@ if(BUILD_TESTING)
     target_link_libraries(pagination_cursor_placeholder_test
       PRIVATE
         gtest_main
+        bytetaper_policy
     )
 
     add_test(
@@ -2240,13 +2186,6 @@ if(BUILD_TESTING)
 
     add_executable(pagination_request_mutation_stage_test
       tests/pagination_request_mutation_stage_test.cpp
-      src/stages/pagination_request_mutation_stage.cpp
-      src/pagination/pagination_decision.cpp
-      src/pagination/pagination_mutation.cpp
-      src/pagination/pagination_query.cpp
-      src/policy/pagination_policy.cpp
-      src/policy/compression_policy.cpp
-      src/apg/query_view.cpp
     )
     target_include_directories(pagination_request_mutation_stage_test
       PRIVATE
@@ -2255,6 +2194,7 @@ if(BUILD_TESTING)
     target_link_libraries(pagination_request_mutation_stage_test
       PRIVATE
         gtest_main
+        bytetaper_stages
     )
 
     add_test(
@@ -2264,7 +2204,6 @@ if(BUILD_TESTING)
 
     add_executable(oversized_response_guard_test
       tests/oversized_response_guard_test.cpp
-      src/pagination/oversized_response_guard.cpp
     )
     target_include_directories(oversized_response_guard_test
       PRIVATE
@@ -2273,6 +2212,7 @@ if(BUILD_TESTING)
     target_link_libraries(oversized_response_guard_test
       PRIVATE
         gtest_main
+        bytetaper_pagination
     )
 
     add_test(
