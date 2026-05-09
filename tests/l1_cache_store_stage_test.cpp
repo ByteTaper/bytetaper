@@ -3,6 +3,7 @@
 
 #include "cache/cache_key.h"
 #include "cache/l1_cache.h"
+#include "metrics/cache_metrics.h"
 #include "policy/route_policy.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/l1_cache_store_stage.h"
@@ -22,6 +23,7 @@ protected:
 
     std::unique_ptr<cache::L1Cache> l1_cache_ptr_;
     policy::RoutePolicy policy_{};
+    metrics::CacheMetrics cache_metrics_{};
 };
 
 TEST_F(L1CacheStoreStageTest, EligibleResponseStored) {
@@ -32,6 +34,7 @@ TEST_F(L1CacheStoreStageTest, EligibleResponseStored) {
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &policy_;
     ctx.l1_cache = l1_cache_ptr_.get();
+    ctx.cache_metrics = &cache_metrics_;
     ctx.request_method = policy::HttpMethod::Get;
     ctx.request_epoch_ms = 1000;
     std::strncpy(ctx.raw_path, "/api/items", sizeof(ctx.raw_path) - 1);
@@ -45,6 +48,10 @@ TEST_F(L1CacheStoreStageTest, EligibleResponseStored) {
     auto out = l1_cache_store_stage(ctx);
     EXPECT_EQ(out.result, apg::StageResult::Continue);
     EXPECT_STREQ(out.note, "stored");
+
+    EXPECT_EQ(cache_metrics_.l1_store_attempt.load(), 1u);
+    EXPECT_EQ(cache_metrics_.l1_store_success.load(), 1u);
+    EXPECT_EQ(cache_metrics_.l1_store_skipped.load(), 0u);
 
     // Verify retrievable
     char key_buf[cache::kCacheKeyMaxLen] = {};
@@ -72,6 +79,7 @@ TEST_F(L1CacheStoreStageTest, NonGetNotStored) {
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &policy_;
     ctx.l1_cache = l1_cache_ptr_.get();
+    ctx.cache_metrics = &cache_metrics_;
     ctx.request_method = policy::HttpMethod::Post; // Non-GET
     ctx.response_status_code = 200;
     ctx.response_body = "body";
@@ -81,6 +89,10 @@ TEST_F(L1CacheStoreStageTest, NonGetNotStored) {
     auto out = l1_cache_store_stage(ctx);
     EXPECT_EQ(out.result, apg::StageResult::Continue);
     EXPECT_STREQ(out.note, "non-get");
+
+    EXPECT_EQ(cache_metrics_.l1_store_attempt.load(), 1u);
+    EXPECT_EQ(cache_metrics_.l1_store_skipped.load(), 1u);
+    EXPECT_EQ(cache_metrics_.l1_store_success.load(), 0u);
 
     for (std::size_t s = 0; s < cache::kL1ShardCount; ++s) {
         for (std::size_t i = 0; i < cache::kL1SlotsPerShard; ++i) {
@@ -97,6 +109,7 @@ TEST_F(L1CacheStoreStageTest, Non2xxNotStored) {
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &policy_;
     ctx.l1_cache = l1_cache_ptr_.get();
+    ctx.cache_metrics = &cache_metrics_;
     ctx.request_method = policy::HttpMethod::Get;
     ctx.response_status_code = 404; // Non-2xx
     ctx.response_body = "body";
@@ -106,6 +119,10 @@ TEST_F(L1CacheStoreStageTest, Non2xxNotStored) {
     auto out = l1_cache_store_stage(ctx);
     EXPECT_EQ(out.result, apg::StageResult::Continue);
     EXPECT_STREQ(out.note, "non-2xx");
+
+    EXPECT_EQ(cache_metrics_.l1_store_attempt.load(), 1u);
+    EXPECT_EQ(cache_metrics_.l1_store_skipped.load(), 1u);
+    EXPECT_EQ(cache_metrics_.l1_store_success.load(), 0u);
 
     for (std::size_t s = 0; s < cache::kL1ShardCount; ++s) {
         for (std::size_t i = 0; i < cache::kL1SlotsPerShard; ++i) {
@@ -122,6 +139,7 @@ TEST_F(L1CacheStoreStageTest, MissingKeyNotStored) {
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &policy_;
     ctx.l1_cache = l1_cache_ptr_.get();
+    ctx.cache_metrics = &cache_metrics_;
     ctx.request_method = policy::HttpMethod::Get;
     ctx.response_status_code = 200;
     ctx.response_body = "body";
@@ -131,6 +149,10 @@ TEST_F(L1CacheStoreStageTest, MissingKeyNotStored) {
     auto out = l1_cache_store_stage(ctx);
     EXPECT_EQ(out.result, apg::StageResult::Continue);
     EXPECT_STREQ(out.note, "key-not-ready");
+
+    EXPECT_EQ(cache_metrics_.l1_store_attempt.load(), 1u);
+    EXPECT_EQ(cache_metrics_.l1_store_skipped.load(), 1u);
+    EXPECT_EQ(cache_metrics_.l1_store_success.load(), 0u);
 
     for (std::size_t s = 0; s < cache::kL1ShardCount; ++s) {
         for (std::size_t i = 0; i < cache::kL1SlotsPerShard; ++i) {

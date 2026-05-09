@@ -17,6 +17,10 @@ enum class CacheMetricEvent : std::uint8_t {
     Store,
     Expired,
     Bypass,
+    L1StoreAttempt,
+    L1StoreSuccess,
+    L1StoreSkipped,
+    L1StoreSkippedBodyTooLarge,
 };
 
 struct CacheMetrics {
@@ -27,6 +31,10 @@ struct CacheMetrics {
     std::atomic<std::uint64_t> store{ 0 };
     std::atomic<std::uint64_t> expired{ 0 };
     std::atomic<std::uint64_t> bypass{ 0 };
+    std::atomic<std::uint64_t> l1_store_attempt{ 0 };
+    std::atomic<std::uint64_t> l1_store_success{ 0 };
+    std::atomic<std::uint64_t> l1_store_skipped{ 0 };
+    std::atomic<std::uint64_t> l1_store_skipped_body_too_large{ 0 };
 };
 
 void record_cache_event(CacheMetrics* metrics, CacheMetricEvent event);
