@@ -230,4 +230,68 @@ TEST(CompiledRouteMatcherTest, CompiledPrefixLengthPrecomputed) {
     EXPECT_STREQ(matcher.prefix_routes[0].prefix, "/api/v1/");
 }
 
+TEST(CompiledRouteMatcherTest, CompiledMatcherEqualsRawMatcher) {
+    RoutePolicy policies[4] = {};
+    policies[0].route_id = "e1";
+    policies[0].match_kind = RouteMatchKind::Exact;
+    policies[0].match_prefix = "/api/v1/users";
+
+    policies[1].route_id = "p1";
+    policies[1].match_kind = RouteMatchKind::Prefix;
+    policies[1].match_prefix = "/api/v1/";
+
+    policies[2].route_id = "e2";
+    policies[2].match_kind = RouteMatchKind::Exact;
+    policies[2].match_prefix = "/api/v2/users";
+
+    policies[3].route_id = "p2";
+    policies[3].match_kind = RouteMatchKind::Prefix;
+    policies[3].match_prefix = "/api/";
+
+    CompiledRouteMatcher matcher;
+    compile_route_matcher(policies, 4, &matcher);
+
+    const char* paths[] = { "/api/v1/users", "/api/v1/users/profile",
+                            "/api/v2/users", "/api/v2/users/settings",
+                            "/api/other",    "/outside",
+                            nullptr };
+
+    for (const char* path : paths) {
+        const RoutePolicy* raw_res = match_route_by_path(policies, 4, path);
+        const RoutePolicy* comp_res = match_route_compiled(matcher, path);
+        EXPECT_EQ(raw_res, comp_res) << "Mismatch on path: " << (path ? path : "nullptr");
+    }
+}
+
+TEST(CompiledRouteMatcherTest, MultiplePrefixes_FirstWins) {
+    RoutePolicy policies[2] = {};
+    policies[0].route_id = "p_short";
+    policies[0].match_kind = RouteMatchKind::Prefix;
+    policies[0].match_prefix = "/api/";
+
+    policies[1].route_id = "p_long";
+    policies[1].match_kind = RouteMatchKind::Prefix;
+    policies[1].match_prefix = "/api/v1/";
+
+    CompiledRouteMatcher matcher;
+    compile_route_matcher(policies, 2, &matcher);
+
+    // /api/v1/users matches both, but short is first so it wins
+    const RoutePolicy* matched = match_route_compiled(matcher, "/api/v1/users");
+    ASSERT_NE(matched, nullptr);
+    EXPECT_STREQ(matched->route_id, "p_short");
+}
+
+TEST(CompiledRouteMatcherTest, NoMatch_ReturnsNullptr) {
+    RoutePolicy policies[1] = {};
+    policies[0].route_id = "p1";
+    policies[0].match_kind = RouteMatchKind::Prefix;
+    policies[0].match_prefix = "/api/";
+
+    CompiledRouteMatcher matcher;
+    compile_route_matcher(policies, 1, &matcher);
+
+    EXPECT_EQ(match_route_compiled(matcher, "/unknown"), nullptr);
+}
+
 } // namespace bytetaper::policy

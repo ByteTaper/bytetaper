@@ -474,6 +474,8 @@ public:
     metrics::MetricsRegistry* metrics_registry = nullptr;
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
     runtime::WorkerQueue worker_queue{};
+    policy::CompiledRouteMatcher route_matcher{};
+    bool route_matcher_ready = false;
 
     grpc::Status Process(grpc::ServerContext*,
                          grpc::ServerReaderWriter<envoy::service::ext_proc::v3::ProcessingResponse,
@@ -541,9 +543,9 @@ public:
             if (kind == ProcessingRequestKind::RequestHeaders) {
                 const auto req_view = apply_request_headers_selection(request, &filter_state);
                 filter_state.matched_policy = nullptr;
-                if (policies != nullptr && filter_state.context.raw_path_length > 0) {
-                    filter_state.matched_policy = policy::match_route_by_path(
-                        policies, policy_count, filter_state.context.raw_path);
+                if (route_matcher_ready && filter_state.context.raw_path_length > 0) {
+                    filter_state.matched_policy =
+                        policy::match_route_compiled(route_matcher, filter_state.context.raw_path);
                 }
 
                 if (trace_enabled) {
@@ -1092,6 +1094,11 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     impl->service.policy_count = config.policy_count;
     compile_route_runtime_table(config.policies, config.policy_count,
                                 &impl->service.route_runtimes);
+    if (config.policies != nullptr && config.policy_count > 0) {
+        policy::compile_route_matcher(config.policies, config.policy_count,
+                                      &impl->service.route_matcher);
+        impl->service.route_matcher_ready = true;
+    }
     impl->service.l1_cache = config.l1_cache;
     impl->service.l2_cache = config.l2_cache;
     impl->service.metrics_registry = config.metrics_registry;
