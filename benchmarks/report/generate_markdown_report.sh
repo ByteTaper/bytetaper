@@ -186,6 +186,36 @@ if jq -e '.coalescing and (.coalescing | length > 0)' "$JSON_FILE" > /dev/null 2
     } >> "$OUT_MD_FILE"
 fi
 
+# Mock upstream backend metrics table. This is independent backend-side evidence
+# that cache/coalescing benchmarks are actually reducing requests reaching the
+# mock upstream server.
+if jq -e '.mock_api and (.mock_api | length > 0)' "$JSON_FILE" > /dev/null 2>&1; then
+    {
+        echo ""
+        echo "## 🧪 Mock Upstream Backend Metrics"
+        echo ""
+        echo "| Leg | Client Requests | Mock Upstream Requests | Backend Reduction | Bytes Sent | 2xx | 4xx/5xx | Fast Path | Slow Path |"
+        echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|"
+
+        while IFS= read -r leg; do
+            upstream=$(jq -r --arg l "$leg" '.mock_api[$l].upstream_requests_total // .mock_api[$l].requests_total // "n/a"' "$JSON_FILE")
+            bytes=$(jq -r --arg l "$leg" '.mock_api[$l].bytes_sent_total // "n/a"' "$JSON_FILE")
+            fast=$(jq -r --arg l "$leg" '.mock_api[$l].fast_path_requests_total // "0"' "$JSON_FILE")
+            slow=$(jq -r --arg l "$leg" '.mock_api[$l].slow_path_requests_total // "0"' "$JSON_FILE")
+            client=$(jq -r --arg l "$leg" '.coalescing[$l].client_requests_sent // .throughput[$l].total_requests // "n/a"' "$JSON_FILE")
+            status_2xx=$(jq -r --arg l "$leg" '[.mock_api[$l].status_codes // {} | to_entries[] | select(.key | test("^2")) | .value] | add // 0' "$JSON_FILE")
+            status_bad=$(jq -r --arg l "$leg" '[.mock_api[$l].status_codes // {} | to_entries[] | select(.key | test("^[45]")) | .value] | add // 0' "$JSON_FILE")
+            reduction=$(jq -r --arg l "$leg" '
+                (.coalescing[$l].client_requests_sent // .throughput[$l].total_requests // null) as $client |
+                (.mock_api[$l].upstream_requests_total // .mock_api[$l].requests_total // null) as $upstream |
+                if ($client == null or $client == 0 or $upstream == null) then "n/a"
+                else (((1 - ($upstream / $client)) * 100) | if . < 0 then 0 else . end | tostring) + "%"
+                end' "$JSON_FILE")
+            echo "| $leg | $client | $upstream | $reduction | $bytes | $status_2xx | $status_bad | $fast | $slow |"
+        done < <(jq -r '.mock_api | keys[]' "$JSON_FILE" 2>/dev/null || true)
+    } >> "$OUT_MD_FILE"
+fi
+
 # Warnings & Notes Section
 {
     echo "## ⚠️ Notes & Warnings"
