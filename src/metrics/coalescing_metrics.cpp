@@ -61,9 +61,6 @@ void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent e
     case CoalescingMetricEvent::FollowerFailed:
         metrics->follower_failed_total.fetch_add(1, std::memory_order_relaxed);
         break;
-    case CoalescingMetricEvent::FollowerPoolQueueFull:
-        metrics->follower_pool_queue_full_total.fetch_add(1, std::memory_order_relaxed);
-        break;
     case CoalescingMetricEvent::FollowerUnaccounted:
         metrics->follower_unaccounted_total.fetch_add(1, std::memory_order_relaxed);
         break;
@@ -175,10 +172,6 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "leader failed.\n"
         "# TYPE bytetaper_coalescing_follower_failed_total counter\n"
         "bytetaper_coalescing_follower_failed_total %llu\n"
-        "# HELP bytetaper_coalescing_follower_pool_queue_full_total Total number of followers that "
-        "fell back immediately due to queue full.\n"
-        "# TYPE bytetaper_coalescing_follower_pool_queue_full_total counter\n"
-        "bytetaper_coalescing_follower_pool_queue_full_total %llu\n"
         "# HELP bytetaper_coalescing_follower_unaccounted_total Total number of followers that "
         "went unaccounted.\n"
         "# TYPE bytetaper_coalescing_follower_unaccounted_total counter\n"
@@ -247,7 +240,6 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
             std::memory_order_relaxed),
         (unsigned long long) metrics.follower_not_cacheable_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_failed_total.load(std::memory_order_relaxed),
-        (unsigned long long) metrics.follower_pool_queue_full_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_unaccounted_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.leader_l1_store_success_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.leader_l1_store_failed_total.load(std::memory_order_relaxed),

@@ -5,7 +5,6 @@
 
 #include "apg/pipeline.h"
 #include "cache/cache_safety.h"
-#include "coalescing/follower_wait_pool.h"
 #include "compression/accept_encoding.h"
 #include "compression/content_encoding.h"
 #include "envoy/service/ext_proc/v3/external_processor.grpc.pb.h"
@@ -474,7 +473,6 @@ public:
     cache::L2DiskCache* l2_cache = nullptr;
     metrics::MetricsRegistry* metrics_registry = nullptr;
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
-    coalescing::FollowerWaitPool follower_wait_pool{};
     runtime::WorkerQueue worker_queue{};
 
     grpc::Status Process(grpc::ServerContext*,
@@ -577,7 +575,6 @@ public:
                     filter_state.context.l1_cache = l1_cache;
                     filter_state.context.l2_cache = l2_cache;
                     filter_state.context.coalescing_registry = coalescing_registry;
-                    filter_state.context.follower_wait_pool = &follower_wait_pool;
                     filter_state.context.request_epoch_ms =
                         std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::system_clock::now().time_since_epoch())
@@ -1069,26 +1066,6 @@ struct WorkerQueueStartGuard {
     }
 };
 
-struct FollowerWaitPoolStartGuard {
-    coalescing::FollowerWaitPool* pool = nullptr;
-    bool active = false;
-
-    ~FollowerWaitPoolStartGuard() {
-        if (active && pool != nullptr) {
-            coalescing::follower_wait_pool_shutdown(pool);
-        }
-    }
-
-    void arm(coalescing::FollowerWaitPool* p) {
-        pool = p;
-        active = true;
-    }
-
-    void release() {
-        active = false;
-    }
-};
-
 } // namespace
 
 bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle) {
@@ -1142,27 +1119,6 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     }
     worker_guard.arm(&impl->service.worker_queue);
 
-    // Initialize and start follower wait pool
-    coalescing::FollowerWaitPoolConfig fwp_config{};
-    const char* fwp_err =
-        coalescing::follower_wait_pool_init(&impl->service.follower_wait_pool, fwp_config);
-    if (fwp_err != nullptr) {
-        return false;
-    }
-
-    coalescing::FollowerWaitPoolResources fwp_res{};
-    fwp_res.registry = config.coalescing_registry;
-    if (config.metrics_registry != nullptr) {
-        fwp_res.metrics = &config.metrics_registry->coalescing_metrics;
-    }
-
-    FollowerWaitPoolStartGuard pool_guard{};
-    fwp_err = coalescing::follower_wait_pool_start(&impl->service.follower_wait_pool, fwp_res);
-    if (fwp_err != nullptr) {
-        return false;
-    }
-    pool_guard.arm(&impl->service.follower_wait_pool);
-
     impl->server = builder.BuildAndStart();
     if (!impl->server) {
         return false;
@@ -1175,7 +1131,6 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
 
     handle->bound_port = static_cast<std::uint16_t>(selected_port);
     handle->impl = impl.release();
-    pool_guard.release();
     worker_guard.release();
     return true;
 }
@@ -1199,7 +1154,6 @@ void stop_grpc_server(GrpcServerHandle* handle) {
         impl->server->Wait();
     }
 
-    coalescing::follower_wait_pool_shutdown(&impl->service.follower_wait_pool);
     runtime::worker_queue_shutdown(&impl->service.worker_queue);
 
     delete impl;

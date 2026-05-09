@@ -294,7 +294,6 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
     src/coalescing/coalescing_eligibility.cpp
     src/coalescing/coalescing_safety.cpp
     src/coalescing/inflight_registry.cpp
-    src/coalescing/follower_wait_pool.cpp
     src/coalescing/coalescing_decision.cpp
     src/coalescing/wait_window.cpp
     src/coalescing/coalescing_timeout.cpp
@@ -738,38 +737,6 @@ if(BUILD_TESTING)
       COMMAND cache_hot_path_regression_test
     )
 
-    add_executable(coalescing_event_driven_wait_test
-      tests/coalescing_event_driven_wait_test.cpp
-    )
-    target_link_libraries(coalescing_event_driven_wait_test
-      PRIVATE
-        gtest_main
-        bytetaper_extproc_grpc_server
-        RocksDB::RocksDB
-        bytetaper_prometheus_registry
-    )
-
-    add_test(
-      NAME coalescing_event_driven_wait_test
-      COMMAND coalescing_event_driven_wait_test
-    )
-
-    add_executable(coalescing_fallback_tightened_test
-      tests/coalescing_fallback_tightened_test.cpp
-    )
-    target_link_libraries(coalescing_fallback_tightened_test
-      PRIVATE
-        gtest_main
-        bytetaper_extproc_grpc_server
-        RocksDB::RocksDB
-        bytetaper_prometheus_registry
-    )
-
-    add_test(
-      NAME coalescing_fallback_tightened_test
-      COMMAND coalescing_fallback_tightened_test
-    )
-
     add_executable(grpc_server_worker_lifecycle_test
       tests/grpc_server_worker_lifecycle_test.cpp
     )
@@ -1197,26 +1164,6 @@ if(BUILD_TESTING)
       COMMAND inflight_registry_test
     )
 
-    add_executable(coalescing_follower_wait_pool_test
-      tests/coalescing_follower_wait_pool_test.cpp
-      src/coalescing/follower_wait_pool.cpp
-      src/coalescing/inflight_registry.cpp
-      src/metrics/coalescing_metrics.cpp
-    )
-    target_include_directories(coalescing_follower_wait_pool_test
-      PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
-    target_link_libraries(coalescing_follower_wait_pool_test
-      PRIVATE
-        gtest_main
-    )
-
-    add_test(
-      NAME coalescing_follower_wait_pool_test
-      COMMAND coalescing_follower_wait_pool_test
-    )
-
     add_executable(coalescing_decision_test
       tests/coalescing_decision_test.cpp
       src/coalescing/coalescing_decision.cpp
@@ -1299,6 +1246,44 @@ if(BUILD_TESTING)
     add_test(
       NAME coalescing_follower_wait_test
       COMMAND coalescing_follower_wait_test
+    )
+
+    add_executable(coalescing_event_driven_wait_test
+      tests/coalescing_event_driven_wait_test.cpp
+    )
+    target_include_directories(coalescing_event_driven_wait_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(coalescing_event_driven_wait_test
+      PRIVATE
+        bytetaper_extproc_grpc_server
+        RocksDB::RocksDB
+        gtest_main
+    )
+
+    add_test(
+      NAME coalescing_event_driven_wait_test
+      COMMAND coalescing_event_driven_wait_test
+    )
+
+    add_executable(coalescing_fallback_tightened_test
+      tests/coalescing_fallback_tightened_test.cpp
+    )
+    target_include_directories(coalescing_fallback_tightened_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(coalescing_fallback_tightened_test
+      PRIVATE
+        bytetaper_extproc_grpc_server
+        RocksDB::RocksDB
+        gtest_main
+    )
+
+    add_test(
+      NAME coalescing_fallback_tightened_test
+      COMMAND coalescing_fallback_tightened_test
     )
 
     add_executable(l2_cache_async_lookup_enqueue_stage_test
