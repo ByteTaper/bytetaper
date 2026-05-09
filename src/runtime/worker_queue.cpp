@@ -113,7 +113,11 @@ static void execute_lookup_job(WorkerQueue* q, RuntimeShard* shard, L2LookupJob&
             ::bytetaper::metrics::record_runtime_event(
                 m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupHit);
             if (l1 != nullptr) {
-                if (cache::l1_put_if_newer(l1, hit)) {
+                if (!cache::l1_can_store_entry(hit)) {
+                    ::bytetaper::metrics::record_runtime_event(
+                        m, ::bytetaper::metrics::RuntimeMetricEvent::
+                               L2ToL1PromotionSkippedBodyTooLarge);
+                } else if (cache::l1_put_if_newer(l1, hit)) {
                     ::bytetaper::metrics::record_runtime_event(
                         m, ::bytetaper::metrics::RuntimeMetricEvent::L2ToL1Promotion);
                 } else {

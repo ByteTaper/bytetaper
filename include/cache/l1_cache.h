@@ -47,6 +47,9 @@ bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry);
 bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
             char* body_out, std::size_t body_out_capacity);
 
+// Returns true only if entry is safe to store in L1 (body present and within capacity).
+bool l1_can_store_entry(const CacheEntry& entry);
+
 } // namespace bytetaper::cache
 
 #endif // BYTETAPER_CACHE_L1_CACHE_H

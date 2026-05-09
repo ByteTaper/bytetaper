@@ -70,7 +70,7 @@ TEST_F(RuntimeMetricsTest, RenderPrometheusFormat) {
     metrics.worker_queue_capacity.store(capacity);
     metrics.l2_async_lookup_hit_total.store(7);
 
-    char buf[4096];
+    char buf[8192];
     std::size_t len = render_runtime_metrics_prometheus(metrics, buf, sizeof(buf));
     ASSERT_GT(len, 0);
 

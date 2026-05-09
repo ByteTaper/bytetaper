@@ -33,6 +33,7 @@ enum class RuntimeMetricEvent : std::uint8_t {
     // L2-to-L1 promotion (worker)
     L2ToL1Promotion,
     L2ToL1StaleRejected,
+    L2ToL1PromotionSkippedBodyTooLarge,
 };
 
 struct RuntimeMetrics {
@@ -62,6 +63,7 @@ struct RuntimeMetrics {
     // L2-to-L1 promotion
     std::atomic<std::uint64_t> l2_to_l1_promotion_total{ 0 };
     std::atomic<std::uint64_t> l2_to_l1_stale_rejected_total{ 0 };
+    std::atomic<std::uint64_t> l2_to_l1_promotion_skipped_body_too_large_total{ 0 };
 };
 
 void record_runtime_event(RuntimeMetrics* metrics, RuntimeMetricEvent event);

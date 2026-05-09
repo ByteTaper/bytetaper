@@ -204,4 +204,49 @@ TEST_F(L1CacheTest, HashCollisionStillCorrect) {
         << "Should not match different key even if key_hashes match (collision correctness)";
 }
 
+TEST_F(L1CacheTest, PutIfNewerRejectsOversizedBody) {
+    CacheEntry e{};
+    ::strncpy(e.key, "oversized_key", sizeof(e.key) - 1);
+    std::string large_body(kL1MaxBodySize + 1, 'A');
+    e.body = large_body.c_str();
+    e.body_len = large_body.size();
+
+    EXPECT_FALSE(l1_put_if_newer(cache.get(), e));
+
+    CacheEntry out{};
+    char body_buf[kL1MaxBodySize] = {};
+    EXPECT_FALSE(l1_get(cache.get(), "oversized_key", 0, &out, body_buf, sizeof(body_buf)));
+}
+
+TEST_F(L1CacheTest, PutRejectsOversizedBody) {
+    CacheEntry e{};
+    ::strncpy(e.key, "oversized_key2", sizeof(e.key) - 1);
+    std::string large_body(kL1MaxBodySize + 1, 'A');
+    e.body = large_body.c_str();
+    e.body_len = large_body.size();
+
+    l1_put(cache.get(), e);
+
+    CacheEntry out{};
+    char body_buf[kL1MaxBodySize] = {};
+    EXPECT_FALSE(l1_get(cache.get(), "oversized_key2", 0, &out, body_buf, sizeof(body_buf)));
+}
+
+TEST_F(L1CacheTest, BoundaryExactlyMaxBodySizeAllowed) {
+    CacheEntry e{};
+    ::strncpy(e.key, "boundary_key", sizeof(e.key) - 1);
+    std::string max_body(kL1MaxBodySize, 'B');
+    e.body = max_body.c_str();
+    e.body_len = max_body.size();
+
+    EXPECT_TRUE(l1_put_if_newer(cache.get(), e));
+
+    CacheEntry out{};
+    char body_buf[kL1MaxBodySize] = {};
+    EXPECT_TRUE(l1_get(cache.get(), "boundary_key", 0, &out, body_buf, sizeof(body_buf)));
+    EXPECT_STREQ(out.key, "boundary_key");
+    EXPECT_EQ(out.body_len, kL1MaxBodySize);
+    EXPECT_STREQ(body_buf, max_body.c_str());
+}
+
 } // namespace bytetaper::cache

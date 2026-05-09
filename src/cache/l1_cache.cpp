@@ -42,6 +42,16 @@ void copy_body_to_slot(L1CacheShard* shard, std::size_t slot_idx, const CacheEnt
 
 } // namespace
 
+bool l1_can_store_entry(const CacheEntry& entry) {
+    if (entry.body_len > kL1MaxBodySize) {
+        return false;
+    }
+    if (entry.body_len > 0 && entry.body == nullptr) {
+        return false;
+    }
+    return true;
+}
+
 void l1_init(L1Cache* cache) {
     if (cache == nullptr) {
         return;
@@ -58,6 +68,9 @@ void l1_init(L1Cache* cache) {
 
 void l1_put(L1Cache* cache, const CacheEntry& entry) {
     if (cache == nullptr || entry.key == nullptr) {
+        return;
+    }
+    if (!l1_can_store_entry(entry)) {
         return;
     }
 
@@ -78,6 +91,9 @@ void l1_put(L1Cache* cache, const CacheEntry& entry) {
 
 bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry) {
     if (cache == nullptr || entry.key == nullptr) {
+        return false;
+    }
+    if (!l1_can_store_entry(entry)) {
         return false;
     }
 

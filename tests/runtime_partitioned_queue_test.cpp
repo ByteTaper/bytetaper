@@ -151,4 +151,90 @@ TEST_F(RuntimePartitionedQueueTest, AsyncL2LookupStalePromotionStillRejected) {
     cache::l2_close(&l2);
 }
 
+TEST_F(RuntimePartitionedQueueTest, AsyncL2LookupDoesNotPromoteOversizedHit) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    worker_queue_init(q_.get(), cfg);
+    q_->running = true;
+
+    auto l1 = std::make_unique<cache::L1Cache>();
+    cache::l1_init(l1.get());
+    q_->resources.l1_cache = l1.get();
+    q_->resources.runtime_metrics = &metrics_;
+
+    cache::L2DiskCache* l2 = cache::l2_open(temp_dir.c_str());
+    ASSERT_NE(l2, nullptr);
+    q_->resources.l2_cache = l2;
+
+    // Put oversized entry in L2
+    cache::CacheEntry oversized{};
+    std::strcpy(oversized.key, "oversized-key");
+    std::string large_body(cache::kL1MaxBodySize + 1, 'X');
+    oversized.body = large_body.c_str();
+    oversized.body_len = large_body.size();
+    oversized.expires_at_epoch_ms = 2000000000000LL;
+    cache::l2_put(l2, oversized);
+
+    L2LookupJob job;
+    std::strcpy(job.key, "oversized-key");
+
+    worker_queue_try_enqueue_lookup(q_.get(), job);
+    worker_queue_execute_one_for_test(q_.get());
+
+    // Should not promote to L1
+    cache::CacheEntry check{};
+    char body_buf[cache::kL1MaxBodySize];
+    EXPECT_FALSE(cache::l1_get(l1.get(), "oversized-key", 0, &check, body_buf, sizeof(body_buf)));
+
+    // Verify correct metric recorded
+    EXPECT_EQ(metrics_.l2_to_l1_promotion_skipped_body_too_large_total.load(), 1u);
+    EXPECT_EQ(metrics_.l2_to_l1_promotion_total.load(), 0u);
+
+    cache::l2_close(&l2);
+}
+
+TEST_F(RuntimePartitionedQueueTest, AsyncL2LookupStillPromotesSmallHit) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    worker_queue_init(q_.get(), cfg);
+    q_->running = true;
+
+    auto l1 = std::make_unique<cache::L1Cache>();
+    cache::l1_init(l1.get());
+    q_->resources.l1_cache = l1.get();
+    q_->resources.runtime_metrics = &metrics_;
+
+    cache::L2DiskCache* l2 = cache::l2_open(temp_dir.c_str());
+    ASSERT_NE(l2, nullptr);
+    q_->resources.l2_cache = l2;
+
+    // Put valid sized entry in L2
+    cache::CacheEntry small{};
+    std::strcpy(small.key, "small-key");
+    std::string small_body = "test-body";
+    small.body = small_body.c_str();
+    small.body_len = small_body.size();
+    small.expires_at_epoch_ms = 2000000000000LL;
+    cache::l2_put(l2, small);
+
+    L2LookupJob job;
+    std::strcpy(job.key, "small-key");
+
+    worker_queue_try_enqueue_lookup(q_.get(), job);
+    worker_queue_execute_one_for_test(q_.get());
+
+    // Should promote to L1
+    cache::CacheEntry check{};
+    char body_buf[cache::kL1MaxBodySize];
+    EXPECT_TRUE(cache::l1_get(l1.get(), "small-key", 0, &check, body_buf, sizeof(body_buf)));
+    EXPECT_EQ(check.body_len, small_body.size());
+    EXPECT_STREQ(body_buf, "test-body");
+
+    // Verify correct metric recorded
+    EXPECT_EQ(metrics_.l2_to_l1_promotion_total.load(), 1u);
+    EXPECT_EQ(metrics_.l2_to_l1_promotion_skipped_body_too_large_total.load(), 0u);
+
+    cache::l2_close(&l2);
+}
+
 } // namespace bytetaper::runtime
