@@ -82,6 +82,24 @@ void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent e
     case CoalescingMetricEvent::FollowerExpired:
         metrics->follower_expired_total.fetch_add(1, std::memory_order_relaxed);
         break;
+    case CoalescingMetricEvent::LeaderL2HandoffPending:
+        metrics->leader_l2_handoff_pending_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::LeaderL2HandoffReady:
+        metrics->leader_l2_handoff_ready_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::LeaderL2HandoffFailed:
+        metrics->leader_l2_handoff_failed_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerL2Ready:
+        metrics->follower_l2_ready_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerL2Hit:
+        metrics->follower_l2_hit_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerL2ReadyButMiss:
+        metrics->follower_l2_ready_but_miss_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     }
 }
 
@@ -184,7 +202,31 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "# HELP bytetaper_coalescing_follower_expired_total Total number of registered followers "
         "expired waiting on CV.\n"
         "# TYPE bytetaper_coalescing_follower_expired_total counter\n"
-        "bytetaper_coalescing_follower_expired_total %llu\n",
+        "bytetaper_coalescing_follower_expired_total %llu\n"
+        "# HELP bytetaper_coalescing_leader_l2_handoff_pending_total Total number of leader L2 "
+        "handoffs pending.\n"
+        "# TYPE bytetaper_coalescing_leader_l2_handoff_pending_total counter\n"
+        "bytetaper_coalescing_leader_l2_handoff_pending_total %llu\n"
+        "# HELP bytetaper_coalescing_leader_l2_handoff_ready_total Total number of successful "
+        "leader L2 handoffs.\n"
+        "# TYPE bytetaper_coalescing_leader_l2_handoff_ready_total counter\n"
+        "bytetaper_coalescing_leader_l2_handoff_ready_total %llu\n"
+        "# HELP bytetaper_coalescing_leader_l2_handoff_failed_total Total number of failed leader "
+        "L2 handoffs.\n"
+        "# TYPE bytetaper_coalescing_leader_l2_handoff_failed_total counter\n"
+        "bytetaper_coalescing_leader_l2_handoff_failed_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_l2_ready_total Total number of follower L2Ready "
+        "wakeups.\n"
+        "# TYPE bytetaper_coalescing_follower_l2_ready_total counter\n"
+        "bytetaper_coalescing_follower_l2_ready_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_l2_hit_total Total number of follower L2 cache "
+        "hits.\n"
+        "# TYPE bytetaper_coalescing_follower_l2_hit_total counter\n"
+        "bytetaper_coalescing_follower_l2_hit_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_l2_ready_but_miss_total Total number of follower "
+        "L2Ready wakeups that missed L2 lookup.\n"
+        "# TYPE bytetaper_coalescing_follower_l2_ready_but_miss_total counter\n"
+        "bytetaper_coalescing_follower_l2_ready_but_miss_total %llu\n",
         (unsigned long long) metrics.leader_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_cache_hit_total.load(std::memory_order_relaxed),
@@ -212,7 +254,15 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         (unsigned long long) metrics.follower_l1_ready_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_l1_ready_but_miss_total.load(
             std::memory_order_relaxed),
-        (unsigned long long) metrics.follower_expired_total.load(std::memory_order_relaxed));
+        (unsigned long long) metrics.follower_expired_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.leader_l2_handoff_pending_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.leader_l2_handoff_ready_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.leader_l2_handoff_failed_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_l2_ready_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_l2_hit_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_l2_ready_but_miss_total.load(
+            std::memory_order_relaxed));
 
     if (written < 0 || static_cast<std::size_t>(written) >= buf_size) {
         return 0;

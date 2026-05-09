@@ -34,6 +34,12 @@ enum class CoalescingMetricEvent : std::uint8_t {
     FollowerL1Ready,        // follower woke because of L1Ready signal
     FollowerL1ReadyButMiss, // L1Ready wakeup but L1 lookup still missed
     FollowerExpired,        // registered follower, entry replaced/recycled before completion
+    LeaderL2HandoffPending,
+    LeaderL2HandoffReady,
+    LeaderL2HandoffFailed,
+    FollowerL2Ready,
+    FollowerL2Hit,
+    FollowerL2ReadyButMiss,
 };
 
 struct CoalescingMetrics {
@@ -61,6 +67,12 @@ struct CoalescingMetrics {
     std::atomic<std::uint64_t> follower_l1_ready_total{ 0 };
     std::atomic<std::uint64_t> follower_l1_ready_but_miss_total{ 0 };
     std::atomic<std::uint64_t> follower_expired_total{ 0 };
+    std::atomic<std::uint64_t> leader_l2_handoff_pending_total{ 0 };
+    std::atomic<std::uint64_t> leader_l2_handoff_ready_total{ 0 };
+    std::atomic<std::uint64_t> leader_l2_handoff_failed_total{ 0 };
+    std::atomic<std::uint64_t> follower_l2_ready_total{ 0 };
+    std::atomic<std::uint64_t> follower_l2_hit_total{ 0 };
+    std::atomic<std::uint64_t> follower_l2_ready_but_miss_total{ 0 };
 };
 
 void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent event);

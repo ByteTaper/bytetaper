@@ -276,6 +276,7 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
     src/coalescing/coalescing_decision.cpp
     src/coalescing/wait_window.cpp
     src/coalescing/coalescing_timeout.cpp
+    src/coalescing/coalescing_completion_handoff.cpp
     src/metrics/coalescing_metrics.cpp
     src/extproc/header_view.cpp
     src/stages/cache_key_prepare_stage.cpp
@@ -485,6 +486,9 @@ if(BUILD_TESTING)
       src/cache/l2_rocksdb_cache.cpp
       src/cache/cache_entry_codec.cpp
       src/cache/cache_ttl.cpp
+      src/coalescing/inflight_registry.cpp
+      src/coalescing/coalescing_completion_handoff.cpp
+      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(runtime_worker_queue_test
       PRIVATE
@@ -1285,6 +1289,9 @@ if(BUILD_TESTING)
       src/cache/l2_rocksdb_cache.cpp
       src/cache/cache_entry_codec.cpp
       src/cache/cache_ttl.cpp
+      src/coalescing/inflight_registry.cpp
+      src/coalescing/coalescing_completion_handoff.cpp
+      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(l2_cache_async_lookup_enqueue_stage_test
       PRIVATE
@@ -1313,6 +1320,9 @@ if(BUILD_TESTING)
       src/cache/l2_rocksdb_cache.cpp
       src/cache/cache_entry_codec.cpp
       src/cache/cache_ttl.cpp
+      src/coalescing/inflight_registry.cpp
+      src/coalescing/coalescing_completion_handoff.cpp
+      src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(l2_cache_async_store_enqueue_stage_test
       PRIVATE
@@ -1334,6 +1344,7 @@ if(BUILD_TESTING)
       tests/coalescing_leader_completion_test.cpp
       src/stages/coalescing_leader_completion_stage.cpp
       src/coalescing/inflight_registry.cpp
+      src/coalescing/coalescing_completion_handoff.cpp
       src/metrics/coalescing_metrics.cpp
     )
     target_include_directories(coalescing_leader_completion_test

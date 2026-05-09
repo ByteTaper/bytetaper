@@ -77,4 +77,49 @@ TEST_F(CoalescingLeaderCompletionTest, NonCacheableLeaderClears) {
     EXPECT_EQ(res.role, coalescing::InFlightRole::Leader);
 }
 
+TEST_F(CoalescingLeaderCompletionTest, L2HandoffOnLargeBody) {
+    auto register_res =
+        coalescing::registry_register(&registry, ctx.coalescing_decision.key, 1000, 100, 5);
+    ctx.coalescing_decision.lifecycle_generation = register_res.lifecycle_generation;
+
+    ctx.cache_key_ready = true;
+    ctx.response_body = "large-body-placeholder";
+    ctx.response_body_len = 3073; // > kL1MaxBodySize (3072 bytes)
+    std::strcpy(ctx.response_content_type, "application/json");
+
+    auto output = coalescing_leader_completion_stage(ctx);
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+    EXPECT_STREQ(output.note, "awaiting-l2-completion");
+
+    // The entry should STILL be in-flight in the registry (not L1Ready)
+    coalescing::RegistrySharedResponseOutput shared{};
+    auto wait_res = coalescing::registry_wait_for_completion(
+        &registry, ctx.coalescing_decision.key, 0, ctx.coalescing_decision.lifecycle_generation,
+        &shared);
+    // Since wait-budget is 0, it should timeout (it's InFlight, not Completed)
+    EXPECT_EQ(wait_res, coalescing::RegistryWaitResult::Timeout);
+}
+
+TEST_F(CoalescingLeaderCompletionTest, GenerationalSafety) {
+    auto register_res =
+        coalescing::registry_register(&registry, ctx.coalescing_decision.key, 1000, 100, 5);
+    ctx.coalescing_decision.lifecycle_generation = register_res.lifecycle_generation;
+
+    ctx.cache_key_ready = true;
+    ctx.response_body = "{\"status\":\"ok\"}";
+    ctx.response_body_len = 15;
+    std::strcpy(ctx.response_content_type, "application/json");
+
+    // Try to complete with a stale/incorrect generation (non-zero)
+    ctx.coalescing_decision.lifecycle_generation = register_res.lifecycle_generation + 1;
+
+    auto output = coalescing_leader_completion_stage(ctx);
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+
+    coalescing::RegistrySharedResponseOutput shared{};
+    auto wait_res = coalescing::registry_wait_for_completion(
+        &registry, ctx.coalescing_decision.key, 0, register_res.lifecycle_generation, &shared);
+    EXPECT_EQ(wait_res, coalescing::RegistryWaitResult::Timeout); // Still InFlight
+}
+
 } // namespace bytetaper::stages

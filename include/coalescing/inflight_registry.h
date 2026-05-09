@@ -38,6 +38,7 @@ enum class InFlightCompletionState : std::uint8_t {
     NotCacheable = 2,
     Failed = 3,
     L1Ready = 4, // leader committed response to L1; followers should lookup L1
+    L2Ready = 5, // leader committed response to L2; followers should lookup L2
 };
 
 static bool is_terminal(InFlightCompletionState s) {
@@ -138,6 +139,13 @@ bool registry_complete_state(InFlightRegistry* registry, const char* key,
                              InFlightCompletionState state, std::uint64_t now_ms);
 
 /**
+ * @brief Completes the in-flight entry with a simple terminal state only if the generation matches.
+ */
+bool registry_complete_state_if_generation(InFlightRegistry* registry, const char* key,
+                                           std::uint64_t expected_generation,
+                                           InFlightCompletionState state, std::uint64_t now_ms);
+
+/**
  * @brief Result of a registry wait operation.
  */
 enum class RegistryWaitResult : std::uint8_t {
@@ -149,6 +157,7 @@ enum class RegistryWaitResult : std::uint8_t {
     Missing = 5,
     L1Ready = 6, // leader marked L1Ready; follower should do L1 lookup
     Expired = 7, // follower had valid registered generation, but entry replaced/recycled
+    L2Ready = 8, // leader marked L2Ready; follower should do L2 lookup
 };
 
 /**

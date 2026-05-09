@@ -3,6 +3,7 @@
 
 #include "stages/coalescing_leader_completion_stage.h"
 
+#include "coalescing/coalescing_completion_handoff.h"
 #include "coalescing/inflight_registry.h"
 #include "metrics/coalescing_metrics.h"
 #include "policy/route_policy.h"
@@ -26,31 +27,49 @@ apg::StageOutput coalescing_leader_completion_stage(apg::ApgTransformContext& co
     std::uint64_t now_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
-    // L1 is already stored by l1_cache_store_stage. Signal L1Ready to followers.
-    const bool l1_committed = context.cache_key_ready && context.response_status_code >= 200 &&
-                              context.response_status_code < 300 &&
-                              context.response_body != nullptr && context.response_body_len > 0;
+    const bool response_valid = context.cache_key_ready && context.response_status_code >= 200 &&
+                                context.response_status_code < 300 &&
+                                context.response_body != nullptr && context.response_body_len > 0;
 
-    if (l1_committed) {
-        coalescing::registry_complete_state(context.coalescing_registry,
-                                            context.coalescing_decision.key,
-                                            coalescing::InFlightCompletionState::L1Ready, now_ms);
+    if (!response_valid) {
+        // non-2xx or no body
+        coalescing::registry_complete_state_if_generation(
+            context.coalescing_registry, context.coalescing_decision.key,
+            context.coalescing_decision.lifecycle_generation,
+            context.response_status_code >= 200 && context.response_status_code < 300
+                ? coalescing::InFlightCompletionState::NotCacheable
+                : coalescing::InFlightCompletionState::Failed,
+            now_ms);
+        return { apg::StageResult::Continue, "completed-cleared" };
+    }
+
+    switch (coalescing::decide_coalescing_completion_handoff(context.response_body_len)) {
+    case coalescing::CoalescingCompletionHandoffTarget::L1Inline:
+        coalescing::registry_complete_state_if_generation(
+            context.coalescing_registry, context.coalescing_decision.key,
+            context.coalescing_decision.lifecycle_generation,
+            coalescing::InFlightCompletionState::L1Ready, now_ms);
         metrics::record_coalescing_event(context.coalescing_metrics,
                                          metrics::CoalescingMetricEvent::LeaderL1StoreSuccess);
-    } else if (context.response_status_code >= 200 && context.response_status_code < 300) {
-        coalescing::registry_complete_state(
+        return { apg::StageResult::Continue, "completed-l1-ready" };
+
+    case coalescing::CoalescingCompletionHandoffTarget::L2Completion:
+        // Registry stays InFlight; L2 worker will publish L2Ready after l2_put().
+        metrics::record_coalescing_event(context.coalescing_metrics,
+                                         metrics::CoalescingMetricEvent::LeaderL2HandoffPending);
+        return { apg::StageResult::Continue, "awaiting-l2-completion" };
+
+    case coalescing::CoalescingCompletionHandoffTarget::NotCacheable:
+        coalescing::registry_complete_state_if_generation(
             context.coalescing_registry, context.coalescing_decision.key,
+            context.coalescing_decision.lifecycle_generation,
             coalescing::InFlightCompletionState::NotCacheable, now_ms);
         metrics::record_coalescing_event(context.coalescing_metrics,
                                          metrics::CoalescingMetricEvent::LeaderL1StoreFailed);
-    } else {
-        coalescing::registry_complete_state(context.coalescing_registry,
-                                            context.coalescing_decision.key,
-                                            coalescing::InFlightCompletionState::Failed, now_ms);
+        return { apg::StageResult::Continue, "completed-not-cacheable" };
     }
 
-    return { apg::StageResult::Continue,
-             l1_committed ? "completed-l1-ready" : "completed-cleared" };
+    return { apg::StageResult::Continue, "completed-cleared" };
 }
 
 } // namespace bytetaper::stages

@@ -1133,6 +1133,8 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     wq_res.l2_cache = config.l2_cache;
     wq_res.runtime_metrics =
         config.metrics_registry ? &config.metrics_registry->runtime_metrics : nullptr;
+    wq_res.coalescing_metrics =
+        config.metrics_registry ? &config.metrics_registry->coalescing_metrics : nullptr;
     WorkerQueueStartGuard worker_guard{};
     wq_err = runtime::worker_queue_start(&impl->service.worker_queue, wq_res);
     if (wq_err != nullptr) {

@@ -4,9 +4,12 @@
 #include "stages/l2_cache_async_store_enqueue_stage.h"
 
 #include "cache/cache_key.h"
+#include "cache/l1_cache.h"
+#include "coalescing/inflight_registry.h"
 #include "metrics/runtime_metrics.h"
 #include "runtime/worker_queue.h"
 
+#include <chrono>
 #include <cstring>
 
 namespace bytetaper::stages {
@@ -94,8 +97,30 @@ apg::StageOutput l2_cache_async_store_enqueue_stage(apg::ApgTransformContext& co
 
     job.body_len = context.response_body_len;
 
+    // Coalescing L2 handoff — populated only for leader large-body responses
+    if (context.coalescing_decision.action == coalescing::CoalescingAction::Leader &&
+        context.coalescing_registry != nullptr &&
+        context.response_body_len > cache::kL1MaxBodySize) {
+        job.coalescing_handoff_enabled = true;
+        job.coalescing_registry = context.coalescing_registry;
+        std::strncpy(job.coalescing_key, context.coalescing_decision.key,
+                     sizeof(job.coalescing_key) - 1);
+        job.coalescing_key[sizeof(job.coalescing_key) - 1] = '\0';
+        job.lifecycle_generation = context.coalescing_decision.lifecycle_generation;
+    }
+
     // 11. Enqueue
     if (!runtime::worker_queue_try_enqueue_store(context.worker_queue, job)) {
+        if (job.coalescing_handoff_enabled) {
+            auto now_ms =
+                static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                               std::chrono::system_clock::now().time_since_epoch())
+                                               .count());
+            coalescing::registry_complete_state_if_generation(
+                context.coalescing_registry, context.coalescing_decision.key,
+                context.coalescing_decision.lifecycle_generation,
+                coalescing::InFlightCompletionState::Failed, now_ms);
+        }
         metrics::record_runtime_event(context.runtime_metrics,
                                       metrics::RuntimeMetricEvent::L2StoreDropped);
         return { apg::StageResult::Continue, "queue-full" };

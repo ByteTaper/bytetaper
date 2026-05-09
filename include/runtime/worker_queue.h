@@ -20,6 +20,11 @@ struct L1Cache;
 
 namespace bytetaper::metrics {
 struct RuntimeMetrics;
+struct CoalescingMetrics;
+} // namespace bytetaper::metrics
+
+namespace bytetaper::coalescing {
+struct InFlightRegistry;
 }
 
 namespace bytetaper::runtime {
@@ -66,6 +71,11 @@ struct L2StoreJob {
     cache::CacheEntry entry = {};
     std::uint32_t body_slot = 0;
     std::size_t body_len = 0;
+    // Coalescing L2 handoff — populated only for leader large-body responses
+    bool coalescing_handoff_enabled = false;
+    coalescing::InFlightRegistry* coalescing_registry = nullptr;
+    char coalescing_key[256] = {}; // matches CoalescingDecision::key capacity
+    std::uint64_t lifecycle_generation = 0;
 };
 
 struct StoreBodyPool {
@@ -97,6 +107,7 @@ struct WorkerQueueResources {
     cache::L2DiskCache* l2_cache = nullptr;
     cache::L1Cache* l1_cache = nullptr;
     metrics::RuntimeMetrics* runtime_metrics = nullptr;
+    metrics::CoalescingMetrics* coalescing_metrics = nullptr;
 };
 
 // Represents a single sharded queue with its own lock and inline pending registry.

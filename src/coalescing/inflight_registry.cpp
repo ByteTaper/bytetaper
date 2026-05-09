@@ -231,6 +231,35 @@ bool registry_complete_state(InFlightRegistry* registry, const char* key,
     return false;
 }
 
+bool registry_complete_state_if_generation(InFlightRegistry* registry, const char* key,
+                                           std::uint64_t expected_generation,
+                                           InFlightCompletionState state, std::uint64_t now_ms) {
+    if (registry == nullptr || key == nullptr) {
+        return false;
+    }
+
+    std::uint64_t hash = hash_string(key);
+    std::size_t shard_idx = hash % kInFlightShards;
+    InFlightShard& shard = registry->shards[shard_idx];
+
+    std::lock_guard<std::mutex> lock(shard.mutex);
+
+    for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
+        InFlightEntry& slot = shard.slots[j];
+        if (slot.active && std::strcmp(slot.key, key) == 0) {
+            if (expected_generation != 0 && slot.lifecycle_generation != expected_generation) {
+                return false;
+            }
+            slot.state = state;
+            slot.completed_at_epoch_ms = now_ms;
+
+            shard.cv.notify_all();
+            return true;
+        }
+    }
+    return false;
+}
+
 void registry_remove_waiter(InFlightRegistry* registry, const char* key) {
     if (registry == nullptr || key == nullptr) {
         return;
@@ -300,6 +329,8 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
             return RegistryWaitResult::StoredButNoSnapshot;
         } else if (entry->state == InFlightCompletionState::L1Ready) {
             return RegistryWaitResult::L1Ready;
+        } else if (entry->state == InFlightCompletionState::L2Ready) {
+            return RegistryWaitResult::L2Ready;
         } else if (entry->state == InFlightCompletionState::NotCacheable) {
             return RegistryWaitResult::NotCacheable;
         } else if (entry->state == InFlightCompletionState::Failed) {
@@ -345,6 +376,8 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
         return RegistryWaitResult::StoredButNoSnapshot;
     } else if (entry->state == InFlightCompletionState::L1Ready) {
         return RegistryWaitResult::L1Ready;
+    } else if (entry->state == InFlightCompletionState::L2Ready) {
+        return RegistryWaitResult::L2Ready;
     } else if (entry->state == InFlightCompletionState::NotCacheable) {
         return RegistryWaitResult::NotCacheable;
     } else if (entry->state == InFlightCompletionState::Failed) {

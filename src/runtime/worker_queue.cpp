@@ -5,6 +5,8 @@
 
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
+#include "coalescing/inflight_registry.h"
+#include "metrics/coalescing_metrics.h"
 #include "metrics/runtime_metrics.h"
 
 #include <chrono>
@@ -148,21 +150,49 @@ static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& j
 
     auto* l2 = q->resources.l2_cache;
     auto* m = q->resources.runtime_metrics;
+    auto* cm = q->resources.coalescing_metrics;
+
+    const std::uint64_t now_ms =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::system_clock::now().time_since_epoch())
+                                       .count());
+
     if (l2 != nullptr) {
         if (cache::l2_put(l2, job.entry)) {
             ::bytetaper::metrics::record_runtime_event(
                 m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreSuccess);
+            if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
+                coalescing::registry_complete_state_if_generation(
+                    job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
+                    coalescing::InFlightCompletionState::L2Ready, now_ms);
+                ::bytetaper::metrics::record_coalescing_event(
+                    cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffReady);
+            }
         } else {
             ::bytetaper::metrics::record_runtime_event(
                 m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreError);
             ::bytetaper::metrics::record_runtime_event(
                 m, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+            if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
+                coalescing::registry_complete_state_if_generation(
+                    job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
+                    coalescing::InFlightCompletionState::Failed, now_ms);
+                ::bytetaper::metrics::record_coalescing_event(
+                    cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
+            }
         }
     } else {
         ::bytetaper::metrics::record_runtime_event(
             m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreError);
         ::bytetaper::metrics::record_runtime_event(
             m, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+        if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
+            coalescing::registry_complete_state_if_generation(
+                job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
+                coalescing::InFlightCompletionState::Failed, now_ms);
+            ::bytetaper::metrics::record_coalescing_event(
+                cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
+        }
     }
 
     // Free body pool slot occupancy

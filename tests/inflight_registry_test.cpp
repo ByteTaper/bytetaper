@@ -509,4 +509,29 @@ TEST_F(InFlightRegistryTest, LifecycleGenerationSafeAfterReuse) {
     EXPECT_TRUE(wait_res == RegistryWaitResult::Expired || wait_res == RegistryWaitResult::Missing);
 }
 
+TEST_F(InFlightRegistryTest, CompleteStateIfGenerationWorks) {
+    const char* key = "test-gen-key";
+    std::uint32_t window = 100;
+    std::uint32_t max_waiters = 5;
+
+    auto reg = registry_register(&registry, key, 1000, window, max_waiters);
+    EXPECT_EQ(reg.role, InFlightRole::Leader);
+    std::uint64_t gen = reg.lifecycle_generation;
+
+    // Call complete_state_if_generation with a mismatching generation (should fail)
+    bool ok1 = registry_complete_state_if_generation(&registry, key, gen + 1,
+                                                     InFlightCompletionState::L2Ready, 1010);
+    EXPECT_FALSE(ok1);
+
+    // Call complete_state_if_generation with matching generation (should succeed)
+    bool ok2 = registry_complete_state_if_generation(&registry, key, gen,
+                                                     InFlightCompletionState::L2Ready, 1010);
+    EXPECT_TRUE(ok2);
+
+    // Verify wait result is L2Ready
+    RegistrySharedResponseOutput resp{};
+    auto wait_res = registry_wait_for_completion(&registry, key, 0, gen, &resp);
+    EXPECT_EQ(wait_res, RegistryWaitResult::L2Ready);
+}
+
 } // namespace bytetaper::coalescing

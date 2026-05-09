@@ -8,6 +8,7 @@
 #include "coalescing/inflight_registry.h"
 #include "metrics/coalescing_metrics.h"
 #include "stages/l1_cache_lookup_stage.h"
+#include "stages/l2_cache_lookup_stage.h"
 
 #include <chrono>
 #include <cstring>
@@ -131,6 +132,31 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
         coalescing::handle_timeout_fallback(context.coalescing_registry,
                                             context.coalescing_decision);
         return { apg::StageResult::Continue, "l1-ready-but-miss-fallback" };
+    } else if (wait_result == coalescing::RegistryWaitResult::L2Ready) {
+        apg::StageOutput l2 = l2_cache_lookup_stage(context);
+        if (l2.result == apg::StageResult::SkipRemaining) {
+            if (context.coalescing_registry != nullptr) {
+                coalescing::registry_remove_waiter(context.coalescing_registry,
+                                                   context.coalescing_decision.key);
+            }
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerL2Ready);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerL2Hit);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerCacheHit);
+            return l2;
+        }
+        // L2Ready but L2 lookup missed — unexpected, record and fallback.
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerL2Ready);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerL2ReadyButMiss);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::Fallback);
+        coalescing::handle_timeout_fallback(context.coalescing_registry,
+                                            context.coalescing_decision);
+        return { apg::StageResult::Continue, "l2-ready-but-miss-fallback" };
     }
 
     // Step 4: L1 check after wake (whether Completed/Stored but no snapshot, Timeout, or Missing)
