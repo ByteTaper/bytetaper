@@ -33,14 +33,16 @@ THROUGHPUT_JSON_MAP=$(mktemp)
 RESOURCES_JSON_MAP=$(mktemp)
 PAYLOAD_JSON_MAP=$(mktemp)
 COALESCING_JSON_MAP=$(mktemp)
+MOCK_API_JSON_MAP=$(mktemp)
 
 echo "{}" > "$LATENCY_JSON_MAP"
 echo "{}" > "$THROUGHPUT_JSON_MAP"
 echo "{}" > "$RESOURCES_JSON_MAP"
 echo "{}" > "$PAYLOAD_JSON_MAP"
 echo "{}" > "$COALESCING_JSON_MAP"
+echo "{}" > "$MOCK_API_JSON_MAP"
 
-# Helper to clean prefixes (e.g. "Leg 1 (Medium JSON)" -> "leg_1_medium_json" or just clean name "Leg 1")
+# Helper to clean prefixes (e.g. "Leg 1 (Medium JSON)" -> "Leg 1")
 clean_key() {
     local raw=$1
     local clean
@@ -48,56 +50,39 @@ clean_key() {
     echo "${clean:-main}"
 }
 
+parse_json_lines() {
+    local pattern=$1
+    local regex=$2
+    local map_file=$3
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ $regex ]]; then
+            key=$(clean_key "${BASH_REMATCH[1]}")
+            val="${BASH_REMATCH[2]}"
+            jq --arg k "$key" --argjson v "$val" '.[$k] = $v' "$map_file" > "${map_file}.tmp"
+            mv "${map_file}.tmp" "$map_file"
+        fi
+    done < <(grep -E "$pattern" "$TXT_FILE" || true)
+}
+
 # 1. Parse Latency JSON
-while IFS= read -r line; do
-    if [[ "$line" =~ ^(.*)Latency\ JSON:[[:space:]]*(.*)$ ]]; then
-        key=$(clean_key "${BASH_REMATCH[1]}")
-        val="${BASH_REMATCH[2]}"
-        # Update JSON map using jq
-        jq --arg k "$key" --argjson v "$val" '.[$k] = $v' "$LATENCY_JSON_MAP" > "${LATENCY_JSON_MAP}.tmp"
-        mv "${LATENCY_JSON_MAP}.tmp" "$LATENCY_JSON_MAP"
-    fi
-done < <(grep -E "Latency JSON" "$TXT_FILE" || true)
+parse_json_lines "Latency JSON" '^(.*)Latency JSON:[[:space:]]*(.*)$' "$LATENCY_JSON_MAP"
 
 # 2. Parse Throughput JSON
-while IFS= read -r line; do
-    if [[ "$line" =~ ^(.*)Throughput\ JSON:[[:space:]]*(.*)$ ]]; then
-        key=$(clean_key "${BASH_REMATCH[1]}")
-        val="${BASH_REMATCH[2]}"
-        jq --arg k "$key" --argjson v "$val" '.[$k] = $v' "$THROUGHPUT_JSON_MAP" > "${THROUGHPUT_JSON_MAP}.tmp"
-        mv "${THROUGHPUT_JSON_MAP}.tmp" "$THROUGHPUT_JSON_MAP"
-    fi
-done < <(grep -E "Throughput JSON" "$TXT_FILE" || true)
+parse_json_lines "Throughput JSON" '^(.*)Throughput JSON:[[:space:]]*(.*)$' "$THROUGHPUT_JSON_MAP"
 
 # 3. Parse Container Stats JSON
-while IFS= read -r line; do
-    if [[ "$line" =~ ^(.*)Container\ Stats\ JSON:[[:space:]]*(.*)$ ]]; then
-        key=$(clean_key "${BASH_REMATCH[1]}")
-        val="${BASH_REMATCH[2]}"
-        jq --arg k "$key" --argjson v "$val" '.[$k] = $v' "$RESOURCES_JSON_MAP" > "${RESOURCES_JSON_MAP}.tmp"
-        mv "${RESOURCES_JSON_MAP}.tmp" "$RESOURCES_JSON_MAP"
-    fi
-done < <(grep -E "Container Stats JSON" "$TXT_FILE" || true)
+parse_json_lines "Container Stats JSON" '^(.*)Container Stats JSON:[[:space:]]*(.*)$' "$RESOURCES_JSON_MAP"
 
 # 4. Parse Payload Savings JSON
-while IFS= read -r line; do
-    if [[ "$line" =~ ^(.*)Payload\ Savings\ JSON:[[:space:]]*(.*)$ ]]; then
-        key=$(clean_key "${BASH_REMATCH[1]}")
-        val="${BASH_REMATCH[2]}"
-        jq --arg k "$key" --argjson v "$val" '.[$k] = $v' "$PAYLOAD_JSON_MAP" > "${PAYLOAD_JSON_MAP}.tmp"
-        mv "${PAYLOAD_JSON_MAP}.tmp" "$PAYLOAD_JSON_MAP"
-    fi
-done < <(grep -E "Payload Savings JSON" "$TXT_FILE" || true)
+parse_json_lines "Payload Savings JSON" '^(.*)Payload Savings JSON:[[:space:]]*(.*)$' "$PAYLOAD_JSON_MAP"
 
 # 5. Parse Coalescing JSON
-while IFS= read -r line; do
-    if [[ "$line" =~ ^(.*)Coalescing\ JSON:[[:space:]]*(.*)$ ]]; then
-        key=$(clean_key "${BASH_REMATCH[1]}")
-        val="${BASH_REMATCH[2]}"
-        jq --arg k "$key" --argjson v "$val" '.[$k] = $v' "$COALESCING_JSON_MAP" > "${COALESCING_JSON_MAP}.tmp"
-        mv "${COALESCING_JSON_MAP}.tmp" "$COALESCING_JSON_MAP"
-    fi
-done < <(grep -E "Coalescing JSON" "$TXT_FILE" || true)
+parse_json_lines "Coalescing JSON" '^(.*)Coalescing JSON:[[:space:]]*(.*)$' "$COALESCING_JSON_MAP"
+
+# 6. Parse Mock API Metrics JSON. This is backend-side evidence used to verify
+# benchmark scenarios that should reduce real upstream fan-out.
+parse_json_lines "Mock API Metrics JSON" '^(.*)Mock API Metrics JSON:[[:space:]]*(.*)$' "$MOCK_API_JSON_MAP"
 
 # Build consolidated report JSON
 OUT_JSON_FILE="${TXT_FILE%.txt}.json"
@@ -108,6 +93,7 @@ tp_data=$(cat "$THROUGHPUT_JSON_MAP")
 res_data=$(cat "$RESOURCES_JSON_MAP")
 pay_data=$(cat "$PAYLOAD_JSON_MAP")
 coal_data=$(cat "$COALESCING_JSON_MAP")
+mock_api_data=$(cat "$MOCK_API_JSON_MAP")
 
 # Compile consolidated JSON
 jq -n \
@@ -119,6 +105,7 @@ jq -n \
     --argjson res "$res_data" \
     --argjson pay "$pay_data" \
     --argjson coal "$coal_data" \
+    --argjson mock_api "$mock_api_data" \
     --arg os "$os_info" \
     --arg cpu "$cpu_cores" \
     --arg mem "$memory_total" \
@@ -132,6 +119,7 @@ jq -n \
         resources: $res,
         payload: $pay,
         coalescing: $coal,
+        mock_api: $mock_api,
         features: {
             os_info: $os,
             cpu_cores: (try ($cpu | tonumber) catch $cpu),
@@ -141,7 +129,7 @@ jq -n \
     }' > "$OUT_JSON_FILE"
 
 # Clean up temporary maps
-rm -f "$LATENCY_JSON_MAP" "$THROUGHPUT_JSON_MAP" "$RESOURCES_JSON_MAP" "$PAYLOAD_JSON_MAP" "$COALESCING_JSON_MAP"
+rm -f "$LATENCY_JSON_MAP" "$THROUGHPUT_JSON_MAP" "$RESOURCES_JSON_MAP" "$PAYLOAD_JSON_MAP" "$COALESCING_JSON_MAP" "$MOCK_API_JSON_MAP"
 
 echo "JSON report written successfully to: $OUT_JSON_FILE"
 cat "$OUT_JSON_FILE" | jq .
