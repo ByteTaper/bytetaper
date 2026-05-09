@@ -256,4 +256,257 @@ TEST_F(InFlightRegistryTest, MissingStillReturnedWhenNoEntryFound) {
     EXPECT_EQ(wait_res, RegistryWaitResult::Missing);
 }
 
+TEST_F(InFlightRegistryTest, ReclaimsAfterGraceWindow) {
+    auto hash_fn = [](const char* s) -> std::uint64_t {
+        std::uint64_t hash = 14695981039346656037ULL;
+        while (*s) {
+            hash ^= static_cast<std::uint64_t>(*s++);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    };
+
+    std::uint32_t window = 100;
+    std::uint32_t max_waiters = 5;
+
+    // Find 16 keys that hash to shard index 0
+    char keys[kSlotsPerShard][32];
+    int found = 0;
+    for (int i = 0; found < (int) kSlotsPerShard; ++i) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "key%d", i);
+        if ((hash_fn(buf) % kInFlightShards) == 0) {
+            strcpy(keys[found], buf);
+            found++;
+        }
+    }
+
+    // Register all of them at now=1000
+    for (int i = 0; i < (int) kSlotsPerShard; ++i) {
+        EXPECT_EQ(registry_register(&registry, keys[i], 1000, window, max_waiters).role,
+                  InFlightRole::Leader);
+    }
+
+    // Complete all of them as Stored at completed_at=1050
+    for (int i = 0; i < (int) kSlotsPerShard; ++i) {
+        EXPECT_TRUE(
+            registry_complete_state(&registry, keys[i], InFlightCompletionState::Stored, 1050));
+    }
+
+    // Now advance time to 1200 (which is >= 1050 + 100)
+    // Find a 17th key that hashes to shard index 0
+    char extra_key[32] = "";
+    for (int i = 0;; ++i) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "extra%d", i);
+        if ((hash_fn(buf) % kInFlightShards) == 0) {
+            strcpy(extra_key, buf);
+            break;
+        }
+    }
+
+    // Since the slots are expired terminal entries, registering the 17th key should reclaim one
+    // slot and succeed as Leader!
+    auto res = registry_register(&registry, extra_key, 1200, window, max_waiters);
+    EXPECT_EQ(res.role, InFlightRole::Leader);
+}
+
+TEST_F(InFlightRegistryTest, DoesNotReclaimWithinGraceWindow) {
+    const char* key = "test-key-within-grace";
+    std::uint64_t now = 1000;
+    std::uint32_t window = 100;
+    std::uint32_t max_waiters = 5;
+
+    // Register key A
+    registry_register(&registry, key, now, window, max_waiters);
+    registry_complete_state(&registry, key, InFlightCompletionState::Stored, now + 10);
+
+    // Re-register key A within wait_window_ms (at now + 50 < 1010 + 100)
+    // Expect to join as Follower
+    auto res = registry_register(&registry, key, now + 50, window, max_waiters);
+    EXPECT_EQ(res.role, InFlightRole::Follower);
+}
+
+TEST_F(InFlightRegistryTest, DifferentKeyReclaimsExpiredTerminalSlot) {
+    auto hash_fn = [](const char* s) -> std::uint64_t {
+        std::uint64_t hash = 14695981039346656037ULL;
+        while (*s) {
+            hash ^= static_cast<std::uint64_t>(*s++);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    };
+
+    std::uint32_t window = 100;
+    std::uint32_t max_waiters = 5;
+
+    // Find two keys that map to same shard
+    char key_a[32] = "";
+    char key_b[32] = "";
+    int found = 0;
+    for (int i = 0; found < 2; ++i) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "pair%d", i);
+        if ((hash_fn(buf) % kInFlightShards) == 0) {
+            if (found == 0) {
+                strcpy(key_a, buf);
+            } else {
+                strcpy(key_b, buf);
+            }
+            found++;
+        }
+    }
+
+    // Register Key A at now=1000
+    registry_register(&registry, key_a, 1000, window, max_waiters);
+    registry_complete_state(&registry, key_a, InFlightCompletionState::Stored, 1010);
+
+    // Register Key B at 1200 (past grace)
+    // Key B should reclaim Key A's slot and become Leader
+    auto res = registry_register(&registry, key_b, 1200, window, max_waiters);
+    EXPECT_EQ(res.role, InFlightRole::Leader);
+}
+
+TEST_F(InFlightRegistryTest, DoesNotReclaimWithActiveWaiter) {
+    auto hash_fn = [](const char* s) -> std::uint64_t {
+        std::uint64_t hash = 14695981039346656037ULL;
+        while (*s) {
+            hash ^= static_cast<std::uint64_t>(*s++);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    };
+
+    std::uint32_t window = 100;
+    std::uint32_t max_waiters = 5;
+
+    // Find 16 keys that hash to shard index 0
+    char keys[kSlotsPerShard][32];
+    int found = 0;
+    for (int i = 0; found < (int) kSlotsPerShard; ++i) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "key%d", i);
+        if ((hash_fn(buf) % kInFlightShards) == 0) {
+            strcpy(keys[found], buf);
+            found++;
+        }
+    }
+
+    // Register all 16 keys
+    for (int i = 0; i < (int) kSlotsPerShard; ++i) {
+        registry_register(&registry, keys[i], 1000, window, max_waiters);
+    }
+
+    // Add a follower/waiter to the first key (waiter_count becomes 1)
+    registry_register(&registry, keys[0], 1005, window, max_waiters);
+
+    // Complete all 16 keys at 1050
+    for (int i = 0; i < (int) kSlotsPerShard; ++i) {
+        registry_complete_state(&registry, keys[i], InFlightCompletionState::Stored, 1050);
+    }
+
+    // Advance to 1200 (past grace window)
+    // Find a 17th key
+    char extra_key[32] = "";
+    for (int i = 0;; ++i) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "extra%d", i);
+        if ((hash_fn(buf) % kInFlightShards) == 0) {
+            strcpy(extra_key, buf);
+            break;
+        }
+    }
+
+    // Try to register the 17th key.
+    // 15 slots can be reclaimed, but keys[0] has an active waiter, so keys[0]'s slot must NOT be
+    // reclaimed! We should still be able to find one of the other 15 slots to reclaim and succeed
+    // as Leader.
+    auto res = registry_register(&registry, extra_key, 1200, window, max_waiters);
+    EXPECT_EQ(res.role, InFlightRole::Leader);
+
+    // Now, we register 14 more extra keys to consume all 15 reclaimable slots
+    for (int i = 1; i < (int) kSlotsPerShard - 1; ++i) {
+        char extra_buf[32];
+        int extra_found = 0;
+        for (int k = 0;; ++k) {
+            char b[32];
+            std::snprintf(b, sizeof(b), "reclaim%d-%d", i, k);
+            if ((hash_fn(b) % kInFlightShards) == 0) {
+                strcpy(extra_buf, b);
+                // Register should succeed
+                auto sub_res = registry_register(&registry, extra_buf, 1200, window, max_waiters);
+                if (sub_res.role == InFlightRole::Leader) {
+                    extra_found = 1;
+                    break;
+                }
+            }
+        }
+        EXPECT_EQ(extra_found, 1);
+    }
+
+    // Now all 15 reclaimable slots are occupied by the new keys.
+    // The only slot that was NOT reclaimed is the keys[0] slot because it has an active waiter.
+    // Therefore, trying to register one more key should result in REJECT!
+    char final_key[32] = "";
+    for (int i = 0;; ++i) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "final%d", i);
+        if ((hash_fn(buf) % kInFlightShards) == 0) {
+            strcpy(final_key, buf);
+            break;
+        }
+    }
+    auto final_res = registry_register(&registry, final_key, 1200, window, max_waiters);
+    EXPECT_EQ(final_res.role, InFlightRole::Reject);
+}
+
+TEST_F(InFlightRegistryTest, LifecycleGenerationSafeAfterReuse) {
+    auto hash_fn = [](const char* s) -> std::uint64_t {
+        std::uint64_t hash = 14695981039346656037ULL;
+        while (*s) {
+            hash ^= static_cast<std::uint64_t>(*s++);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    };
+
+    std::uint32_t window = 100;
+    std::uint32_t max_waiters = 5;
+
+    // Find key A and key B that map to the same shard
+    char key_a[32] = "";
+    char key_b[32] = "";
+    int found = 0;
+    for (int i = 0; found < 2; ++i) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "genpair%d", i);
+        if ((hash_fn(buf) % kInFlightShards) == 0) {
+            if (found == 0) {
+                strcpy(key_a, buf);
+            } else {
+                strcpy(key_b, buf);
+            }
+            found++;
+        }
+    }
+
+    // Register Key A
+    auto reg_a = registry_register(&registry, key_a, 1000, window, max_waiters);
+    EXPECT_EQ(reg_a.role, InFlightRole::Leader);
+    std::uint64_t gen_a = reg_a.lifecycle_generation;
+
+    // Complete Key A
+    registry_complete_state(&registry, key_a, InFlightCompletionState::Stored, 1010);
+
+    // Advance time and register Key B (which reclaims Key A's slot)
+    auto reg_b = registry_register(&registry, key_b, 1200, window, max_waiters);
+    EXPECT_EQ(reg_b.role, InFlightRole::Leader);
+
+    // Stale wait call using Key A with generation A should return Expired (or Missing) since the
+    // slot is now used for Key B
+    RegistrySharedResponseOutput resp{};
+    auto wait_res = registry_wait_for_completion(&registry, key_a, 50, gen_a, &resp);
+    EXPECT_TRUE(wait_res == RegistryWaitResult::Expired || wait_res == RegistryWaitResult::Missing);
+}
+
 } // namespace bytetaper::coalescing

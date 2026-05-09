@@ -24,6 +24,29 @@ std::uint64_t hash_string(const char* s) {
     return hash;
 }
 
+bool terminal_entry_expired(const InFlightEntry& entry, std::uint64_t now_ms,
+                            std::uint32_t wait_window_ms) {
+    if (!entry.active)
+        return false;
+    if (!is_terminal(entry.state))
+        return false;
+    if (entry.waiter_count > 0)
+        return false;
+    return now_ms >= entry.completed_at_epoch_ms + wait_window_ms;
+}
+
+void reset_entry_for_reuse(InFlightEntry* entry) {
+    if (entry == nullptr)
+        return;
+    entry->key[0] = '\0';
+    entry->created_at_epoch_ms = 0;
+    entry->completed_at_epoch_ms = 0;
+    entry->waiter_count = 0;
+    entry->active = false;
+    entry->state = InFlightCompletionState::InFlight;
+    entry->shared_response = {};
+}
+
 } // namespace
 
 void registry_init(InFlightRegistry* registry) {
@@ -114,9 +137,12 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
         }
     }
 
-    // Try to find an empty or reusable slot in the shard
+    // Try to find an empty or reusable slot. Reclaim expired terminal entries first.
     for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
         InFlightEntry& slot = shard.slots[j];
+        if (terminal_entry_expired(slot, now_ms, wait_window_ms)) {
+            reset_entry_for_reuse(&slot);
+        }
         if (!slot.active) {
             std::strncpy(slot.key, key, sizeof(slot.key) - 1);
             slot.created_at_epoch_ms = now_ms;
