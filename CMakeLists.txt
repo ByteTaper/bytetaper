@@ -76,6 +76,11 @@ target_link_libraries(bytetaper-extproc
 
 find_package(Threads REQUIRED)
 
+add_library(bytetaper_hash STATIC
+  src/hash/hash.cpp
+)
+target_include_directories(bytetaper_hash PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 add_library(bytetaper_prometheus_registry STATIC
   src/metrics/prometheus_registry.cpp
   src/metrics/cache_metrics.cpp
@@ -87,6 +92,10 @@ add_library(bytetaper_prometheus_registry STATIC
 target_include_directories(bytetaper_prometheus_registry
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(bytetaper_prometheus_registry
+  PUBLIC
+    bytetaper_hash
 )
 
 add_library(bytetaper_metrics_http_server STATIC
@@ -318,6 +327,7 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
     PRIVATE
       bytetaper_extproc_grpc
       RocksDB::RocksDB
+      bytetaper_hash
   )
 
   add_executable(bytetaper-extproc-server
@@ -347,12 +357,15 @@ if(BUILD_TESTING)
   )
 
   if(BYTETAPER_ENABLE_GTEST_TESTS)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(
       googletest
       URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
       DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(googletest)
+    target_link_libraries(gtest_main PUBLIC bytetaper_hash)
+    target_link_libraries(gtest PUBLIC bytetaper_hash)
 
     add_executable(apg_transform_context_test
       tests/apg_transform_context_test.cpp
@@ -421,6 +434,23 @@ if(BUILD_TESTING)
     add_test(
       NAME apg_result_output_test
       COMMAND apg_result_output_test
+    )
+
+    add_executable(hash_test
+      tests/hash_test.cpp
+    )
+    target_include_directories(hash_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(hash_test
+      PRIVATE
+        gtest_main
+        bytetaper_hash
+    )
+    add_test(
+      NAME hash_test
+      COMMAND hash_test
     )
 
     add_executable(apg_pipeline_runner_test

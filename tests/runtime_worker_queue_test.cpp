@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
 #include "cache/l1_cache.h"
+#include "hash/hash.h"
 #include "metrics/runtime_metrics.h"
 #include "runtime/worker_queue.h"
 
@@ -16,7 +17,23 @@ using namespace bytetaper::runtime;
 class WorkerQueueTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        bytetaper::hash::set_process_hash_seed_for_test(
+            { 0x1234567812345678ULL, 0x8765432187654321ULL });
         q_ = std::make_unique<WorkerQueue>();
+    }
+
+    void TearDown() override {
+        bytetaper::hash::reset_process_hash_seed_for_test();
+    }
+
+    std::uint32_t expected_shard(const std::string& key) const {
+        return static_cast<std::uint32_t>(bytetaper::hash::hash_cstr_runtime(key.c_str()) %
+                                          kRuntimeShardCount);
+    }
+
+    std::uint32_t expected_shard(const char* key) const {
+        return static_cast<std::uint32_t>(bytetaper::hash::hash_cstr_runtime(key) %
+                                          kRuntimeShardCount);
     }
 
     std::unique_ptr<WorkerQueue> q_;
@@ -441,11 +458,7 @@ TEST_F(WorkerQueueTest, DeterministicWakeupOnNonPrimaryShard) {
     std::string key;
     for (int i = 0; i < 1000; ++i) {
         std::string candidate = "test-key-" + std::to_string(i);
-        std::uint32_t hash = 5381;
-        for (char c : candidate) {
-            hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(c);
-        }
-        if (hash % kRuntimeShardCount == 1) {
+        if (expected_shard(candidate) == 1) {
             key = candidate;
             break;
         }
@@ -518,11 +531,7 @@ TEST_F(WorkerQueueTest, SingleReadyQueuePushPerShard) {
     std::string key2;
     for (int i = 0; i < 1000; ++i) {
         std::string candidate = "test-key-collision-" + std::to_string(i);
-        std::uint32_t hash = 5381;
-        for (char c : candidate) {
-            hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(c);
-        }
-        if (hash % kRuntimeShardCount == shard_idx) {
+        if (expected_shard(candidate) == shard_idx) {
             key2 = candidate;
             break;
         }
@@ -564,11 +573,7 @@ TEST_F(WorkerQueueTest, LookupPrecedenceInTryPop) {
     std::string lookup_key;
     for (int i = 0; i < 1000; ++i) {
         std::string candidate = "lookup-collision-" + std::to_string(i);
-        std::uint32_t hash = 5381;
-        for (char c : candidate) {
-            hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(c);
-        }
-        if (hash % kRuntimeShardCount == shard_idx) {
+        if (expected_shard(candidate) == shard_idx) {
             lookup_key = candidate;
             break;
         }
@@ -621,11 +626,7 @@ TEST_F(WorkerQueueTest, RequeueAndClearSemantics) {
     std::string key2;
     for (int i = 0; i < 1000; ++i) {
         std::string candidate = "collision-" + std::to_string(i);
-        std::uint32_t hash = 5381;
-        for (char c : candidate) {
-            hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(c);
-        }
-        if (hash % kRuntimeShardCount == shard_idx) {
+        if (expected_shard(candidate) == shard_idx) {
             key2 = candidate;
             break;
         }
@@ -687,11 +688,7 @@ TEST_F(WorkerQueueTest, ShutdownDrainsPendingJobs) {
 
     for (int i = 0; i < 1000 && enqueued_count < 5; ++i) {
         std::string candidate = key_base + std::to_string(i);
-        std::uint32_t hash = 5381;
-        for (char c : candidate) {
-            hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(c);
-        }
-        if (hash % kRuntimeShardCount == target_shard) {
+        if (expected_shard(candidate) == target_shard) {
             L2StoreJob job;
             std::strcpy(job.key, candidate.c_str());
             job.body_len = 0;
@@ -727,11 +724,7 @@ TEST_F(WorkerQueueTest, StateMachineProcessesReadyShard) {
 
     EXPECT_EQ(q_->worker_ready[0].count, 0u);
     // Find shard and check store_count is 0
-    std::uint32_t hash = 5381;
-    for (const char* p = "key-sm-1"; *p; ++p) {
-        hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(*p);
-    }
-    std::size_t shard_idx = hash % kRuntimeShardCount;
+    std::size_t shard_idx = expected_shard("key-sm-1");
     EXPECT_EQ(q_->shards[shard_idx].store_count, 0u);
 }
 
@@ -746,11 +739,7 @@ TEST_F(WorkerQueueTest, StateMachineTransitionsToDrainingOnShutdown) {
     job.body_len = 0;
 
     // Artificially put jobs in shard but do NOT push into ready queue
-    std::uint32_t hash = 5381;
-    for (const char* p = "key-sm-2"; *p; ++p) {
-        hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(*p);
-    }
-    std::size_t shard_idx = hash % kRuntimeShardCount;
+    std::size_t shard_idx = expected_shard("key-sm-2");
     q_->shards[shard_idx].store_slots[0] = job;
     q_->shards[shard_idx].store_count = 1;
 
@@ -775,17 +764,8 @@ TEST_F(WorkerQueueTest, DrainingProcessesAllJobsAndStops) {
     std::strcpy(job2.key, "key-sm-3b");
 
     // Manually enqueue without running threads or triggering push
-    std::uint32_t h1 = 5381;
-    for (const char* p = "key-sm-3a"; *p; ++p) {
-        h1 = ((h1 << 5) + h1) + static_cast<std::uint32_t>(*p);
-    }
-    std::size_t s1 = h1 % kRuntimeShardCount;
-
-    std::uint32_t h2 = 5381;
-    for (const char* p = "key-sm-3b"; *p; ++p) {
-        h2 = ((h2 << 5) + h2) + static_cast<std::uint32_t>(*p);
-    }
-    std::size_t s2 = h2 % kRuntimeShardCount;
+    std::size_t s1 = expected_shard("key-sm-3a");
+    std::size_t s2 = expected_shard("key-sm-3b");
 
     q_->shards[s1].store_slots[0] = job1;
     q_->shards[s1].store_count = 1;
@@ -813,11 +793,7 @@ TEST_F(WorkerQueueTest, WorkerDoesNotProcessUnownedShards) {
 
     L2StoreJob job;
     std::strcpy(job.key, "key-sm-5");
-    std::uint32_t hash = 5381;
-    for (const char* p = "key-sm-5"; *p; ++p) {
-        hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(*p);
-    }
-    std::size_t shard_idx = hash % kRuntimeShardCount;
+    std::size_t shard_idx = expected_shard("key-sm-5");
     std::size_t owner = shard_idx % 2;
     std::size_t non_owner = 1 - owner;
 

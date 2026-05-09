@@ -5,6 +5,7 @@
 #include "cache/cache_key.h"
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
+#include "hash/hash.h"
 #include "metrics/runtime_metrics.h"
 #include "runtime/worker_queue.h"
 #include "stages/cache_key_prepare_stage.h"
@@ -19,6 +20,8 @@ namespace bytetaper::stages {
 class L2CacheAsyncLookupEnqueueStageTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        bytetaper::hash::set_process_hash_seed_for_test(
+            { 0x1234567812345678ULL, 0x8765432187654321ULL });
         l1_cache = std::make_unique<cache::L1Cache>();
         cache::l1_init(l1_cache.get());
 
@@ -39,6 +42,10 @@ protected:
         ctx.runtime_metrics = &metrics;
         std::strcpy(ctx.raw_path, "/path");
         ctx.request_method = policy::HttpMethod::Get;
+    }
+
+    void TearDown() override {
+        bytetaper::hash::reset_process_hash_seed_for_test();
     }
 
     std::unique_ptr<cache::L1Cache> l1_cache;
@@ -130,11 +137,8 @@ TEST_F(L2CacheAsyncLookupEnqueueStageTest, QueueFullContinuesPendingCleared) {
     cache::build_cache_key(ki, actual_key, sizeof(actual_key));
 
     // Find shard for actual_key
-    std::uint32_t hash = 5381;
-    for (const char* p = actual_key; *p; ++p) {
-        hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(*p);
-    }
-    std::uint32_t shard_idx = hash % runtime::kRuntimeShardCount;
+    std::uint32_t shard_idx = static_cast<std::uint32_t>(
+        bytetaper::hash::hash_cstr_runtime(actual_key) % runtime::kRuntimeShardCount);
 
     // Directly saturate lookup queue for that shard
     worker_queue.shards[shard_idx].lookup_count = runtime::kRuntimeQueueSlotsPerShard;

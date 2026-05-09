@@ -3,6 +3,7 @@
 
 #include "cache/cache_entry.h"
 #include "cache/l1_cache.h"
+#include "hash/hash.h"
 
 #include <cstring>
 #include <gtest/gtest.h>
@@ -15,6 +16,12 @@ protected:
     void SetUp() override {
         cache = std::make_unique<L1Cache>();
         l1_init(cache.get());
+        bytetaper::hash::set_process_hash_seed_for_test(
+            { 0x1234567812345678ULL, 0x8765432187654321ULL });
+    }
+
+    void TearDown() override {
+        bytetaper::hash::reset_process_hash_seed_for_test();
     }
 
     std::unique_ptr<L1Cache> cache;
@@ -90,14 +97,7 @@ TEST_F(L1CacheTest, Expiry) {
 }
 
 static std::uint64_t expected_hash_key(const char* key) {
-    if (key == nullptr)
-        return 0;
-    std::uint64_t h = 5381;
-    int c;
-    while ((c = static_cast<unsigned char>(*key++))) {
-        h = ((h << 5) + h) + static_cast<std::uint64_t>(c);
-    }
-    return h;
+    return bytetaper::hash::hash_cstr_keyed(key, { 0x1234567812345678ULL, 0x8765432187654321ULL });
 }
 
 TEST_F(L1CacheTest, HashTagStoredOnPut) {

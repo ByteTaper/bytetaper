@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
 #include "coalescing/inflight_registry.h"
+#include "hash/hash.h"
 
 #include <cstring>
 #include <gtest/gtest.h>
@@ -11,7 +12,17 @@ namespace bytetaper::coalescing {
 class InFlightRegistryTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        bytetaper::hash::set_process_hash_seed_for_test(
+            { 0x1234567812345678ULL, 0x8765432187654321ULL });
         registry_init(&registry);
+    }
+
+    void TearDown() override {
+        bytetaper::hash::reset_process_hash_seed_for_test();
+    }
+
+    std::uint64_t hash_key(const char* s) const {
+        return bytetaper::hash::hash_cstr_runtime(s);
     }
 
     InFlightRegistry registry;
@@ -120,14 +131,7 @@ TEST_F(InFlightRegistryTest, CacheableCompletionExpiresToLeader) {
 }
 
 TEST_F(InFlightRegistryTest, ShardFullRejects) {
-    auto hash_fn = [](const char* s) -> std::uint64_t {
-        std::uint64_t hash = 14695981039346656037ULL;
-        while (*s) {
-            hash ^= static_cast<std::uint64_t>(*s++);
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    };
+    auto hash_fn = [this](const char* s) -> std::uint64_t { return hash_key(s); };
 
     std::uint32_t window = 100;
     std::uint32_t max_waiters = 5;
@@ -227,11 +231,7 @@ TEST_F(InFlightRegistryTest, ExpiredReturnedWhenInactiveDuringWait) {
 
     // Simulate entry deactivation (active = false) or generation mismatch during the wait
     {
-        std::uint64_t hash = 14695981039346656037ULL;
-        for (const char* p = key; *p; ++p) {
-            hash ^= static_cast<std::uint64_t>(*p);
-            hash *= 1099511628211ULL;
-        }
+        std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
         auto& shard = registry.shards[hash % kInFlightShards];
         {
             std::lock_guard<std::mutex> lock(shard.mutex);
@@ -257,14 +257,7 @@ TEST_F(InFlightRegistryTest, MissingStillReturnedWhenNoEntryFound) {
 }
 
 TEST_F(InFlightRegistryTest, ReclaimsAfterGraceWindow) {
-    auto hash_fn = [](const char* s) -> std::uint64_t {
-        std::uint64_t hash = 14695981039346656037ULL;
-        while (*s) {
-            hash ^= static_cast<std::uint64_t>(*s++);
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    };
+    auto hash_fn = [this](const char* s) -> std::uint64_t { return hash_key(s); };
 
     std::uint32_t window = 100;
     std::uint32_t max_waiters = 5;
@@ -328,14 +321,7 @@ TEST_F(InFlightRegistryTest, DoesNotReclaimWithinGraceWindow) {
 }
 
 TEST_F(InFlightRegistryTest, DifferentKeyReclaimsExpiredTerminalSlot) {
-    auto hash_fn = [](const char* s) -> std::uint64_t {
-        std::uint64_t hash = 14695981039346656037ULL;
-        while (*s) {
-            hash ^= static_cast<std::uint64_t>(*s++);
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    };
+    auto hash_fn = [this](const char* s) -> std::uint64_t { return hash_key(s); };
 
     std::uint32_t window = 100;
     std::uint32_t max_waiters = 5;
@@ -368,14 +354,7 @@ TEST_F(InFlightRegistryTest, DifferentKeyReclaimsExpiredTerminalSlot) {
 }
 
 TEST_F(InFlightRegistryTest, DoesNotReclaimWithActiveWaiter) {
-    auto hash_fn = [](const char* s) -> std::uint64_t {
-        std::uint64_t hash = 14695981039346656037ULL;
-        while (*s) {
-            hash ^= static_cast<std::uint64_t>(*s++);
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    };
+    auto hash_fn = [this](const char* s) -> std::uint64_t { return hash_key(s); };
 
     std::uint32_t window = 100;
     std::uint32_t max_waiters = 5;
@@ -461,14 +440,7 @@ TEST_F(InFlightRegistryTest, DoesNotReclaimWithActiveWaiter) {
 }
 
 TEST_F(InFlightRegistryTest, LifecycleGenerationSafeAfterReuse) {
-    auto hash_fn = [](const char* s) -> std::uint64_t {
-        std::uint64_t hash = 14695981039346656037ULL;
-        while (*s) {
-            hash ^= static_cast<std::uint64_t>(*s++);
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    };
+    auto hash_fn = [this](const char* s) -> std::uint64_t { return hash_key(s); };
 
     std::uint32_t window = 100;
     std::uint32_t max_waiters = 5;

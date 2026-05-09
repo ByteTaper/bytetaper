@@ -5,6 +5,7 @@
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
 #include "extproc/grpc_server.h"
+#include "hash/hash.h"
 #include "metrics/metrics_http_server.h"
 #include "metrics/prometheus_registry.h"
 #include "observability/logger.h"
@@ -120,6 +121,8 @@ int main(int argc, char** argv) {
     log_config.enabled = true;
     log_config.level = bytetaper::observability::LogLevel::Info;
     bytetaper::observability::logger_init(log_config);
+
+    bytetaper::hash::init_process_hash_seed();
 
     ServerArgs args = parse_args(argc, argv);
     if (args.error) {

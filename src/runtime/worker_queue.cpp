@@ -6,6 +6,7 @@
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
+#include "hash/hash.h"
 #include "metrics/coalescing_metrics.h"
 #include "metrics/runtime_metrics.h"
 
@@ -28,20 +29,9 @@ static WorkerEvent worker_wait_for_event(WorkerQueue* q, std::size_t worker_id);
 static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size_t shard_id);
 static void drain_owned_shards(WorkerQueue* q, std::size_t worker_id);
 
-static std::uint32_t hash_key(const char* key) {
-    if (key == nullptr)
-        return 0;
-    std::uint32_t hash = 5381;
-    int c;
-    while ((c = *key++)) {
-        hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(c);
-    }
-    return hash;
-}
-
-// Simple DJB2 hash for selecting shard.
+// Simple hash for selecting shard.
 static std::uint32_t hash_key_to_shard(const char* key) {
-    return hash_key(key) % kRuntimeShardCount;
+    return static_cast<std::uint32_t>(bytetaper::hash::hash_cstr_runtime(key) % kRuntimeShardCount);
 }
 
 static std::size_t shard_owner(std::size_t shard_idx, std::size_t worker_count) {
@@ -468,8 +458,9 @@ bool worker_queue_try_enqueue_lookup(WorkerQueue* q, const L2LookupJob& job) {
         return false;
     }
 
-    std::uint32_t hash = hash_key(job.key);
-    std::uint32_t shard_idx = hash % kRuntimeShardCount;
+    std::uint64_t h_64 = bytetaper::hash::hash_cstr_runtime(job.key);
+    std::uint32_t hash = static_cast<std::uint32_t>(h_64 ^ (h_64 >> 32));
+    std::uint32_t shard_idx = h_64 % kRuntimeShardCount;
     RuntimeShard& shard = q->shards[shard_idx];
 
     bool should_push_ready = false;

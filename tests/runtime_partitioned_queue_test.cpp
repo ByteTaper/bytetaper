@@ -3,6 +3,7 @@
 
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
+#include "hash/hash.h"
 #include "metrics/runtime_metrics.h"
 #include "runtime/worker_queue.h"
 
@@ -21,6 +22,8 @@ namespace bytetaper::runtime {
 class RuntimePartitionedQueueTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        bytetaper::hash::set_process_hash_seed_for_test(
+            { 0x1234567812345678ULL, 0x8765432187654321ULL });
         q_ = std::make_unique<WorkerQueue>();
         temp_dir = std::filesystem::current_path() / "bt_l2_test";
         std::filesystem::remove_all(temp_dir);
@@ -28,19 +31,15 @@ protected:
     }
 
     void TearDown() override {
+        bytetaper::hash::reset_process_hash_seed_for_test();
         std::filesystem::remove_all(temp_dir);
     }
 
     std::uint32_t hash_key_to_shard_proxy(const char* key) {
         if (key == nullptr)
             return 0;
-        std::uint32_t hash = 5381;
-        int c;
-        const char* s = key;
-        while ((c = *s++)) {
-            hash = ((hash << 5) + hash) + static_cast<std::uint32_t>(c);
-        }
-        return hash % kRuntimeShardCount;
+        return static_cast<std::uint32_t>(bytetaper::hash::hash_cstr_runtime(key) %
+                                          kRuntimeShardCount);
     }
 
     std::unique_ptr<WorkerQueue> q_;

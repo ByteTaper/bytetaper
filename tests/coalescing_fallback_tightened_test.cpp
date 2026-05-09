@@ -5,6 +5,7 @@
 #include "cache/cache_key.h"
 #include "cache/l1_cache.h"
 #include "coalescing/inflight_registry.h"
+#include "hash/hash.h"
 #include "policy/route_policy.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/coalescing_follower_wait_stage.h"
@@ -19,6 +20,8 @@ namespace bytetaper::stages {
 class CoalescingFallbackTightenedTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        bytetaper::hash::set_process_hash_seed_for_test(
+            { 0x1234567812345678ULL, 0x8765432187654321ULL });
         registry = std::make_unique<coalescing::InFlightRegistry>();
         coalescing::registry_init(registry.get());
 
@@ -45,6 +48,10 @@ protected:
             std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
     }
 
+    void TearDown() override {
+        bytetaper::hash::reset_process_hash_seed_for_test();
+    }
+
     void populate_l1(const char* key) {
         cache::CacheEntry entry{};
         std::strcpy(entry.key, key);
@@ -58,12 +65,7 @@ protected:
 
     std::uint32_t get_waiter_count(const char* key) {
         // Internal access for testing
-        std::uint64_t hash = 14695981039346656037ULL;
-        const char* s = key;
-        while (*s) {
-            hash ^= static_cast<std::uint64_t>(*s++);
-            hash *= 1099511628211ULL;
-        }
+        std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
         auto& shard = registry->shards[hash % coalescing::kInFlightShards];
         std::lock_guard<std::mutex> lock(shard.mutex);
         for (auto& slot : shard.slots) {

@@ -3,6 +3,7 @@
 
 #include "cache/cache_entry.h"
 #include "cache/l1_cache.h"
+#include "hash/hash.h"
 
 #include <atomic>
 #include <chrono>
@@ -17,7 +18,13 @@ namespace bytetaper::cache {
 class L1CacheConcurrencyTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        bytetaper::hash::set_process_hash_seed_for_test(
+            { 0x1234567812345678ULL, 0x8765432187654321ULL });
         l1_init(&l1);
+    }
+
+    void TearDown() override {
+        bytetaper::hash::reset_process_hash_seed_for_test();
     }
 
     // Helper to generate a key that hashes to a specific shard
@@ -25,10 +32,7 @@ protected:
         for (int i = 0; i < 100000; ++i) {
             std::string candidate = "key_" + std::to_string(shard_idx) + "_" +
                                     std::to_string(item_idx) + "_" + std::to_string(i);
-            std::uint64_t h = 5381;
-            for (char c : candidate) {
-                h = ((h << 5) + h) + static_cast<std::uint64_t>(c);
-            }
+            std::uint64_t h = bytetaper::hash::hash_cstr_runtime(candidate.c_str());
             if (h % kL1ShardCount == shard_idx) {
                 return candidate;
             }

@@ -3,26 +3,14 @@
 
 #include "coalescing/inflight_registry.h"
 
+#include "hash/hash.h"
+
 #include <chrono>
 #include <cstring>
 
 namespace bytetaper::coalescing {
 
 namespace {
-
-/**
- * @brief Simple FNV-1a hash for strings.
- */
-std::uint64_t hash_string(const char* s) {
-    std::uint64_t hash = 14695981039346656037ULL;
-    if (s == nullptr)
-        return hash;
-    while (*s) {
-        hash ^= static_cast<std::uint64_t>(*s++);
-        hash *= 1099511628211ULL;
-    }
-    return hash;
-}
 
 bool terminal_entry_expired(const InFlightEntry& entry, std::uint64_t now_ms,
                             std::uint32_t wait_window_ms) {
@@ -69,7 +57,7 @@ RegistryRegistrationResult registry_register(InFlightRegistry* registry, const c
         return { InFlightRole::Reject, 0 };
     }
 
-    std::uint64_t hash = hash_string(key);
+    std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
     std::size_t shard_idx = hash % kInFlightShards;
     InFlightShard& shard = registry->shards[shard_idx];
 
@@ -172,7 +160,7 @@ bool registry_complete_with_response(InFlightRegistry* registry, const char* key
                                        now_ms);
     }
 
-    std::uint64_t hash = hash_string(key);
+    std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
     std::size_t shard_idx = hash % kInFlightShards;
     InFlightShard& shard = registry->shards[shard_idx];
 
@@ -212,7 +200,7 @@ bool registry_complete_state(InFlightRegistry* registry, const char* key,
         return false;
     }
 
-    std::uint64_t hash = hash_string(key);
+    std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
     std::size_t shard_idx = hash % kInFlightShards;
     InFlightShard& shard = registry->shards[shard_idx];
 
@@ -238,7 +226,7 @@ bool registry_complete_state_if_generation(InFlightRegistry* registry, const cha
         return false;
     }
 
-    std::uint64_t hash = hash_string(key);
+    std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
     std::size_t shard_idx = hash % kInFlightShards;
     InFlightShard& shard = registry->shards[shard_idx];
 
@@ -265,7 +253,7 @@ void registry_remove_waiter(InFlightRegistry* registry, const char* key) {
         return;
     }
 
-    std::uint64_t hash = hash_string(key);
+    std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
     InFlightShard& shard = registry->shards[hash % kInFlightShards];
 
     std::lock_guard<std::mutex> lock(shard.mutex);
@@ -289,7 +277,7 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
         return RegistryWaitResult::Missing;
     }
 
-    const std::uint64_t hash = hash_string(key);
+    const std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
     InFlightShard& shard = registry->shards[hash % kInFlightShards];
 
     std::unique_lock<std::mutex> lock(shard.mutex);

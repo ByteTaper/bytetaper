@@ -4,28 +4,13 @@
 #include "cache/l1_cache.h"
 
 #include "cache/cache_entry.h"
+#include "hash/hash.h"
 
 #include <cstring>
 
 namespace bytetaper::cache {
 
 namespace {
-
-// Standard initial value for DJB2 hashing algorithm.
-static constexpr std::size_t kDJB2InitialHash = 5381;
-
-// Simple, fast hash function (DJB2) used when cache is large.
-std::uint64_t hash_key(const char* key) {
-    if (key == nullptr) {
-        return 0;
-    }
-    std::uint64_t h = kDJB2InitialHash;
-    int c;
-    while ((c = static_cast<unsigned char>(*key++))) {
-        h = ((h << 5) + h) + static_cast<std::uint64_t>(c); // h * 33 + c
-    }
-    return h;
-}
 
 void copy_body_to_slot(L1CacheShard* shard, std::size_t slot_idx, const CacheEntry& entry) {
     if (entry.body == nullptr || entry.body_len == 0) {
@@ -74,7 +59,7 @@ void l1_put(L1Cache* cache, const CacheEntry& entry) {
         return;
     }
 
-    const std::uint64_t h = hash_key(entry.key);
+    const std::uint64_t h = bytetaper::hash::hash_cstr_runtime(entry.key);
     const std::size_t shard_idx = h % kL1ShardCount;
     auto& shard = cache->shards[shard_idx];
 
@@ -97,7 +82,7 @@ bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry) {
         return false;
     }
 
-    const std::uint64_t h = hash_key(entry.key);
+    const std::uint64_t h = bytetaper::hash::hash_cstr_runtime(entry.key);
     const std::size_t shard_idx = h % kL1ShardCount;
     auto& shard = cache->shards[shard_idx];
 
@@ -142,7 +127,7 @@ bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEnt
         return false;
     }
 
-    const std::uint64_t h = hash_key(key);
+    const std::uint64_t h = bytetaper::hash::hash_cstr_runtime(key);
     const std::size_t shard_idx = h % kL1ShardCount;
     auto& shard = cache->shards[shard_idx];
 
