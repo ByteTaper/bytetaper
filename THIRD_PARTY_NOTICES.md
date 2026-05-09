@@ -25,6 +25,7 @@ in that distribution.
 Homepage: https://rocksdb.org/  
 Repository: https://github.com/facebook/rocksdb  
 License: Apache-2.0 or GPL-2.0
+License text (copied): [LICENSES/Apache-2.0.txt]([LICENSES/Apache-2.0.txt])
 
 ByteTaper uses RocksDB under the Apache License, Version 2.0 option.
 
@@ -45,6 +46,7 @@ upstream headers and notices.
 Homepage: [https://www.envoyproxy.io/](https://www.envoyproxy.io/)
 Repository: [https://github.com/envoyproxy/data-plane-api](https://github.com/envoyproxy/data-plane-api)
 License: Apache-2.0
+License text (copied): [LICENSES/Apache-2.0.txt]([LICENSES/Apache-2.0.txt])
 
 ByteTaper uses Envoy API protobuf definitions, including the External Processor
 API, to generate C++ protobuf/gRPC bindings for Envoy `ext_proc` integration.
@@ -65,6 +67,7 @@ copyright and license headers must be preserved.
 Homepage: [https://grpc.io/](https://grpc.io/)
 Repository: [https://github.com/grpc/grpc](https://github.com/grpc/grpc)
 License: Apache-2.0
+License text (copied): [LICENSES/Apache-2.0.txt]([LICENSES/Apache-2.0.txt])
 
 ByteTaper links against gRPC C++ libraries for the Envoy ExternalProcessor
 service implementation.
@@ -82,6 +85,7 @@ Licensed under the Apache License, Version 2.0.
 Homepage: [https://protobuf.dev/](https://protobuf.dev/)
 Repository: [https://github.com/protocolbuffers/protobuf](https://github.com/protocolbuffers/protobuf)
 License: BSD-3-Clause
+License text (copied): [LICENSES/BSD-3-Clause-Protocol-Buffers.txt]([LICENSES/BSD-3-Clause-Protocol-Buffers.txt])
 
 ByteTaper uses Protocol Buffers for generated C++ bindings from Envoy API
 `.proto` definitions.
@@ -94,10 +98,17 @@ Copyright 2008 Google LLC.
 Licensed under the BSD 3-Clause License.
 ```
 
+## Quill
+
+Repository: https://github.com/odygrd/quill
+License: MIT License
+License text (copied): [LICENSES/MIT-quill.txt]([LICENSES/MIT-quill.txt])
+
 ## yaml-cpp
 
 Repository: [https://github.com/jbeder/yaml-cpp](https://github.com/jbeder/yaml-cpp)
 License: MIT
+License text (copied): [LICENSES/MIT-yaml-cpp.txt]([LICENSES/MIT-yaml-cpp.txt])
 
 ByteTaper uses yaml-cpp for YAML route policy loading and validation.
 

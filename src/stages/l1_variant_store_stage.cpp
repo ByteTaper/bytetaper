@@ -8,13 +8,11 @@
 #include "cache/l1_cache.h"
 #include "policy/cache_policy.h"
 
-#include <cstdio>
 #include <cstring>
 
 namespace bytetaper::stages {
 
 apg::StageOutput l1_variant_store_stage(apg::ApgTransformContext& context) {
-    std::printf("[L1 VAR STORE] Entering variant store stage...\n");
     if (context.matched_policy == nullptr) {
         return { apg::StageResult::Continue, "no-policy" };
     }
@@ -78,7 +76,6 @@ apg::StageOutput l1_variant_store_stage(apg::ApgTransformContext& context) {
         (context.request_epoch_ms > 0) ? context.request_epoch_ms + ttl_ms : 0;
 
     cache::l1_put(context.l1_cache, entry);
-    std::printf("[L1 VAR STORE] Successfully stored variant under key: %s\n", key_buf);
     return { apg::StageResult::Continue, "stored" };
 }
 

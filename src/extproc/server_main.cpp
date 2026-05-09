@@ -7,6 +7,7 @@
 #include "extproc/grpc_server.h"
 #include "metrics/metrics_http_server.h"
 #include "metrics/prometheus_registry.h"
+#include "observability/logger.h"
 #include "policy/yaml_loader.h"
 
 #include <atomic>
@@ -20,9 +21,7 @@ namespace {
 
 std::atomic<bool> g_should_stop{ false };
 
-void on_signal(int sig) {
-    std::printf("Received signal %d, setting g_should_stop to true...\n", sig);
-    std::fflush(stdout);
+void on_signal(int) {
     g_should_stop.store(true);
 }
 
@@ -116,13 +115,20 @@ ServerArgs parse_args(int argc, char** argv) {
 } // namespace
 
 int main(int argc, char** argv) {
+    bytetaper::observability::LoggerConfig log_config{};
+    log_config.enabled = true;
+    log_config.level = bytetaper::observability::LogLevel::Info;
+    bytetaper::observability::logger_init(log_config);
+
     ServerArgs args = parse_args(argc, argv);
     if (args.error) {
+        bytetaper::observability::logger_shutdown();
         return 2;
     }
     if (args.help) {
         std::puts("usage: bytetaper-extproc-server [--listen-address HOST:PORT] [--policy-file "
                   "PATH] [--l2-cache-path PATH] [--metrics-address ADDR] [--metrics-port PORT]");
+        bytetaper::observability::logger_shutdown();
         return 0;
     }
 
@@ -134,9 +140,13 @@ int main(int argc, char** argv) {
         if (!bytetaper::policy::load_policy_from_file(args.policy_file, &policy_result)) {
             std::fprintf(stderr, "failed to load policy file %s: %s\n", args.policy_file,
                          policy_result.error ? policy_result.error : "unknown error");
+            bytetaper::observability::logger_shutdown();
             return 3;
         }
-        std::printf("loaded %zu routes from %s\n", policy_result.count, args.policy_file);
+        char buf[512];
+        std::snprintf(buf, sizeof(buf), "loaded %zu routes from %s", policy_result.count,
+                      args.policy_file);
+        bytetaper::observability::log_info(buf);
     }
 
     auto l1_cache = std::make_unique<bytetaper::cache::L1Cache>();
@@ -147,6 +157,7 @@ int main(int argc, char** argv) {
         l2_cache = bytetaper::cache::l2_open(args.l2_cache_path);
         if (l2_cache == nullptr) {
             std::fprintf(stderr, "failed to open L2 cache at %s\n", args.l2_cache_path);
+            bytetaper::observability::logger_shutdown();
             return 4;
         }
     }
@@ -184,25 +195,30 @@ int main(int argc, char** argv) {
         if (l2_cache != nullptr) {
             bytetaper::cache::l2_close(&l2_cache);
         }
+        bytetaper::observability::logger_shutdown();
         return 1;
     }
 
-    std::printf("bytetaper-extproc-server listening on %s (L1 enabled, L2 %s)\n",
-                args.listen_address, l2_cache ? "enabled" : "disabled");
-    std::printf("metrics server listening on %s:%u\n", args.metrics_listen_address,
-                metrics_handle.bound_port);
+    char buf[512];
+    std::snprintf(buf, sizeof(buf), "bytetaper-extproc-server listening on %s (L1 enabled, L2 %s)",
+                  args.listen_address, l2_cache ? "enabled" : "disabled");
+    bytetaper::observability::log_info(buf);
+
+    std::snprintf(buf, sizeof(buf), "metrics server listening on %s:%u",
+                  args.metrics_listen_address, metrics_handle.bound_port);
+    bytetaper::observability::log_info(buf);
 
     while (!g_should_stop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
-    std::printf("Exiting main loop, stopping server...\n");
-    std::fflush(stdout);
+    bytetaper::observability::log_info("exiting main loop, stopping server");
 
     bytetaper::extproc::stop_grpc_server(&handle);
     bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
     if (l2_cache != nullptr) {
         bytetaper::cache::l2_close(&l2_cache);
     }
+    bytetaper::observability::logger_shutdown();
     return 0;
 }

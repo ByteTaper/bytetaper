@@ -15,6 +15,18 @@ option(BYTETAPER_ENABLE_GTEST_TESTS "Enable GoogleTest-based unit tests" OFF)
 option(BYTETAPER_ENABLE_INTEGRATION_TESTS "Enable integration-style extproc adapter tests" OFF)
 option(BYTETAPER_ENABLE_TSAN "Enable ThreadSanitizer for concurrency tests" OFF)
 
+set(QUILL_NO_EXCEPTIONS ON CACHE BOOL "" FORCE)
+set(QUILL_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(QUILL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(QUILL_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(QUILL_DISABLE_NON_PREFIXED_MACROS ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    quill
+    GIT_REPOSITORY https://github.com/odygrd/quill.git
+    GIT_TAG        v11.1.0
+)
+FetchContent_MakeAvailable(quill)
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
 
@@ -217,10 +229,20 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
       bytetaper_extproc_proto
   )
 
+  add_library(bytetaper_logger STATIC
+    src/observability/logger.cpp
+  )
+  set_source_files_properties(src/observability/logger.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(bytetaper_logger PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(bytetaper_logger PUBLIC quill::quill)
+
   add_library(bytetaper_trace STATIC
     src/observability/trace.cpp
   )
   target_include_directories(bytetaper_trace PUBLIC include)
+  target_link_libraries(bytetaper_trace PRIVATE bytetaper_logger)
 
   add_library(bytetaper_extproc_grpc_server STATIC
     src/extproc/grpc_server.cpp
@@ -314,6 +336,7 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
       policy_yaml_loader
       bytetaper_metrics_http_server
       bytetaper_prometheus_registry
+      bytetaper_logger
       ${YAML_CPP_LIBRARIES}
   )
 endif()
