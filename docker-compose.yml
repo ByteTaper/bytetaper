@@ -10,17 +10,26 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
+      - bt-ccache:/home/bytetaper/.cache/ccache
   bytetaper-build-server:
     image: bytetaper-dev:latest
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
+      - bt-ccache:/home/bytetaper/.cache/ccache
     command:
       - /bin/bash
       - -lc
       - |
         set -eu
-        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
+          -DBYTETAPER_ENABLE_GTEST_TESTS=OFF \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         cmake --build build --target bytetaper-extproc-server
 
   bytetaper-unit-test:
@@ -28,12 +37,18 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
+      - bt-ccache:/home/bytetaper/.cache/ccache
     command:
       - /bin/bash
       - -lc
       - |
         set -eu
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_GTEST_TESTS=ON -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON
+        cmake -S . -B build -G Ninja \
+          -DBYTETAPER_ENABLE_GTEST_TESTS=ON \
+          -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         cmake --build build
         ctest --test-dir build --output-on-failure
   bytetaper-smoke-test:
@@ -41,12 +56,18 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
+      - bt-ccache:/home/bytetaper/.cache/ccache
     command:
       - /bin/bash
       - -lc
       - |
         set -eu
-        cmake -S . -B build -G Ninja -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON -DBYTETAPER_ENABLE_GTEST_TESTS=OFF
+        cmake -S . -B build -G Ninja \
+          -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
+          -DBYTETAPER_ENABLE_GTEST_TESTS=OFF \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         cmake --build build --target bytetaper-extproc --target extproc_server_smoke_test
         ./build/bytetaper-extproc
         ctest --test-dir build -R extproc_server_smoke_test --output-on-failure
@@ -139,6 +160,7 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
     environment:
       - BYTETAPER_TRACE_ENABLED
       - BYTETAPER_TRACE_SCENARIO
@@ -236,6 +258,7 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
     environment:
       - BYTETAPER_TRACE_ENABLED
       - BYTETAPER_TRACE_SCENARIO
@@ -324,6 +347,7 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
     environment:
       - BYTETAPER_TRACE_ENABLED
       - BYTETAPER_TRACE_SCENARIO
@@ -386,6 +410,7 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
     environment:
       - BYTETAPER_TRACE_ENABLED
       - BYTETAPER_TRACE_SCENARIO
@@ -448,6 +473,7 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
     environment:
       - BYTETAPER_TRACE_ENABLED
       - BYTETAPER_TRACE_SCENARIO
@@ -510,6 +536,7 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
     environment:
       - BYTETAPER_TRACE_ENABLED
       - BYTETAPER_TRACE_SCENARIO
@@ -572,6 +599,7 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
     environment:
       - BYTETAPER_TRACE_ENABLED
       - BYTETAPER_TRACE_SCENARIO
@@ -634,6 +662,7 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+      - bt-build:/workspace/build
     environment:
       - BYTETAPER_TRACE_ENABLED
       - BYTETAPER_TRACE_SCENARIO
@@ -811,6 +840,36 @@ services:
         condition: service_healthy
       envoy-bytetaper-coalescing:
         condition: service_healthy
+  bytetaper-dev-build:
+    image: bytetaper-dev:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - bt-build:/workspace/build
+      - bt-ccache:/home/bytetaper/.cache/ccache
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DBYTETAPER_ENABLE_GTEST_TESTS=ON \
+          -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        cmake --build build
+
+  bytetaper-dev-shell:
+    image: bytetaper-dev:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - bt-build:/workspace/build
+      - bt-ccache:/home/bytetaper/.cache/ccache
+    command: ["/bin/bash"]
 
 volumes:
   bt-l2-cache: {}
+  bt-build: {}
+  bt-ccache: {}

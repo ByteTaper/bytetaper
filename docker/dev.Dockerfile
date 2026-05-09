@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     build-essential \
     ca-certificates \
+    ccache \
     clang-format \
     cmake \
     git \
@@ -66,10 +67,16 @@ COPY --from=rocksdb-builder /usr/local/include/rocksdb /usr/local/include/rocksd
 # Ensure the dynamic linker can find RocksDB
 RUN ldconfig
 
+ENV CCACHE_DIR=/home/bytetaper/.cache/ccache
+ENV CCACHE_MAXSIZE=5G
+ENV CCACHE_COMPRESS=true
+
 # Setup development user and cache directory
 RUN groupadd -f -o -g "${LOCAL_GID}" bytetaper \
     && useradd -m -o -u "${LOCAL_UID}" -g "${LOCAL_GID}" -s /bin/bash bytetaper \
+    && mkdir -p /home/bytetaper/.cache/ccache \
     && mkdir -p /var/cache/bytetaper \
+    && chown -R bytetaper:bytetaper /home/bytetaper/.cache \
     && chown bytetaper:bytetaper /var/cache/bytetaper
 
 WORKDIR /workspace
