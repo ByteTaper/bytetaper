@@ -2,220 +2,161 @@
 
 ![CI](https://github.com/haluan/bytetaper/actions/workflows/ci.yml/badge.svg)
 
-## Development Commands
+ByteTaper is an API Performance Gateway component designed to optimize API
+responses at the edge without requiring backend rewrites. The current runtime is
+implemented as an Envoy External Processor (`ext_proc`) service.
 
-Use Docker Compose workflows only. Do not run local host build/test commands.
+Core primitives include field selection, policy safety, tiered caching,
+pagination guardrails, compression decisions, request coalescing, materialized
+field-filtered variant caching, and Prometheus-style observability.
 
-Build/demo flow:
+## Requirements
+
+ByteTaper is developed and tested through Docker Compose only. Do not install or
+run CMake, compilers, RocksDB, gRPC, Protobuf, yaml-cpp, or Envoy directly on
+the host for normal development.
+
+Required host tools:
+
+- Docker Engine or Docker Desktop with Linux container support
+- Docker Compose v2 (`docker compose`)
+- Git
+- A shell capable of running standard Docker commands
+
+Optional host tools:
+
+- GNU Make, only for repository wrapper commands such as `make format`
+- `docker-compose`, only if your environment does not provide `docker compose`
+
+Resource notes:
+
+- The first build downloads and builds development dependencies, including
+  RocksDB, so it can take longer than later incremental builds.
+- Docker volumes are used for the build directory and ccache.
+- Containers support host-mapped UID/GID to avoid root-owned files in mounted
+  workspaces.
+
+## Docker Development Workflow
+
+Build the reusable development image first:
 
 ```bash
-docker compose run --rm bytetaper-build
+docker compose build bytetaper-dev
 ```
 
-Unit-test flow:
+Run a development build:
+
+```bash
+docker compose run --rm bytetaper-dev-build
+```
+
+Build the ExtProc server target used by the local stack:
+
+```bash
+docker compose run --rm bytetaper-build-server
+```
+
+Run unit tests:
 
 ```bash
 docker compose run --rm bytetaper-unit-test
-make test
 ```
 
-Smoke-test flow:
+Run smoke tests:
 
 ```bash
 docker compose run --rm bytetaper-smoke-test
-make smoke-test
 ```
 
-Integration-test flow:
+Run integration tests:
 
 ```bash
 docker compose run --rm bytetaper-integration-test
 ```
 
-Format flow:
+Open a development shell:
+
+```bash
+docker compose run --rm bytetaper-dev-shell
+```
+
+Format code:
 
 ```bash
 make format
 ```
 
-Compatibility note:
-If `docker compose` is unavailable in your environment, use the equivalent
+Compatibility note: if `docker compose` is unavailable, use the equivalent
 `docker-compose` command form.
 
 Rootless note:
-Containers run with host-mapped UID/GID to avoid root-owned files in mounted
-workspaces. Example:
 
 ```bash
 LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-unit-test
 ```
 
-## Envoy ExtProc Adapter
+## Run ByteTaper with Docker Compose
 
-The extproc adapter is a high-performance gRPC implementation of the Envoy `ExternalProcessor` service.
+The default local stack uses:
 
-### Features
+- `mock-api`: local Python mock upstream API
+- `bytetaper-extproc`: ByteTaper Envoy External Processor service
+- `envoy`: Envoy configured to call ByteTaper through `ext_proc`
 
-- **gRPC Server Lifecycle**: Managed through `GrpcServerHandle` with support for explicit startup, dynamic port binding, and clean shutdown.
-- **ExternalProcessor Service**: Full implementation of the `envoy.service.ext_proc.v3.ExternalProcessor` gRPC contract.
-- **Synchronous Message Handling**:
-    - **Request Headers**: Efficient classification and recording of request header metadata.
-    - **Response Headers**: Classification and recording of response header metadata.
-    - **Response Body**: Handling of response body chunks.
-- **Stateless Continuation**: Automatically returns a `ProcessingResponse` with a "continue" instruction (zero mutations) for all supported message types, ensuring minimal latency overhead.
-- **Resilience**: Unsupported message variants are handled as safe no-ops, preventing stream disruptions.
-
-## APG Stage Behavior
-
-Stage behavior contract:
-- Stage input is mutable `ApgTransformContext&`.
-- Stage output is `StageOutput{ result, note }`.
-- `StageResult::Continue` executes the next stage.
-- `StageResult::Error` stops the pipeline immediately and returns that exact output.
-- `StageResult::SkipRemaining` stops the pipeline immediately (non-error flow) and
-  returns that exact output.
-- `note` is non-owning (`const char*`) and is propagated unchanged.
-
-Pipeline trace behavior:
-- Trace fields live in context: `trace_buffer`, `trace_capacity`, `trace_length`.
-- Trace is reset at pipeline start.
-- One token is appended per executed stage:
-  `C` (Continue), `E` (Error), `S` (SkipRemaining).
-- Trace writes are skipped when buffer is null or capacity is zero.
-- Trace writes are safely truncated and never write out-of-bounds.
-
-## Route Policy
-
-ByteTaper uses a static YAML-driven policy framework to define how specific routes should be optimized. Policies are loaded at startup and enforced by the Envoy ExtProc adapter.
-
-### Features
-
-- **YAML Configuration**: Human-readable policy definitions using the `yaml-cpp` library.
-- **Request Matching**:
-  - **Path Matching**: Support for `prefix` and `exact` path matching logic.
-  - **Method Filtering**: Filter policies by HTTP method (GET, POST, PUT, DELETE, PATCH, or Any).
-- **Optimization Primitives**:
-  - **Field Filtering**: Define `allowlist` or `denylist` rules for JSON response body fields.
-  - **Response Size Limits**: Enforce a `max_response_bytes` cap to reject or truncate oversized payloads.
-- **Cache Control**: Declarative `cache` placeholders for future-ready caching behavior (bypass/store/TTL).
-- **Validation Tooling**: Standalone `bytetaper-validate-policy` CLI for pre-deployment configuration verification.
-
-### Policy Example
-
-```yaml
-routes:
-  - id: "api-v1-proxy"
-    match:
-      kind: "prefix"
-      prefix: "/api/v1/"
-    method: "get"
-    mutation: "disabled"
-    max_response_bytes: 1048576 # 1 MiB
-    cache:
-      behavior: "store"
-      ttl_seconds: 300
-    field_filter:
-      mode: "allowlist"
-      fields:
-        - "id"
-        - "name"
-        - "status"
-```
-
-### Policy Validation
-
-Validate your policy file before deployment using the built-in validator:
+Build the development image first if needed:
 
 ```bash
-# Using Docker (recommended)
-docker compose run --rm bytetaper-build build/bytetaper-validate-policy examples/policy/bytetaper-policy.yaml
+docker compose build bytetaper-dev
 ```
 
-The tool will print a detailed per-route report on success or a descriptive error message on failure.
+Start the local stack:
 
-#### Exit Codes
-- `0`: Success (all routes valid)
-- `1`: Usage error
+```bash
+docker compose up bytetaper-extproc envoy
+```
+
+The `bytetaper-extproc` service exposes:
+
+- `18080`: ExtProc server listen port
+- `18081`: metrics endpoint
+
+Stop the local stack:
+
+```bash
+docker compose down
+```
+
+## Policy Validation
+
+Validate a policy file through Docker:
+
+```bash
+docker compose run --rm bytetaper-build-server build/bytetaper-validate-policy examples/policy/bytetaper-policy.yaml
+```
+
+Exit codes:
+
+- `0`: success
+- `1`: usage error
 - `2`: YAML parse/load failure
-- `3`: Validation rule violation (e.g., missing ID, invalid path prefix)
+- `3`: validation rule violation
 
-### Documentation
+## Documentation
 
-For more details on matching logic and configuration options, see [Route Policy Reference](docs/route-policy.md).
-
-## Field Selection
-
-Field Selection is a core ByteTaper primitive designed to reduce API payload sizes by selectively including or excluding JSON response fields. By stripping unnecessary data at the edge, ByteTaper reduces egress costs and improves client processing performance without requiring backend modifications.
-
-### Capabilities
-
-- **Nested Path Support**: Target data within complex structures using **dotted notation** (`user.id`) or **array notation** (`items[]`).
-- **Allowlist Mode**: Explicitly select which fields to **keep**. Any field not in the list is automatically removed from the response body.
-- **Denylist Mode**: Select which fields to **remove**. Ideal for stripping sensitive or internal-only fields while keeping the rest of the response intact.
-
-### Technical Design & Performance
-
-The Field Selection engine is built with strict **Orthodox C++** principles to ensure zero latency impact on the hot path:
-
-- **Streaming Single-Pass**: Data is filtered and written to the output buffer in a single pass without intermediate object creation.
-- **Zero Heap Allocation**: All parsing, path tracking, and matching logic use fixed-capacity flat buffers. This eliminates memory fragmentation and unpredictable allocation latency jitter.
-- **Predictable O(N) Complexity**: Performance scales linearly with the size of the response body.
-
-### Constraints
-
-To maintain high performance and predictable memory usage, the following limits apply:
-- **Max Selection Path**: Path strings are capped at 512 characters.
-- **Max Field Rules**: 16 field rules can be defined per route.
-- **JSON Only**: Field selection operates on valid UTF-8 JSON response bodies.
-
-### Example Configuration
-
-```yaml
-field_filter:
-  mode: "allowlist"
-  fields:
-    - "id"
-    - "user.display_name"
-    - "items[].price"
-```
-
-### Documentation
-
-For a detailed behavior reference and example scenarios, see [Field Selection Reference](docs/field-selection.md).
-
-## Observability
-
-ByteTaper provides comprehensive observability through Prometheus metrics and HTTP response headers. These tools allow you to monitor the performance, savings, and safety status of your JSON optimizations.
-
-See [Observability Guide](docs/observability.md) for a complete reference on monitoring ByteTaper.
-
-## Policy Safety
-
-See [Policy Safety](docs/policy-safety.md) for a complete reference on policy safety.
-
-## Cache Policy
-
-See [Cache Policy](docs/cache-policy.md) for a complete reference on tiered caching.
-
-## Pagination Policy
-
-See [Pagination Policy](docs/pagination-policy.md) for a complete reference on pagination handling.
-
-## Compression Policy
-
-See [Compression Policy](docs/compression-policy.md) for a complete reference on response compression handling.
-
-## Coalescing Policy
-
-See [Request Coalescing](docs/coalescing-policy.md) for a complete reference on request coalescing.
-
-## Variant Caching Policy
-
-See [Materialized Field-Filtered Variant Cache](docs/materialized-filed-filtered-variant-cache.policy) for a complete reference on variant caching.
+- [Route Policy Reference](docs/route-policy.md)
+- [Field Selection Reference](docs/field-selection.md)
+- [Observability Guide](docs/observability.md)
+- [Policy Safety](docs/policy-safety.md)
+- [Cache Policy](docs/cache-policy.md)
+- [Pagination Policy](docs/pagination-policy.md)
+- [Compression Policy](docs/compression-policy.md)
+- [Request Coalescing](docs/coalescing-policy.md)
+- [Materialized Field-Filtered Variant Cache](docs/materialized-filed-filtered-variant-cache.policy)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details on our development process and how to contribute.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details on the development process
+and contribution expectations.
 
 ## License
 
@@ -224,5 +165,5 @@ This tool is licensed under:
 - `AGPL-3.0-only`, or
 - `LicenseRef-Commercial`
 
-See repository license files and source SPDX headers for details.
-See `LICENSES/` for full license texts.
+See repository license files and source SPDX headers for details. See
+`LICENSES/` for full license texts.
