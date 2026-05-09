@@ -1,24 +1,24 @@
-Commercial License Notice for vantaq
+Commercial License Notice for ByteTaper
 
 SPDX-License-Identifier: LicenseRef-Commercial
 
 Copyright (c) 2026 Haluan Irsad
 
-This file describes the commercial licensing option for vantaq.
+This file describes the commercial licensing option for ByteTaper.
 
-vantaq is available under a dual-license model:
+ByteTaper is available under a dual-license model:
 
     AGPL-3.0-only OR LicenseRef-Commercial
 
-You may use, copy, modify, and distribute vantaq under the terms of the
+You may use, copy, modify, and distribute ByteTaper under the terms of the
 GNU Affero General Public License version 3 only.
 
-Alternatively, you may use vantaq under a separate commercial license
+Alternatively, you may use ByteTaper under a separate commercial license
 agreement granted by Haluan Irsad.
 
 Commercial license rights are not granted by possession of this file,
 by possession of the source code, by cloning the repository, by downloading
-a release, or by receiving a copy of vantaq.
+a release, or by receiving a copy of ByteTaper.
 
 Commercial license rights are granted only through a separate written
 agreement signed or otherwise explicitly authorized by Haluan Irsad.
@@ -26,10 +26,10 @@ agreement signed or otherwise explicitly authorized by Haluan Irsad.
 A commercial license may be required for use cases including, but not
 limited to:
 
-- proprietary modification of vantaq;
-- private forks of vantaq;
+- proprietary modification of ByteTaper;
+- private forks of ByteTaper;
 - redistribution of modified versions without complying with AGPL-3.0-only;
-- embedding vantaq into proprietary firmware, appliances, or devices;
+- embedding ByteTaper into proprietary firmware, appliances, or devices;
 - OEM distribution;
 - commercial redistribution;
 - private customer-specific builds;
