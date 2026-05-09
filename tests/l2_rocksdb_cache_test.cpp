@@ -102,4 +102,111 @@ TEST_F(L2RocksDbCacheTest, BufferTooSmallReturnsFalse) {
     EXPECT_FALSE(l2_get(cache_, e.key, 0, &out, body_buf, sizeof(body_buf)));
 }
 
+TEST(L2RocksDbCacheOptionsTest, DefaultOptionsRoundtrip) {
+    const char* path = "/tmp/bytetaper_l2_opts_default";
+    l2_destroy(path);
+    L2DiskCache* cache = l2_open(path);
+    ASSERT_NE(cache, nullptr);
+
+    CacheEntry e{};
+    std::strncpy(e.key, "key_def", kCacheKeyMaxLen - 1);
+    e.body = "default_opt_data";
+    e.body_len = 16;
+    e.expires_at_epoch_ms = 9999999;
+
+    EXPECT_TRUE(l2_put(cache, e));
+
+    CacheEntry out{};
+    char body_buf[64] = {};
+    EXPECT_TRUE(l2_get(cache, e.key, 0, &out, body_buf, sizeof(body_buf)));
+    EXPECT_EQ(out.body_len, e.body_len);
+    EXPECT_STREQ(out.body, e.body);
+
+    l2_close(&cache);
+    l2_destroy(path);
+}
+
+TEST(L2RocksDbCacheOptionsTest, CustomOptionsRoundtrip) {
+    const char* path = "/tmp/bytetaper_l2_opts_custom";
+    l2_destroy(path);
+
+    L2CacheOptions opts{};
+    opts.block_cache_mb = 8;
+    opts.write_buffer_mb = 4;
+    opts.max_background_jobs = 1;
+    opts.enable_compression = false;
+
+    L2DiskCache* cache = l2_open_with_options(path, opts);
+    ASSERT_NE(cache, nullptr);
+
+    CacheEntry e{};
+    std::strncpy(e.key, "key_cust", kCacheKeyMaxLen - 1);
+    e.body = "custom_opt_data";
+    e.body_len = 15;
+    e.expires_at_epoch_ms = 9999999;
+
+    EXPECT_TRUE(l2_put(cache, e));
+
+    CacheEntry out{};
+    char body_buf[64] = {};
+    EXPECT_TRUE(l2_get(cache, e.key, 0, &out, body_buf, sizeof(body_buf)));
+    EXPECT_EQ(out.body_len, e.body_len);
+    EXPECT_STREQ(out.body, e.body);
+
+    l2_close(&cache);
+    l2_destroy(path);
+}
+
+TEST(L2RocksDbCacheOptionsTest, WalDisabledRoundtrip) {
+    const char* path = "/tmp/bytetaper_l2_opts_wal";
+    l2_destroy(path);
+
+    L2CacheOptions opts{};
+    opts.disable_wal = true;
+
+    L2DiskCache* cache = l2_open_with_options(path, opts);
+    ASSERT_NE(cache, nullptr);
+
+    CacheEntry e{};
+    std::strncpy(e.key, "key_wal", kCacheKeyMaxLen - 1);
+    e.body = "wal_disabled_data";
+    e.body_len = 17;
+    e.expires_at_epoch_ms = 9999999;
+
+    EXPECT_TRUE(l2_put(cache, e));
+
+    CacheEntry out{};
+    char body_buf[64] = {};
+    EXPECT_TRUE(l2_get(cache, e.key, 0, &out, body_buf, sizeof(body_buf)));
+    EXPECT_EQ(out.body_len, e.body_len);
+    EXPECT_STREQ(out.body, e.body);
+
+    l2_close(&cache);
+    l2_destroy(path);
+}
+
+TEST(L2RocksDbCacheOptionsTest, TtlBehaviorUnchanged) {
+    const char* path = "/tmp/bytetaper_l2_opts_ttl";
+    l2_destroy(path);
+
+    L2DiskCache* cache = l2_open(path);
+    ASSERT_NE(cache, nullptr);
+
+    CacheEntry e{};
+    std::strncpy(e.key, "key_ttl", kCacheKeyMaxLen - 1);
+    e.body = "ttl_data";
+    e.body_len = 8;
+    std::int64_t now = 5000;
+    e.expires_at_epoch_ms = now - 1; // Expired
+
+    EXPECT_TRUE(l2_put(cache, e));
+
+    CacheEntry out{};
+    char body_buf[64] = {};
+    EXPECT_FALSE(l2_get(cache, e.key, now, &out, body_buf, sizeof(body_buf)));
+
+    l2_close(&cache);
+    l2_destroy(path);
+}
+
 } // namespace bytetaper::cache

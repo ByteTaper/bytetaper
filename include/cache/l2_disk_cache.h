@@ -15,8 +15,23 @@ struct L2DiskCache; // opaque; defined in l2_rocksdb_cache.cpp
 
 static constexpr std::size_t kL2MaxBodySize = 1 * 1024 * 1024; // 1 MiB
 
+struct L2CacheOptions {
+    std::size_t block_cache_mb = 64;
+    std::size_t write_buffer_mb = 32;
+    std::size_t max_write_buffer_number = 2;
+    std::size_t target_file_size_mb = 64;
+    int max_background_jobs = 2;
+    bool create_if_missing = true;
+    bool disable_wal = true;
+    bool cache_index_and_filter_blocks = true;
+    bool enable_compression = true;
+};
+
 // Opens (or creates) a RocksDB database at path. Returns nullptr on failure.
 L2DiskCache* l2_open(const char* path);
+
+// Opens with explicit cache-oriented options.
+L2DiskCache* l2_open_with_options(const char* path, const L2CacheOptions& options);
 
 // Closes and frees the database handle. Sets *cache to nullptr.
 void l2_close(L2DiskCache** cache);

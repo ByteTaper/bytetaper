@@ -14,6 +14,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 
@@ -154,7 +155,15 @@ int main(int argc, char** argv) {
 
     bytetaper::cache::L2DiskCache* l2_cache = nullptr;
     if (args.l2_cache_path != nullptr) {
-        l2_cache = bytetaper::cache::l2_open(args.l2_cache_path);
+        bytetaper::cache::L2CacheOptions l2_opts{};
+        if (const char* v = std::getenv("BYTETAPER_L2_BLOCK_CACHE_MB"))
+            l2_opts.block_cache_mb = static_cast<std::size_t>(std::atoi(v));
+        if (const char* v = std::getenv("BYTETAPER_L2_WRITE_BUFFER_MB"))
+            l2_opts.write_buffer_mb = static_cast<std::size_t>(std::atoi(v));
+        if (const char* v = std::getenv("BYTETAPER_L2_MAX_BACKGROUND_JOBS"))
+            l2_opts.max_background_jobs = std::atoi(v);
+
+        l2_cache = bytetaper::cache::l2_open_with_options(args.l2_cache_path, l2_opts);
         if (l2_cache == nullptr) {
             std::fprintf(stderr, "failed to open L2 cache at %s\n", args.l2_cache_path);
             bytetaper::observability::logger_shutdown();
