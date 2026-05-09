@@ -22,10 +22,6 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace bytetaper::coalescing {
-struct FollowerWaitPool;
-} // namespace bytetaper::coalescing
-
 namespace bytetaper::runtime {
 struct WorkerQueue;
 } // namespace bytetaper::runtime
@@ -139,7 +135,6 @@ struct ApgTransformContext {
     // --- Coalescing decision output (written by coalescing_decision_stage) ---
     coalescing::CoalescingDecision coalescing_decision{};
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
-    coalescing::FollowerWaitPool* follower_wait_pool = nullptr;
 
     // --- Background runtime inputs (set by caller for async stages) ---
     runtime::WorkerQueue* worker_queue = nullptr;

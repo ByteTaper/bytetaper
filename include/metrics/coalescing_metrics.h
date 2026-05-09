@@ -27,7 +27,6 @@ enum class CoalescingMetricEvent : std::uint8_t {
     FollowerStoredButNoSnapshot,
     FollowerNotCacheable,
     FollowerFailed,
-    FollowerPoolQueueFull,
     FollowerUnaccounted,
     LeaderL1StoreSuccess,   // leader committed to L1 and signaled L1Ready
     LeaderL1StoreFailed,    // leader could not commit to L1 (non-cacheable or no cache_key)
@@ -60,7 +59,6 @@ struct CoalescingMetrics {
     std::atomic<std::uint64_t> follower_stored_but_no_snapshot_total{ 0 };
     std::atomic<std::uint64_t> follower_not_cacheable_total{ 0 };
     std::atomic<std::uint64_t> follower_failed_total{ 0 };
-    std::atomic<std::uint64_t> follower_pool_queue_full_total{ 0 };
     std::atomic<std::uint64_t> follower_unaccounted_total{ 0 };
     std::atomic<std::uint64_t> leader_l1_store_success_total{ 0 };
     std::atomic<std::uint64_t> leader_l1_store_failed_total{ 0 };

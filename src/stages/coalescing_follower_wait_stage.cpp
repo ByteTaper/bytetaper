@@ -4,7 +4,6 @@
 #include "stages/coalescing_follower_wait_stage.h"
 
 #include "coalescing/coalescing_timeout.h"
-#include "coalescing/follower_wait_pool.h"
 #include "coalescing/inflight_registry.h"
 #include "metrics/coalescing_metrics.h"
 #include "stages/l1_cache_lookup_stage.h"
@@ -14,6 +13,38 @@
 #include <cstring>
 
 namespace bytetaper::stages {
+
+static apg::StageOutput try_final_cache_probe(apg::ApgTransformContext& context) {
+    apg::StageOutput l1 = l1_cache_lookup_stage(context);
+    if (l1.result == apg::StageResult::SkipRemaining) {
+        if (context.coalescing_registry != nullptr) {
+            coalescing::registry_remove_waiter(context.coalescing_registry,
+                                               context.coalescing_decision.key);
+        }
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerL1Hit);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerCacheHit);
+        return l1;
+    }
+
+    if (context.l2_cache != nullptr && context.cache_key_ready) {
+        apg::StageOutput l2 = l2_cache_lookup_stage(context);
+        if (l2.result == apg::StageResult::SkipRemaining) {
+            if (context.coalescing_registry != nullptr) {
+                coalescing::registry_remove_waiter(context.coalescing_registry,
+                                                   context.coalescing_decision.key);
+            }
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerL2Hit);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerCacheHit);
+            return l2;
+        }
+    }
+
+    return { apg::StageResult::Continue, "final-cache-probe-miss" };
+}
 
 apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& context) {
     if (context.coalescing_decision.action != coalescing::CoalescingAction::Follower) {
@@ -63,29 +94,10 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
     }
 
     // Step 2: Block until leader completes or timeout.
-    // Try to delegate wait to dedicated pool when available, otherwise direct wait.
-    coalescing::RegistryWaitResult wait_result = coalescing::RegistryWaitResult::Missing;
     coalescing::RegistrySharedResponseOutput shared{};
-    bool submitted = false;
-
-    if (context.follower_wait_pool != nullptr) {
-        submitted = coalescing::follower_wait_pool_submit_and_wait(
-            context.follower_wait_pool, context.coalescing_decision.key, follower_wait_budget_ms,
-            context.coalescing_decision.lifecycle_generation, &shared, &wait_result);
-        if (!submitted) {
-            coalescing::handle_timeout_fallback(context.coalescing_registry,
-                                                context.coalescing_decision);
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::FollowerPoolQueueFull);
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::Fallback);
-            return { apg::StageResult::Continue, "pool-queue-full-fallback" };
-        }
-    } else {
-        wait_result = coalescing::registry_wait_for_completion(
-            context.coalescing_registry, context.coalescing_decision.key, follower_wait_budget_ms,
-            context.coalescing_decision.lifecycle_generation, &shared);
-    }
+    coalescing::RegistryWaitResult wait_result = coalescing::registry_wait_for_completion(
+        context.coalescing_registry, context.coalescing_decision.key, follower_wait_budget_ms,
+        context.coalescing_decision.lifecycle_generation, &shared);
 
     // Step 3: Handle fast-path delivery if snapshot is ready
     if (wait_result == coalescing::RegistryWaitResult::SharedResponseReady) {
@@ -175,45 +187,22 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
 
     // Step 5: Map wait result to granular outcomes and fallback
     if (wait_result == coalescing::RegistryWaitResult::Timeout) {
-        // Check if leader published just as timeout fired (race-edge case)
-        coalescing::RegistrySharedResponseOutput late_check{};
-        auto recheck = coalescing::registry_wait_for_completion(
-            context.coalescing_registry, context.coalescing_decision.key,
-            0, // immediate poll
-            context.coalescing_decision.lifecycle_generation, &late_check);
-
-        if (recheck == coalescing::RegistryWaitResult::SharedResponseReady) {
-            // Leader published just after timeout — consume result
-            context.cache_hit = true;
-            context.cache_layer = "COALESCED";
-            context.should_return_immediate_response = true;
-            context.cached_response.status_code = late_check.status_code;
-            std::strncpy(context.cached_response.content_type, late_check.content_type,
-                         cache::kCacheContentTypeMaxLen - 1);
-            context.cached_response.content_type[cache::kCacheContentTypeMaxLen - 1] = '\0';
-            std::memcpy(context.l2_body_buf, late_check.body, late_check.body_len);
-            context.cached_response.body = context.l2_body_buf;
-            context.cached_response.body_len = late_check.body_len;
-
-            coalescing::registry_remove_waiter(context.coalescing_registry,
-                                               context.coalescing_decision.key);
+        apg::StageOutput probe = try_final_cache_probe(context);
+        if (probe.result == apg::StageResult::SkipRemaining) {
             record_coalescing_event(context.coalescing_metrics,
                                     metrics::CoalescingMetricEvent::FollowerTimeoutAfterPublish);
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::FollowerCacheHit);
-            return { apg::StageResult::SkipRemaining, "coalesced-shared-response-late" };
-        } else {
-            // Genuine timeout — leader not yet done
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::FollowerTimeoutBeforePublish);
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::FollowerTimeout);
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::Fallback);
-            coalescing::handle_timeout_fallback(context.coalescing_registry,
-                                                context.coalescing_decision);
-            return { apg::StageResult::Continue, "timeout-fallback" };
+            return probe;
         }
+
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerTimeoutBeforePublish);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerTimeout);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::Fallback);
+        coalescing::handle_timeout_fallback(context.coalescing_registry,
+                                            context.coalescing_decision);
+        return { apg::StageResult::Continue, "timeout-fallback" };
     } else if (wait_result == coalescing::RegistryWaitResult::Missing) {
         // Entry expired/recycled. Try L1 — leader may have stored before entry was gone.
         apg::StageOutput l1 = l1_cache_lookup_stage(context);
