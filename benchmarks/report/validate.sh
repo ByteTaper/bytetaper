@@ -26,7 +26,7 @@ validate_json_lines() {
         if [[ "$line" =~ $label:[[:space:]]*(.*) ]]; then
             found=$((found + 1))
             local json_str="${BASH_REMATCH[1]}"
-            echo "Checking $label: $json_str"
+            echo "Checking $label: $json_str" >&2
             for field in "$@"; do
                 require_json_field "$json_str" "$field" "$label block in $file"
             done
