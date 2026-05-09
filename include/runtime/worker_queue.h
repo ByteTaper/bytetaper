@@ -139,14 +139,6 @@ struct RuntimeShard {
     bool ready_enqueued = false;
 };
 
-enum class DequeuedJobKind { None, Lookup, Store };
-
-struct DequeuedRuntimeJob {
-    DequeuedJobKind kind = DequeuedJobKind::None;
-    L2LookupJob lookup_job = {};
-    L2StoreJob store_job = {};
-};
-
 // Fixed-capacity worker queue with sharding. Must not be copied or moved after init.
 struct WorkerQueue {
     RuntimeShard shards[kRuntimeShardCount];
@@ -188,8 +180,10 @@ bool worker_queue_execute_one_for_test(WorkerQueue* q);
 /**
  * Test helpers to verify internal pop and requeue/clear.
  */
-bool worker_queue_shard_try_pop_for_test(WorkerQueue* q, std::size_t shard_idx,
-                                         DequeuedRuntimeJob* job_out);
+bool worker_queue_shard_try_pop_lookup_for_test(WorkerQueue* q, std::size_t shard_idx,
+                                                L2LookupJob* job_out);
+bool worker_queue_shard_try_pop_store_for_test(WorkerQueue* q, std::size_t shard_idx,
+                                               L2StoreJob* job_out);
 void worker_queue_shard_requeue_or_clear_for_test(WorkerQueue* q, std::size_t shard_idx);
 
 /**

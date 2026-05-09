@@ -21,9 +21,24 @@ namespace {
 static bool worker_ready_try_push(WorkerQueue* q, std::size_t worker_id, std::size_t shard_id);
 static bool worker_ready_try_pop(WorkerQueue* q, std::size_t worker_id, std::size_t* shard_id_out);
 static bool worker_ready_wait_pop(WorkerQueue* q, std::size_t worker_id, std::size_t* shard_id_out);
-static bool shard_try_pop_one_job(WorkerQueue* q, std::size_t shard_idx,
-                                  DequeuedRuntimeJob* job_out);
+static bool shard_try_pop_lookup_job(WorkerQueue* q, std::size_t shard_idx, L2LookupJob* job_out);
+static bool shard_try_pop_store_job(WorkerQueue* q, std::size_t shard_idx, L2StoreJob* job_out);
 static void shard_requeue_or_clear(WorkerQueue* q, std::size_t shard_idx);
+
+static bool shard_has_pending_lookup(const RuntimeShard& shard) {
+    return shard.lookup_count > 0;
+}
+
+static bool shard_has_pending_store(const RuntimeShard& shard) {
+    return shard.store_count > 0;
+}
+
+static bool shard_has_pending_work(const RuntimeShard& shard) {
+    return shard.lookup_count > 0 || shard.store_count > 0;
+}
+
+static constexpr std::size_t kLookupLaneQuota = 4;
+static constexpr std::size_t kStoreLaneQuota = 1;
 
 static WorkerEvent worker_wait_for_event(WorkerQueue* q, std::size_t worker_id);
 static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size_t shard_id);
@@ -47,7 +62,7 @@ static bool worker_has_no_remaining_work(WorkerQueue* q, std::size_t worker_id) 
         const std::size_t s_idx = q->worker_owned_shards[worker_id][i];
         RuntimeShard& shard = q->shards[s_idx];
         std::scoped_lock lock(shard.mu);
-        if (shard.lookup_count > 0 || shard.store_count > 0) {
+        if (shard_has_pending_work(shard)) {
             return false;
         }
     }
@@ -208,15 +223,27 @@ static WorkerEvent worker_wait_for_event(WorkerQueue* q, std::size_t worker_id) 
 }
 
 static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size_t shard_id) {
-    DequeuedRuntimeJob job;
-    if (shard_try_pop_one_job(q, shard_id, &job)) {
-        if (job.kind == DequeuedJobKind::Lookup) {
-            execute_lookup_job(q, &q->shards[shard_id], job.lookup_job,
+    // Process up to 4 lookup jobs
+    for (std::size_t i = 0; i < kLookupLaneQuota; ++i) {
+        L2LookupJob lookup_job{};
+        if (shard_try_pop_lookup_job(q, shard_id, &lookup_job)) {
+            execute_lookup_job(q, &q->shards[shard_id], lookup_job,
                                q->worker_scratch[worker_id].l2_lookup_body, kAsyncL2MaxBodySize);
-        } else if (job.kind == DequeuedJobKind::Store) {
-            execute_store_job(q, &q->shards[shard_id], job.store_job);
+        } else {
+            break; // No more lookup jobs in this shard
         }
     }
+
+    // Process up to 1 store job
+    for (std::size_t i = 0; i < kStoreLaneQuota; ++i) {
+        L2StoreJob store_job{};
+        if (shard_try_pop_store_job(q, shard_id, &store_job)) {
+            execute_store_job(q, &q->shards[shard_id], store_job);
+        } else {
+            break; // No more store jobs in this shard
+        }
+    }
+
     shard_requeue_or_clear(q, shard_id);
 }
 
@@ -261,8 +288,7 @@ static void worker_loop(WorkerQueue* q, std::size_t worker_id) {
     }
 }
 
-[[maybe_unused]] static bool shard_try_pop_one_job(WorkerQueue* q, std::size_t shard_idx,
-                                                   DequeuedRuntimeJob* job_out) {
+static bool shard_try_pop_lookup_job(WorkerQueue* q, std::size_t shard_idx, L2LookupJob* job_out) {
     if (q == nullptr || shard_idx >= kRuntimeShardCount || job_out == nullptr) {
         return false;
     }
@@ -270,8 +296,7 @@ static void worker_loop(WorkerQueue* q, std::size_t worker_id) {
     std::lock_guard<std::mutex> lock(shard.mu);
 
     if (shard.lookup_count > 0) {
-        job_out->kind = DequeuedJobKind::Lookup;
-        job_out->lookup_job = shard.lookup_slots[shard.lookup_head];
+        *job_out = shard.lookup_slots[shard.lookup_head];
         shard.lookup_head = (shard.lookup_head + 1) % kRuntimeQueueSlotsPerShard;
         shard.lookup_count--;
 
@@ -282,9 +307,18 @@ static void worker_loop(WorkerQueue* q, std::size_t worker_id) {
         return true;
     }
 
+    return false;
+}
+
+static bool shard_try_pop_store_job(WorkerQueue* q, std::size_t shard_idx, L2StoreJob* job_out) {
+    if (q == nullptr || shard_idx >= kRuntimeShardCount || job_out == nullptr) {
+        return false;
+    }
+    RuntimeShard& shard = q->shards[shard_idx];
+    std::lock_guard<std::mutex> lock(shard.mu);
+
     if (shard.store_count > 0) {
-        job_out->kind = DequeuedJobKind::Store;
-        job_out->store_job = shard.store_slots[shard.store_head];
+        *job_out = shard.store_slots[shard.store_head];
         shard.store_head = (shard.store_head + 1) % kRuntimeQueueSlotsPerShard;
         shard.store_count--;
 
@@ -298,7 +332,7 @@ static void worker_loop(WorkerQueue* q, std::size_t worker_id) {
     return false;
 }
 
-[[maybe_unused]] static void shard_requeue_or_clear(WorkerQueue* q, std::size_t shard_idx) {
+static void shard_requeue_or_clear(WorkerQueue* q, std::size_t shard_idx) {
     if (q == nullptr || shard_idx >= kRuntimeShardCount) {
         return;
     }
@@ -306,7 +340,7 @@ static void worker_loop(WorkerQueue* q, std::size_t worker_id) {
     bool should_requeue = false;
     {
         std::lock_guard<std::mutex> lock(shard.mu);
-        if (shard.lookup_count > 0 || shard.store_count > 0) {
+        if (shard_has_pending_work(shard)) {
             shard.ready_enqueued = true;
             should_requeue = true;
         } else {
@@ -620,38 +654,17 @@ bool worker_queue_execute_one_for_test(WorkerQueue* q) {
 
     for (std::size_t i = 0; i < kRuntimeShardCount; ++i) {
         RuntimeShard& shard = q->shards[i];
-        std::unique_lock<std::mutex> lock(shard.mu);
 
-        // Execute lookup job first
-        if (shard.lookup_count > 0) {
-            L2LookupJob job = shard.lookup_slots[shard.lookup_head];
-            shard.lookup_head = (shard.lookup_head + 1) % kRuntimeQueueSlotsPerShard;
-            shard.lookup_count--;
-
-            if (q->resources.runtime_metrics != nullptr) {
-                q->resources.runtime_metrics->worker_queue_depth.fetch_sub(
-                    1, std::memory_order_relaxed);
-            }
-
-            lock.unlock(); // Release lock before executing I/O
-            execute_lookup_job(q, &shard, job, q->worker_scratch[0].l2_lookup_body,
+        L2LookupJob lookup_job{};
+        if (shard_try_pop_lookup_job(q, i, &lookup_job)) {
+            execute_lookup_job(q, &shard, lookup_job, q->worker_scratch[0].l2_lookup_body,
                                kAsyncL2LookupScratchSize);
             return true;
         }
 
-        // Execute store job second
-        if (shard.store_count > 0) {
-            L2StoreJob job = shard.store_slots[shard.store_head];
-            shard.store_head = (shard.store_head + 1) % kRuntimeQueueSlotsPerShard;
-            shard.store_count--;
-
-            if (q->resources.runtime_metrics != nullptr) {
-                q->resources.runtime_metrics->worker_queue_depth.fetch_sub(
-                    1, std::memory_order_relaxed);
-            }
-
-            lock.unlock(); // Release lock before executing I/O
-            execute_store_job(q, &shard, job);
+        L2StoreJob store_job{};
+        if (shard_try_pop_store_job(q, i, &store_job)) {
+            execute_store_job(q, &shard, store_job);
             return true;
         }
     }
@@ -659,9 +672,14 @@ bool worker_queue_execute_one_for_test(WorkerQueue* q) {
     return false;
 }
 
-bool worker_queue_shard_try_pop_for_test(WorkerQueue* q, std::size_t shard_idx,
-                                         DequeuedRuntimeJob* job_out) {
-    return shard_try_pop_one_job(q, shard_idx, job_out);
+bool worker_queue_shard_try_pop_lookup_for_test(WorkerQueue* q, std::size_t shard_idx,
+                                                L2LookupJob* job_out) {
+    return shard_try_pop_lookup_job(q, shard_idx, job_out);
+}
+
+bool worker_queue_shard_try_pop_store_for_test(WorkerQueue* q, std::size_t shard_idx,
+                                               L2StoreJob* job_out) {
+    return shard_try_pop_store_job(q, shard_idx, job_out);
 }
 
 void worker_queue_shard_requeue_or_clear_for_test(WorkerQueue* q, std::size_t shard_idx) {
@@ -676,15 +694,28 @@ bool worker_drain_owned_once(WorkerQueue* q, std::size_t worker_id) {
     const std::size_t owned_count = q->worker_owned_shard_count[worker_id];
     for (std::size_t i = 0; i < owned_count; ++i) {
         const std::size_t s_idx = q->worker_owned_shards[worker_id][i];
-        DequeuedRuntimeJob job;
-        if (shard_try_pop_one_job(q, s_idx, &job)) {
-            worked = true;
-            if (job.kind == DequeuedJobKind::Lookup) {
-                execute_lookup_job(q, &q->shards[s_idx], job.lookup_job,
+
+        // Process up to 4 lookup jobs
+        for (std::size_t j = 0; j < kLookupLaneQuota; ++j) {
+            L2LookupJob lookup_job{};
+            if (shard_try_pop_lookup_job(q, s_idx, &lookup_job)) {
+                worked = true;
+                execute_lookup_job(q, &q->shards[s_idx], lookup_job,
                                    q->worker_scratch[worker_id].l2_lookup_body,
                                    kAsyncL2MaxBodySize);
-            } else if (job.kind == DequeuedJobKind::Store) {
-                execute_store_job(q, &q->shards[s_idx], job.store_job);
+            } else {
+                break;
+            }
+        }
+
+        // Process up to 1 store job
+        for (std::size_t j = 0; j < kStoreLaneQuota; ++j) {
+            L2StoreJob store_job{};
+            if (shard_try_pop_store_job(q, s_idx, &store_job)) {
+                worked = true;
+                execute_store_job(q, &q->shards[s_idx], store_job);
+            } else {
+                break;
             }
         }
     }

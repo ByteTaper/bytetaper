@@ -546,7 +546,7 @@ TEST_F(WorkerQueueTest, SingleReadyQueuePushPerShard) {
     EXPECT_EQ(q_->worker_ready[0].count, 1u);
 }
 
-TEST_F(WorkerQueueTest, LookupPrecedenceInTryPop) {
+TEST_F(WorkerQueueTest, PrecedenceAndTypedPop) {
     WorkerQueueConfig cfg;
     cfg.worker_count = 1;
     ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
@@ -585,19 +585,22 @@ TEST_F(WorkerQueueTest, LookupPrecedenceInTryPop) {
 
     EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), lookup_job));
 
-    // Now try pop. Even though store was enqueued FIRST, lookup must take precedence!
-    DequeuedRuntimeJob popped_job;
-    EXPECT_TRUE(worker_queue_shard_try_pop_for_test(q_.get(), shard_idx, &popped_job));
-    EXPECT_EQ(popped_job.kind, DequeuedJobKind::Lookup);
-    EXPECT_STREQ(popped_job.lookup_job.key, lookup_key.c_str());
+    // Now try pop.
+    // Assert lookup pop returns the lookup job
+    L2LookupJob popped_lookup;
+    EXPECT_TRUE(worker_queue_shard_try_pop_lookup_for_test(q_.get(), shard_idx, &popped_lookup));
+    EXPECT_STREQ(popped_lookup.key, lookup_key.c_str());
 
-    // Next pop should be the store job
-    EXPECT_TRUE(worker_queue_shard_try_pop_for_test(q_.get(), shard_idx, &popped_job));
-    EXPECT_EQ(popped_job.kind, DequeuedJobKind::Store);
-    EXPECT_STREQ(popped_job.store_job.key, "common-shard-key");
+    // Assert subsequent lookup pop returns false
+    EXPECT_FALSE(worker_queue_shard_try_pop_lookup_for_test(q_.get(), shard_idx, &popped_lookup));
 
-    // Third pop should return false (empty)
-    EXPECT_FALSE(worker_queue_shard_try_pop_for_test(q_.get(), shard_idx, &popped_job));
+    // Next pop on store lane should be the store job
+    L2StoreJob popped_store;
+    EXPECT_TRUE(worker_queue_shard_try_pop_store_for_test(q_.get(), shard_idx, &popped_store));
+    EXPECT_STREQ(popped_store.key, "common-shard-key");
+
+    // Third pop on store lane should return false (empty)
+    EXPECT_FALSE(worker_queue_shard_try_pop_store_for_test(q_.get(), shard_idx, &popped_store));
 }
 
 TEST_F(WorkerQueueTest, RequeueAndClearSemantics) {
@@ -643,8 +646,8 @@ TEST_F(WorkerQueueTest, RequeueAndClearSemantics) {
     q_->worker_ready[0].count = 0;
 
     // Pop the first job
-    DequeuedRuntimeJob popped_job;
-    EXPECT_TRUE(worker_queue_shard_try_pop_for_test(q_.get(), shard_idx, &popped_job));
+    L2StoreJob popped_store;
+    EXPECT_TRUE(worker_queue_shard_try_pop_store_for_test(q_.get(), shard_idx, &popped_store));
 
     // Requeue since 1 job remains
     worker_queue_shard_requeue_or_clear_for_test(q_.get(), shard_idx);
@@ -653,7 +656,7 @@ TEST_F(WorkerQueueTest, RequeueAndClearSemantics) {
     EXPECT_EQ(q_->worker_ready[0].shard_ids[q_->worker_ready[0].head], shard_idx);
 
     // Pop the second job (now empty)
-    EXPECT_TRUE(worker_queue_shard_try_pop_for_test(q_.get(), shard_idx, &popped_job));
+    EXPECT_TRUE(worker_queue_shard_try_pop_store_for_test(q_.get(), shard_idx, &popped_store));
 
     // Clear ready queue count again to isolate the next check
     q_->worker_ready[0].head = 0;
@@ -664,6 +667,108 @@ TEST_F(WorkerQueueTest, RequeueAndClearSemantics) {
     worker_queue_shard_requeue_or_clear_for_test(q_.get(), shard_idx);
     EXPECT_FALSE(q_->shards[shard_idx].ready_enqueued);
     EXPECT_EQ(q_->worker_ready[0].count, 0u);
+}
+
+TEST_F(WorkerQueueTest, MixedLaneSchedulingFollowsQuota) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    // Map all test keys to shard 0
+    std::size_t shard_idx = 0;
+
+    // Enqueue 10 lookup jobs to shard 0
+    std::string lookup_base = "lookup-quota-";
+    int enqueued_lookups = 0;
+    for (int i = 0; i < 100000 && enqueued_lookups < 10; ++i) {
+        std::string candidate = lookup_base + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            L2LookupJob lookup_job;
+            std::strcpy(lookup_job.key, candidate.c_str());
+            if (worker_queue_try_enqueue_lookup(q_.get(), lookup_job)) {
+                enqueued_lookups++;
+            }
+        }
+    }
+    ASSERT_EQ(enqueued_lookups, 10);
+
+    // Enqueue 3 store jobs to shard 0
+    std::string store_base = "store-quota-";
+    int enqueued_stores = 0;
+    for (int i = 0; i < 100000 && enqueued_stores < 3; ++i) {
+        std::string candidate = store_base + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            L2StoreJob store_job;
+            std::strcpy(store_job.key, candidate.c_str());
+            store_job.body_len = 0;
+            if (worker_queue_try_enqueue_store(q_.get(), store_job)) {
+                enqueued_stores++;
+            }
+        }
+    }
+    ASSERT_EQ(enqueued_stores, 3);
+
+    // Run exactly 1 event (will process ready shard 0)
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+
+    // Assert that shard 0's lookup_count decreased by exactly 4 (from 10 to 6)
+    EXPECT_EQ(q_->shards[shard_idx].lookup_count, 6u);
+
+    // Assert that shard 0's store_count decreased by exactly 1 (from 3 to 2)
+    EXPECT_EQ(q_->shards[shard_idx].store_count, 2u);
+
+    // Since work remains, ready queue of worker 0 should still contain shard 0
+    EXPECT_EQ(q_->worker_ready[0].count, 1u);
+    EXPECT_EQ(q_->worker_ready[0].shard_ids[q_->worker_ready[0].head], shard_idx);
+}
+
+TEST_F(WorkerQueueTest, StoreStarvationSustainedPressure) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    // Find a target shard
+    std::size_t shard_idx = 0;
+
+    // Enqueue 1 store job to shard_idx
+    std::string store_key;
+    for (int i = 0; i < 100000; ++i) {
+        std::string candidate = "store-key-" + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            store_key = candidate;
+            break;
+        }
+    }
+    ASSERT_FALSE(store_key.empty());
+    L2StoreJob store_job;
+    std::strcpy(store_job.key, store_key.c_str());
+    store_job.body_len = 0;
+    EXPECT_TRUE(worker_queue_try_enqueue_store(q_.get(), store_job));
+
+    // Enqueue 10 lookup jobs to the same shard_idx to simulate sustained lookup load
+    std::string lookup_base = "lookup-sustained-";
+    int enqueued_lookups = 0;
+    for (int i = 0; i < 100000 && enqueued_lookups < 10; ++i) {
+        std::string candidate = lookup_base + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            L2LookupJob lookup_job;
+            std::strcpy(lookup_job.key, candidate.c_str());
+            if (worker_queue_try_enqueue_lookup(q_.get(), lookup_job)) {
+                enqueued_lookups++;
+            }
+        }
+    }
+    ASSERT_EQ(enqueued_lookups, 10);
+
+    // Run exactly one event. It must execute up to 4 lookup jobs AND 1 store job.
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+
+    // Assert that the store job was executed (store_count is now 0)
+    EXPECT_EQ(q_->shards[shard_idx].store_count, 0u);
+    // Assert that lookup_count decreased by exactly 4 (from 10 to 6)
+    EXPECT_EQ(q_->shards[shard_idx].lookup_count, 6u);
 }
 
 TEST_F(WorkerQueueTest, ShutdownDrainsPendingJobs) {
@@ -681,28 +786,45 @@ TEST_F(WorkerQueueTest, ShutdownDrainsPendingJobs) {
     res.l1_cache = l1.get();
     ASSERT_EQ(worker_queue_start(q_.get(), res), nullptr);
 
-    // Enqueue 5 store jobs to the same shard
-    std::string key_base = "drain-test-key-";
     std::size_t target_shard = 0; // We'll map them to shard 0
-    int enqueued_count = 0;
 
-    for (int i = 0; i < 1000 && enqueued_count < 5; ++i) {
-        std::string candidate = key_base + std::to_string(i);
+    // Enqueue 5 lookup jobs to the same shard
+    std::string lookup_base = "drain-lookup-key-";
+    int enqueued_lookups = 0;
+    for (int i = 0; i < 100000 && enqueued_lookups < 5; ++i) {
+        std::string candidate = lookup_base + std::to_string(i);
+        if (expected_shard(candidate) == target_shard) {
+            L2LookupJob job;
+            std::strcpy(job.key, candidate.c_str());
+            if (worker_queue_try_enqueue_lookup(q_.get(), job)) {
+                enqueued_lookups++;
+            }
+        }
+    }
+    ASSERT_EQ(enqueued_lookups, 5);
+
+    // Enqueue 5 store jobs to the same shard
+    std::string store_base = "drain-store-key-";
+    int enqueued_stores = 0;
+    for (int i = 0; i < 100000 && enqueued_stores < 5; ++i) {
+        std::string candidate = store_base + std::to_string(i);
         if (expected_shard(candidate) == target_shard) {
             L2StoreJob job;
             std::strcpy(job.key, candidate.c_str());
             job.body_len = 0;
             if (worker_queue_try_enqueue_store(q_.get(), job)) {
-                enqueued_count++;
+                enqueued_stores++;
             }
         }
     }
-    ASSERT_EQ(enqueued_count, 5);
+    ASSERT_EQ(enqueued_stores, 5);
 
     // Shutdown immediately. This will trigger the worker shutdown draining path.
     worker_queue_shutdown(q_.get());
 
-    // Verify that all 5 store jobs were drained and processed from shard 0 during shutdown
+    // Verify that both lookup and store jobs were drained and processed from shard 0 during
+    // shutdown
+    EXPECT_EQ(q_->shards[target_shard].lookup_count, 0u);
     EXPECT_EQ(q_->shards[target_shard].store_count, 0u);
 }
 
