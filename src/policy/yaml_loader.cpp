@@ -517,6 +517,13 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
                 policy.coalescing.result_ready_retention_ms =
                     coal_node["result_ready_retention_ms"].as<std::uint32_t>();
             }
+            if (coal_node["wait_window_ms"] && coal_node["backend_timeout_ms"]) {
+                result->error =
+                    "coalescing: 'wait_window_ms' and 'backend_timeout_ms' are both set; "
+                    "remove 'wait_window_ms' — it is deprecated and ignored when "
+                    "'backend_timeout_ms' is present";
+                return false;
+            }
             // backward compat: wait_window_ms maps to backend_timeout_ms
             if (coal_node["wait_window_ms"] && !coal_node["backend_timeout_ms"]) {
                 policy.coalescing.backend_timeout_ms =
@@ -537,6 +544,11 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
                                 : 10;
                     }
                 }
+                std::snprintf(result->warning, sizeof(result->warning),
+                              "coalescing: 'wait_window_ms' is deprecated; replace with "
+                              "'backend_timeout_ms: %u' and 'handoff_buffer_ms: %u'",
+                              policy.coalescing.backend_timeout_ms,
+                              policy.coalescing.handoff_buffer_ms);
             }
             if (coal_node["max_waiters_per_key"]) {
                 policy.coalescing.max_waiters_per_key =

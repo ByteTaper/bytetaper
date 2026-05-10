@@ -14,7 +14,9 @@ routes:
           capacity_entries: 8
     coalescing:
       enabled: true
-      wait_window_ms: 100
+      backend_timeout_ms: 100
+      handoff_buffer_ms: 50
+      result_ready_retention_ms: 25
       max_waiters_per_key: 128
 
   - id: "api-v1-observe-proxy"

@@ -147,6 +147,9 @@ int main(int argc, char** argv) {
             bytetaper::observability::logger_shutdown();
             return 3;
         }
+        if (policy_result.warning[0] != '\0') {
+            std::fprintf(stderr, "policy warning: %s\n", policy_result.warning);
+        }
         char buf[512];
         std::snprintf(buf, sizeof(buf), "loaded %zu routes from %s", policy_result.count,
                       args.policy_file);

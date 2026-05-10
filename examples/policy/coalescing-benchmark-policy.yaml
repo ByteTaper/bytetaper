@@ -8,13 +8,12 @@ routes:
     max_response_bytes: 2097152
     coalescing:
       enabled: true
-      wait_window_ms: 50
       max_waiters_per_key: 128
       require_cache_enabled: true
       allow_authenticated: false
-      backend_timeout_ms: 15
-      handoff_buffer_ms: 10
-      result_ready_retention_ms: 10
+      backend_timeout_ms: 50
+      handoff_buffer_ms: 25
+      result_ready_retention_ms: 12
     cache:
       enabled: true
       behavior: store

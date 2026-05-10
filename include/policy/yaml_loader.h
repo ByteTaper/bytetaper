@@ -22,6 +22,7 @@ struct PolicyFileResult {
     char route_id_storage[kMaxRoutes][kMaxRouteIdLen] = {};
     char match_prefix_storage[kMaxRoutes][kMaxPrefixLen] = {};
     RoutePolicy policies[kMaxRoutes] = {};
+    char warning[256] = {}; // non-fatal deprecation notice; empty if none
 };
 
 // Load from YAML file path. Returns false and sets result->error on failure.

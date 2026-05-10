@@ -5,6 +5,8 @@
 
 #include "policy/cache_policy.h"
 
+#include <cstdio>
+
 namespace bytetaper::policy {
 
 const char* validate_coalescing_policy_safe(const CoalescingPolicy& policy,
@@ -26,6 +28,10 @@ const char* validate_coalescing_policy_safe(const CoalescingPolicy& policy,
     if (policy.handoff_buffer_ms > policy.backend_timeout_ms) {
         return "coalescing handoff_buffer_ms exceeds backend_timeout_ms";
     }
+
+    std::fprintf(stderr, "  coalescing.follower_wait_budget_ms = %u + %u = %u\n",
+                 policy.backend_timeout_ms, policy.handoff_buffer_ms,
+                 policy.backend_timeout_ms + policy.handoff_buffer_ms);
 
     // 3. Unsupported mode check (future-proofing)
     if (policy.mode != CoalescingMode::CacheAssisted) {
