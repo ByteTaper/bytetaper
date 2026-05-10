@@ -97,10 +97,11 @@ apg::StageOutput l2_cache_async_store_enqueue_stage(apg::ApgTransformContext& co
 
     job.body_len = context.response_body_len;
 
-    // Coalescing L2 handoff — populated only for leader large-body responses
+    // Coalescing L2 handoff — populated only for leader large-body responses within buffer limits
     if (context.coalescing_decision.action == coalescing::CoalescingAction::Leader &&
         context.coalescing_registry != nullptr &&
-        context.response_body_len > cache::kL1MaxBodySize) {
+        context.response_body_len > cache::kL1MaxBodySize &&
+        context.response_body_len <= apg::ApgTransformContext::kL2BodyBufSize) {
         job.coalescing_handoff_enabled = true;
         job.coalescing_registry = context.coalescing_registry;
         std::strncpy(job.coalescing_key, context.coalescing_decision.key,

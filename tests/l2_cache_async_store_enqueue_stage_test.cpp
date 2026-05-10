@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
+#include "apg/context.h"
 #include "cache/cache_entry.h"
 #include "cache/cache_key.h"
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
+#include "coalescing/inflight_registry.h"
 #include "hash/hash.h"
 #include "metrics/runtime_metrics.h"
 #include "runtime/worker_queue.h"
@@ -152,6 +154,73 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, Large65KBBodyEnqueuesSuccessfully) {
     EXPECT_EQ(output.result, apg::StageResult::Continue);
     EXPECT_STREQ(output.note, "enqueued");
     EXPECT_EQ(metrics.l2_async_store_total.load(), 1);
+}
+
+TEST_F(L2CacheAsyncStoreEnqueueStageTest, CoalescingHandoffEnabledForMediumBody) {
+    auto test_registry = std::make_unique<coalescing::InFlightRegistry>();
+    coalescing::registry_init(test_registry.get());
+
+    ctx.coalescing_registry = test_registry.get();
+    ctx.coalescing_decision.action = coalescing::CoalescingAction::Leader;
+    std::strcpy(ctx.coalescing_decision.key, "test-coalescing-key");
+    ctx.coalescing_decision.lifecycle_generation = 123;
+
+    // Medium body is > kL1MaxBodySize (3072) and <= kL2BodyBufSize (65536)
+    ctx.response_body_len = cache::kL1MaxBodySize + 100;
+    std::string medium_body(ctx.response_body_len, 'x');
+    ctx.response_body = medium_body.c_str();
+
+    cache_key_prepare_stage(ctx);
+    auto output = l2_cache_async_store_enqueue_stage(ctx);
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+    EXPECT_STREQ(output.note, "enqueued");
+
+    // Find the enqueued job and assert
+    bool found = false;
+    for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
+        if (worker_queue.shards[i].store_count > 0) {
+            auto& slot = worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head];
+            EXPECT_TRUE(slot.coalescing_handoff_enabled);
+            EXPECT_EQ(slot.coalescing_registry, test_registry.get());
+            EXPECT_STREQ(slot.coalescing_key, "test-coalescing-key");
+            EXPECT_EQ(slot.lifecycle_generation, 123u);
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(L2CacheAsyncStoreEnqueueStageTest, CoalescingHandoffDisabledForLargeBody) {
+    auto test_registry = std::make_unique<coalescing::InFlightRegistry>();
+    coalescing::registry_init(test_registry.get());
+
+    ctx.coalescing_registry = test_registry.get();
+    ctx.coalescing_decision.action = coalescing::CoalescingAction::Leader;
+    std::strcpy(ctx.coalescing_decision.key, "test-coalescing-key");
+    ctx.coalescing_decision.lifecycle_generation = 456;
+
+    // Large body is > kL2BodyBufSize (65536) and <= kL2MaxBodySize (1048576)
+    ctx.response_body_len = apg::ApgTransformContext::kL2BodyBufSize + 100;
+    std::string large_body(ctx.response_body_len, 'y');
+    ctx.response_body = large_body.c_str();
+
+    cache_key_prepare_stage(ctx);
+    auto output = l2_cache_async_store_enqueue_stage(ctx);
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+    EXPECT_STREQ(output.note, "enqueued");
+
+    // Find the enqueued job and assert
+    bool found = false;
+    for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
+        if (worker_queue.shards[i].store_count > 0) {
+            auto& slot = worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head];
+            EXPECT_FALSE(slot.coalescing_handoff_enabled);
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
 }
 
 TEST_F(L2CacheAsyncStoreEnqueueStageTest, OversizedBodySkipsAsyncL2Store) {

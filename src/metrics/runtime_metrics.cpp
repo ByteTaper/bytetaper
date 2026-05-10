@@ -65,6 +65,18 @@ void record_runtime_event(RuntimeMetrics* metrics, RuntimeMetricEvent event) {
         metrics->l2_to_l1_promotion_skipped_body_too_large_total.fetch_add(
             1, std::memory_order_relaxed);
         break;
+    case RuntimeMetricEvent::L2LookupBodyTooLargeForBuffer:
+        metrics->l2_lookup_body_too_large_for_buffer_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case RuntimeMetricEvent::L2LookupExpired:
+        metrics->l2_lookup_expired_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case RuntimeMetricEvent::L2LookupDecodeError:
+        metrics->l2_lookup_decode_error_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case RuntimeMetricEvent::L2LookupRocksDbError:
+        metrics->l2_lookup_rocksdb_error_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     }
 }
 
@@ -152,7 +164,23 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         "L2-to-L1 "
         "promotions skipped because the body exceeded L1 max capacity.\n"
         "# TYPE bytetaper_runtime_l2_to_l1_promotion_skipped_body_too_large_total counter\n"
-        "bytetaper_runtime_l2_to_l1_promotion_skipped_body_too_large_total %lu\n",
+        "bytetaper_runtime_l2_to_l1_promotion_skipped_body_too_large_total %lu\n"
+        "# HELP bytetaper_runtime_l2_lookup_body_too_large_for_buffer_total Number of "
+        "L2 lookups that failed because the body was too large for the buffer.\n"
+        "# TYPE bytetaper_runtime_l2_lookup_body_too_large_for_buffer_total counter\n"
+        "bytetaper_runtime_l2_lookup_body_too_large_for_buffer_total %lu\n"
+        "# HELP bytetaper_runtime_l2_lookup_expired_total Number of "
+        "L2 lookups that found an expired entry.\n"
+        "# TYPE bytetaper_runtime_l2_lookup_expired_total counter\n"
+        "bytetaper_runtime_l2_lookup_expired_total %lu\n"
+        "# HELP bytetaper_runtime_l2_lookup_decode_error_total Number of "
+        "L2 lookups that failed to decode the entry.\n"
+        "# TYPE bytetaper_runtime_l2_lookup_decode_error_total counter\n"
+        "bytetaper_runtime_l2_lookup_decode_error_total %lu\n"
+        "# HELP bytetaper_runtime_l2_lookup_rocksdb_error_total Number of "
+        "L2 lookups that failed due to a RocksDB error.\n"
+        "# TYPE bytetaper_runtime_l2_lookup_rocksdb_error_total counter\n"
+        "bytetaper_runtime_l2_lookup_rocksdb_error_total %lu\n",
         metrics.worker_enqueue_total.load(std::memory_order_relaxed),
         metrics.worker_enqueue_dropped_total.load(std::memory_order_relaxed),
         metrics.worker_job_executed_total.load(std::memory_order_relaxed),
@@ -171,7 +199,11 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         metrics.l2_async_store_oversized_skipped_total.load(std::memory_order_relaxed),
         metrics.l2_to_l1_promotion_total.load(std::memory_order_relaxed),
         metrics.l2_to_l1_stale_rejected_total.load(std::memory_order_relaxed),
-        metrics.l2_to_l1_promotion_skipped_body_too_large_total.load(std::memory_order_relaxed));
+        metrics.l2_to_l1_promotion_skipped_body_too_large_total.load(std::memory_order_relaxed),
+        metrics.l2_lookup_body_too_large_for_buffer_total.load(std::memory_order_relaxed),
+        metrics.l2_lookup_expired_total.load(std::memory_order_relaxed),
+        metrics.l2_lookup_decode_error_total.load(std::memory_order_relaxed),
+        metrics.l2_lookup_rocksdb_error_total.load(std::memory_order_relaxed));
 
     if (n < 0 || static_cast<std::size_t>(n) >= buf_size) {
         return 0;

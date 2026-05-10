@@ -3,7 +3,9 @@
 
 #include "coalescing/coalescing_completion_handoff.h"
 
+#include "apg/context.h"
 #include "cache/l1_cache.h"
+#include "cache/l2_disk_cache.h"
 
 namespace bytetaper::coalescing {
 
@@ -14,7 +16,13 @@ CoalescingCompletionHandoffTarget decide_coalescing_completion_handoff(std::size
     if (body_len <= cache::kL1MaxBodySize) {
         return CoalescingCompletionHandoffTarget::L1Inline;
     }
-    return CoalescingCompletionHandoffTarget::L2Completion;
+    if (body_len <= apg::ApgTransformContext::kL2BodyBufSize) {
+        return CoalescingCompletionHandoffTarget::L2Completion;
+    }
+    if (body_len <= cache::kL2MaxBodySize) {
+        return CoalescingCompletionHandoffTarget::StoreToL2NoFollowerHandoff;
+    }
+    return CoalescingCompletionHandoffTarget::TooLargeForL2;
 }
 
 } // namespace bytetaper::coalescing

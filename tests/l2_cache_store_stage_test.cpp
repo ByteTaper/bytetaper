@@ -172,4 +172,41 @@ TEST_F(L2CacheStoreStageTest, NonCacheableNotStored) {
     EXPECT_FALSE(cache::l2_get(l2_, key_buf, 0, &retrieved, res_body_buf, sizeof(res_body_buf)));
 }
 
+TEST_F(L2CacheStoreStageTest, L2GetResultClassification) {
+    const char* key = "test-result-key";
+
+    // 1. Missing Key -> Miss
+    cache::CacheEntry retrieved{};
+    char res_body_buf[1024];
+    cache::L2GetResult r =
+        cache::l2_get_result(l2_, key, 1000, &retrieved, res_body_buf, sizeof(res_body_buf));
+    EXPECT_EQ(r, cache::L2GetResult::Miss);
+
+    // Store a valid entry
+    cache::CacheEntry entry{};
+    std::strncpy(entry.key, key, sizeof(entry.key) - 1);
+    entry.status_code = 200;
+    std::strncpy(entry.content_type, "text/plain", sizeof(entry.content_type) - 1);
+    const char body[] = "test-body-content";
+    entry.body = body;
+    entry.body_len = sizeof(body);
+    entry.created_at_epoch_ms = 1000;
+    entry.expires_at_epoch_ms = 2000;
+    ASSERT_TRUE(cache::l2_put(l2_, entry));
+
+    // 2. Body fits buffer -> Hit
+    r = cache::l2_get_result(l2_, key, 1500, &retrieved, res_body_buf, sizeof(res_body_buf));
+    EXPECT_EQ(r, cache::L2GetResult::Hit);
+    EXPECT_EQ(retrieved.body_len, sizeof(body));
+    EXPECT_EQ(std::memcmp(retrieved.body, body, retrieved.body_len), 0);
+
+    // 3. Expired entry -> Expired
+    r = cache::l2_get_result(l2_, key, 2500, &retrieved, res_body_buf, sizeof(res_body_buf));
+    EXPECT_EQ(r, cache::L2GetResult::Expired);
+
+    // 4. Body larger than buffer -> BodyTooLargeForBuffer
+    r = cache::l2_get_result(l2_, key, 1500, &retrieved, res_body_buf, 5);
+    EXPECT_EQ(r, cache::L2GetResult::BodyTooLargeForBuffer);
+}
+
 } // namespace bytetaper::stages

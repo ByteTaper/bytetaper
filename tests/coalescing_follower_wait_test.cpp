@@ -327,4 +327,68 @@ TEST_F(CoalescingFollowerWaitTest, TimeoutFinalProbe_L2Unavailable) {
     EXPECT_EQ(coalescing_metrics->follower_cache_hit_total.load(), 0u);
 }
 
+TEST_F(CoalescingFollowerWaitTest, FollowerTooLargeForHandoffTransition) {
+    auto reg_res = coalescing::registry_register(registry.get(), ctx.coalescing_decision.key,
+                                                 ctx.request_epoch_ms, 50, 128);
+    ctx.coalescing_decision.lifecycle_generation = reg_res.lifecycle_generation;
+
+    // Complete registry with TooLargeForHandoff state
+    coalescing::registry_complete_state_if_generation(
+        registry.get(), ctx.coalescing_decision.key, ctx.coalescing_decision.lifecycle_generation,
+        coalescing::InFlightCompletionState::TooLargeForHandoff, ctx.request_epoch_ms);
+
+    cache_key_prepare_stage(ctx);
+    auto output = coalescing_follower_wait_stage(ctx);
+
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+    EXPECT_STREQ(output.note, "too-large-for-handoff-fallback");
+    EXPECT_FALSE(ctx.cache_hit);
+
+    EXPECT_EQ(coalescing_metrics->follower_too_large_for_handoff_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->fallback_total.load(), 1u);
+}
+
+TEST_F(CoalescingFollowerWaitTest, TimeoutFinalProbe_L2BodyTooLarge) {
+    auto reg_res = coalescing::registry_register(registry.get(), ctx.coalescing_decision.key,
+                                                 ctx.request_epoch_ms, 50, 128);
+    ctx.coalescing_decision.lifecycle_generation = reg_res.lifecycle_generation;
+
+    cache_key_prepare_stage(ctx);
+    ctx.cache_key_ready = true;
+
+    const char* db_path = "/tmp/bytetaper_final_probe_l2_too_large_test";
+    cache::l2_destroy(db_path);
+    auto* l2 = cache::l2_open(db_path);
+    ASSERT_NE(l2, nullptr);
+    ctx.l2_cache = l2;
+
+    // Put a large entry into L2 cache (size > 64 KiB, e.g. 64 KiB + 100 bytes)
+    cache::CacheEntry entry{};
+    std::strcpy(entry.key, ctx.cache_key);
+    std::strcpy(entry.content_type, "application/json");
+
+    std::size_t large_len = apg::ApgTransformContext::kL2BodyBufSize + 100;
+    std::string large_body(large_len, 'x');
+    entry.body = large_body.c_str();
+    entry.body_len = large_len;
+    entry.created_at_epoch_ms = ctx.request_epoch_ms;
+    entry.expires_at_epoch_ms = ctx.request_epoch_ms + 10000;
+    ASSERT_TRUE(cache::l2_put(l2, entry));
+
+    policy.coalescing.backend_timeout_ms = 0;
+    policy.coalescing.handoff_buffer_ms = 0;
+
+    auto output = coalescing_follower_wait_stage(ctx);
+
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+    EXPECT_STREQ(output.note, "timeout-fallback");
+    EXPECT_FALSE(ctx.cache_hit);
+
+    EXPECT_EQ(coalescing_metrics->follower_timeout_l2_body_too_large_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->fallback_total.load(), 1u);
+
+    cache::l2_close(&l2);
+    cache::l2_destroy(db_path);
+}
+
 } // namespace bytetaper::stages

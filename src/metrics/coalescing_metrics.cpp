@@ -97,6 +97,15 @@ void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent e
     case CoalescingMetricEvent::FollowerL2ReadyButMiss:
         metrics->follower_l2_ready_but_miss_total.fetch_add(1, std::memory_order_relaxed);
         break;
+    case CoalescingMetricEvent::LeaderTooLargeForHandoff:
+        metrics->leader_too_large_for_handoff_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerTooLargeForHandoff:
+        metrics->follower_too_large_for_handoff_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerTimeoutL2BodyTooLarge:
+        metrics->follower_timeout_l2_body_too_large_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     }
 }
 
@@ -219,7 +228,22 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "# HELP bytetaper_coalescing_follower_l2_ready_but_miss_total Total number of follower "
         "L2Ready wakeups that missed L2 lookup.\n"
         "# TYPE bytetaper_coalescing_follower_l2_ready_but_miss_total counter\n"
-        "bytetaper_coalescing_follower_l2_ready_but_miss_total %llu\n",
+        "bytetaper_coalescing_follower_l2_ready_but_miss_total %llu\n"
+        "# HELP bytetaper_coalescing_leader_too_large_for_handoff_total Total number of leader "
+        "requests "
+        "where the response body exceeded follower buffer limits but was saved to L2.\n"
+        "# TYPE bytetaper_coalescing_leader_too_large_for_handoff_total counter\n"
+        "bytetaper_coalescing_leader_too_large_for_handoff_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_too_large_for_handoff_total Total number of follower "
+        "requests "
+        "that woke up to find the leader stored the body but it was too large for handoff.\n"
+        "# TYPE bytetaper_coalescing_follower_too_large_for_handoff_total counter\n"
+        "bytetaper_coalescing_follower_too_large_for_handoff_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_timeout_l2_body_too_large_total Total number of "
+        "follower requests "
+        "that timed out, checked L2, but found the body too large for the local buffer.\n"
+        "# TYPE bytetaper_coalescing_follower_timeout_l2_body_too_large_total counter\n"
+        "bytetaper_coalescing_follower_timeout_l2_body_too_large_total %llu\n",
         (unsigned long long) metrics.leader_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_cache_hit_total.load(std::memory_order_relaxed),
@@ -254,6 +278,12 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         (unsigned long long) metrics.follower_l2_ready_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_l2_hit_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_l2_ready_but_miss_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.leader_too_large_for_handoff_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_too_large_for_handoff_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_timeout_l2_body_too_large_total.load(
             std::memory_order_relaxed));
 
     if (written < 0 || static_cast<std::size_t>(written) >= buf_size) {

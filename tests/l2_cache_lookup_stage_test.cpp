@@ -141,7 +141,7 @@ TEST_F(L2CacheLookupStageTest, ExpiredEntryRejected) {
     auto out = l2_cache_lookup_stage(ctx);
     EXPECT_EQ(out.result, apg::StageResult::Continue);
     EXPECT_FALSE(ctx.cache_hit);
-    EXPECT_STREQ(out.note, "l2-miss"); // l2_get returns false on expired
+    EXPECT_STREQ(out.note, "l2-expired");
 }
 
 } // namespace bytetaper::stages

@@ -34,6 +34,11 @@ enum class RuntimeMetricEvent : std::uint8_t {
     L2ToL1Promotion,
     L2ToL1StaleRejected,
     L2ToL1PromotionSkippedBodyTooLarge,
+    // Detailed L2 lookup results
+    L2LookupBodyTooLargeForBuffer,
+    L2LookupExpired,
+    L2LookupDecodeError,
+    L2LookupRocksDbError,
 };
 
 struct RuntimeMetrics {
@@ -64,6 +69,12 @@ struct RuntimeMetrics {
     std::atomic<std::uint64_t> l2_to_l1_promotion_total{ 0 };
     std::atomic<std::uint64_t> l2_to_l1_stale_rejected_total{ 0 };
     std::atomic<std::uint64_t> l2_to_l1_promotion_skipped_body_too_large_total{ 0 };
+
+    // Detailed L2 lookup counters
+    std::atomic<std::uint64_t> l2_lookup_body_too_large_for_buffer_total{ 0 };
+    std::atomic<std::uint64_t> l2_lookup_expired_total{ 0 };
+    std::atomic<std::uint64_t> l2_lookup_decode_error_total{ 0 };
+    std::atomic<std::uint64_t> l2_lookup_rocksdb_error_total{ 0 };
 };
 
 void record_runtime_event(RuntimeMetrics* metrics, RuntimeMetricEvent event);

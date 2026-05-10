@@ -319,6 +319,8 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
             return RegistryWaitResult::L1Ready;
         } else if (entry->state == InFlightCompletionState::L2Ready) {
             return RegistryWaitResult::L2Ready;
+        } else if (entry->state == InFlightCompletionState::TooLargeForHandoff) {
+            return RegistryWaitResult::TooLargeForHandoff;
         } else if (entry->state == InFlightCompletionState::NotCacheable) {
             return RegistryWaitResult::NotCacheable;
         } else if (entry->state == InFlightCompletionState::Failed) {
@@ -366,6 +368,8 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
         return RegistryWaitResult::L1Ready;
     } else if (entry->state == InFlightCompletionState::L2Ready) {
         return RegistryWaitResult::L2Ready;
+    } else if (entry->state == InFlightCompletionState::TooLargeForHandoff) {
+        return RegistryWaitResult::TooLargeForHandoff;
     } else if (entry->state == InFlightCompletionState::NotCacheable) {
         return RegistryWaitResult::NotCacheable;
     } else if (entry->state == InFlightCompletionState::Failed) {

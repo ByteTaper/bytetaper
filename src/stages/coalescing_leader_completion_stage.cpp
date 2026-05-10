@@ -59,6 +59,16 @@ apg::StageOutput coalescing_leader_completion_stage(apg::ApgTransformContext& co
                                          metrics::CoalescingMetricEvent::LeaderL2HandoffPending);
         return { apg::StageResult::Continue, "awaiting-l2-completion" };
 
+    case coalescing::CoalescingCompletionHandoffTarget::StoreToL2NoFollowerHandoff:
+        coalescing::registry_complete_state_if_generation(
+            context.coalescing_registry, context.coalescing_decision.key,
+            context.coalescing_decision.lifecycle_generation,
+            coalescing::InFlightCompletionState::TooLargeForHandoff, now_ms);
+        metrics::record_coalescing_event(context.coalescing_metrics,
+                                         metrics::CoalescingMetricEvent::LeaderTooLargeForHandoff);
+        return { apg::StageResult::Continue, "awaiting-l2-completion-no-handoff" };
+
+    case coalescing::CoalescingCompletionHandoffTarget::TooLargeForL2:
     case coalescing::CoalescingCompletionHandoffTarget::NotCacheable:
         coalescing::registry_complete_state_if_generation(
             context.coalescing_registry, context.coalescing_decision.key,

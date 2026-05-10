@@ -41,6 +41,9 @@ static apg::StageOutput try_final_cache_probe(apg::ApgTransformContext& context)
                                     metrics::CoalescingMetricEvent::FollowerCacheHit);
             return l2;
         }
+        if (l2.note != nullptr && std::strcmp(l2.note, "l2-body-too-large-for-buffer") == 0) {
+            return l2;
+        }
     }
 
     return { apg::StageResult::Continue, "final-cache-probe-miss" };
@@ -194,6 +197,11 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
             return probe;
         }
 
+        if (probe.note != nullptr && std::strcmp(probe.note, "l2-body-too-large-for-buffer") == 0) {
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerTimeoutL2BodyTooLarge);
+        }
+
         record_coalescing_event(context.coalescing_metrics,
                                 metrics::CoalescingMetricEvent::FollowerTimeoutBeforePublish);
         record_coalescing_event(context.coalescing_metrics,
@@ -203,6 +211,16 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
         coalescing::handle_timeout_fallback(context.coalescing_registry,
                                             context.coalescing_decision);
         return { apg::StageResult::Continue, "timeout-fallback" };
+    } else if (wait_result == coalescing::RegistryWaitResult::TooLargeForHandoff) {
+        coalescing::registry_remove_waiter(context.coalescing_registry,
+                                           context.coalescing_decision.key);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerTooLargeForHandoff);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::Fallback);
+        coalescing::handle_timeout_fallback(context.coalescing_registry,
+                                            context.coalescing_decision);
+        return { apg::StageResult::Continue, "too-large-for-handoff-fallback" };
     } else if (wait_result == coalescing::RegistryWaitResult::Missing) {
         // Entry expired/recycled. Try L1 — leader may have stored before entry was gone.
         apg::StageOutput l1 = l1_cache_lookup_stage(context);

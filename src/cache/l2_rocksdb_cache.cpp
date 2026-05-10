@@ -94,30 +94,40 @@ bool l2_put(L2DiskCache* cache, const CacheEntry& entry) {
     return status.ok();
 }
 
-bool l2_get(L2DiskCache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
-            char* body_buf, std::size_t body_buf_size) {
+L2GetResult l2_get_result(L2DiskCache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
+                          char* body_buf, std::size_t body_buf_size) {
     if (!cache || !cache->db || !key || !out)
-        return false;
+        return L2GetResult::Miss;
 
     std::string raw;
-    rocksdb::Status status = cache->db->Get(cache->read_options, key, &raw);
-    if (!status.ok()) {
-        return false;
-    }
+    rocksdb::Status s = cache->db->Get(cache->read_options, key, &raw);
+    if (s.IsNotFound())
+        return L2GetResult::Miss;
+    if (!s.ok())
+        return L2GetResult::RocksDbError;
 
+    // Check body size before decode to detect BodyTooLargeForBuffer early
+    // (cache_entry_decode will also catch this, but we want the explicit enum)
     CacheEntry decoded{};
     bool ok = cache_entry_decode(raw.data(), raw.size(), &decoded, body_buf, body_buf_size);
     if (!ok) {
-        return false;
+        // Distinguish oversized body from decode error by checking raw size heuristic
+        // If raw.size() > body_buf_size + overhead, it's likely oversized
+        if (raw.size() > body_buf_size + kCacheEntryEncodedOverhead)
+            return L2GetResult::BodyTooLargeForBuffer;
+        return L2GetResult::DecodeError;
     }
 
-    // TTL Check
-    if (now_ms > 0 && !cache_ttl_valid(now_ms, decoded.expires_at_epoch_ms)) {
-        return false;
-    }
+    if (now_ms > 0 && !cache_ttl_valid(now_ms, decoded.expires_at_epoch_ms))
+        return L2GetResult::Expired;
 
     *out = decoded;
-    return true;
+    return L2GetResult::Hit;
+}
+
+bool l2_get(L2DiskCache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
+            char* body_buf, std::size_t body_buf_size) {
+    return l2_get_result(cache, key, now_ms, out, body_buf, body_buf_size) == L2GetResult::Hit;
 }
 
 bool l2_remove(L2DiskCache* cache, const char* key) {

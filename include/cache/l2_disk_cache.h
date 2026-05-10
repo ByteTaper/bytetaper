@@ -49,6 +49,18 @@ bool l2_put(L2DiskCache* cache, const CacheEntry& entry);
 bool l2_get(L2DiskCache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
             char* body_buf, std::size_t body_buf_size);
 
+enum class L2GetResult : std::uint8_t {
+    Hit,
+    Miss,
+    Expired,
+    DecodeError,
+    BodyTooLargeForBuffer,
+    RocksDbError,
+};
+
+L2GetResult l2_get_result(L2DiskCache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
+                          char* body_buf, std::size_t body_buf_size);
+
 // Removes the entry for key. Returns true if the key existed.
 bool l2_remove(L2DiskCache* cache, const char* key);
 

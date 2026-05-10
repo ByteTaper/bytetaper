@@ -5,6 +5,7 @@
 
 #include "cache/cache_key.h"
 #include "cache/l2_disk_cache.h"
+#include "metrics/runtime_metrics.h"
 #include "policy/cache_policy.h"
 
 namespace bytetaper::stages {
@@ -37,9 +38,31 @@ apg::StageOutput l2_cache_lookup_stage(apg::ApgTransformContext& context) {
 
     // L2 lookup
     cache::CacheEntry hit{};
-    if (!cache::l2_get(context.l2_cache, key_buf, context.request_epoch_ms, &hit,
-                       context.l2_body_buf, apg::ApgTransformContext::kL2BodyBufSize)) {
+    cache::L2GetResult r =
+        cache::l2_get_result(context.l2_cache, key_buf, context.request_epoch_ms, &hit,
+                             context.l2_body_buf, apg::ApgTransformContext::kL2BodyBufSize);
+
+    switch (r) {
+    case cache::L2GetResult::Hit:
+        break;
+    case cache::L2GetResult::Miss:
         return { apg::StageResult::Continue, "l2-miss" };
+    case cache::L2GetResult::Expired:
+        metrics::record_runtime_event(context.runtime_metrics,
+                                      metrics::RuntimeMetricEvent::L2LookupExpired);
+        return { apg::StageResult::Continue, "l2-expired" };
+    case cache::L2GetResult::DecodeError:
+        metrics::record_runtime_event(context.runtime_metrics,
+                                      metrics::RuntimeMetricEvent::L2LookupDecodeError);
+        return { apg::StageResult::Continue, "l2-decode-error" };
+    case cache::L2GetResult::BodyTooLargeForBuffer:
+        metrics::record_runtime_event(context.runtime_metrics,
+                                      metrics::RuntimeMetricEvent::L2LookupBodyTooLargeForBuffer);
+        return { apg::StageResult::Continue, "l2-body-too-large-for-buffer" };
+    case cache::L2GetResult::RocksDbError:
+        metrics::record_runtime_event(context.runtime_metrics,
+                                      metrics::RuntimeMetricEvent::L2LookupRocksDbError);
+        return { apg::StageResult::Continue, "l2-error" };
     }
 
     // Hit - populate outputs

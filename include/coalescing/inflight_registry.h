@@ -37,8 +37,9 @@ enum class InFlightCompletionState : std::uint8_t {
     Stored = 1,
     NotCacheable = 2,
     Failed = 3,
-    L1Ready = 4, // leader committed response to L1; followers should lookup L1
-    L2Ready = 5, // leader committed response to L2; followers should lookup L2
+    L1Ready = 4,            // leader committed response to L1; followers should lookup L1
+    L2Ready = 5,            // leader committed response to L2; followers should lookup L2
+    TooLargeForHandoff = 6, // leader stored to L2, body too large for follower buffer
 };
 
 static bool is_terminal(InFlightCompletionState s) {
@@ -155,9 +156,10 @@ enum class RegistryWaitResult : std::uint8_t {
     Failed = 3,
     Timeout = 4,
     Missing = 5,
-    L1Ready = 6, // leader marked L1Ready; follower should do L1 lookup
-    Expired = 7, // follower had valid registered generation, but entry replaced/recycled
-    L2Ready = 8, // leader marked L2Ready; follower should do L2 lookup
+    L1Ready = 6,            // leader marked L1Ready; follower should do L1 lookup
+    Expired = 7,            // follower had valid registered generation, but entry replaced/recycled
+    L2Ready = 8,            // leader marked L2Ready; follower should do L2 lookup
+    TooLargeForHandoff = 9, // leader stored to L2, body too large for follower buffer
 };
 
 /**
