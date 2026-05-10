@@ -30,6 +30,8 @@ enum class RuntimeMetricEvent : std::uint8_t {
     // Async L2 store (worker)
     L2StoreSuccess,
     L2StoreError,
+    L2StoreEncodeError,
+    L2StoreBodyTooLarge,
     // L2-to-L1 promotion (worker)
     L2ToL1Promotion,
     L2ToL1StaleRejected,
@@ -64,6 +66,8 @@ struct RuntimeMetrics {
     std::atomic<std::uint64_t> l2_async_store_error_total{ 0 };
     std::atomic<std::uint64_t> l2_async_store_dropped_total{ 0 };
     std::atomic<std::uint64_t> l2_async_store_oversized_skipped_total{ 0 };
+    std::atomic<std::uint64_t> l2_async_store_encode_error_total{ 0 };
+    std::atomic<std::uint64_t> l2_async_store_body_too_large_total{ 0 };
 
     // L2-to-L1 promotion
     std::atomic<std::uint64_t> l2_to_l1_promotion_total{ 0 };

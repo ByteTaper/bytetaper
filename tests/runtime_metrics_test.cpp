@@ -46,12 +46,16 @@ TEST_F(RuntimeMetricsTest, L2StoreEvents) {
     record_runtime_event(&metrics, RuntimeMetricEvent::L2StoreError);
     record_runtime_event(&metrics, RuntimeMetricEvent::L2StoreDropped);
     record_runtime_event(&metrics, RuntimeMetricEvent::L2StoreOversizedSkipped);
+    record_runtime_event(&metrics, RuntimeMetricEvent::L2StoreEncodeError);
+    record_runtime_event(&metrics, RuntimeMetricEvent::L2StoreBodyTooLarge);
 
     EXPECT_EQ(metrics.l2_async_store_total.load(), 1);
     EXPECT_EQ(metrics.l2_async_store_success_total.load(), 1);
     EXPECT_EQ(metrics.l2_async_store_error_total.load(), 1);
     EXPECT_EQ(metrics.l2_async_store_dropped_total.load(), 1);
     EXPECT_EQ(metrics.l2_async_store_oversized_skipped_total.load(), 1);
+    EXPECT_EQ(metrics.l2_async_store_encode_error_total.load(), 1);
+    EXPECT_EQ(metrics.l2_async_store_body_too_large_total.load(), 1);
 }
 
 TEST_F(RuntimeMetricsTest, PromotionEvents) {

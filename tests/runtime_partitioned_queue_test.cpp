@@ -236,4 +236,90 @@ TEST_F(RuntimePartitionedQueueTest, AsyncL2LookupStillPromotesSmallHit) {
     cache::l2_close(&l2);
 }
 
+TEST_F(RuntimePartitionedQueueTest, WorkerPathMetricsStoreSuccess) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    worker_queue_init(q_.get(), cfg);
+    q_->running = true;
+    q_->resources.runtime_metrics = &metrics_;
+
+    cache::L2DiskCache* l2 = cache::l2_open(temp_dir.c_str());
+    ASSERT_NE(l2, nullptr);
+    q_->resources.l2_cache = l2;
+
+    L2StoreJob job;
+    std::strcpy(job.key, "store-metrics-key");
+    const char* test_data = "metrics test body";
+    job.entry.body = test_data;
+    job.entry.body_len = std::strlen(test_data);
+    job.entry.status_code = 200;
+    std::strcpy(job.entry.key, "store-metrics-key");
+    std::strcpy(job.entry.content_type, "text/plain");
+    job.entry.created_at_epoch_ms = 1000;
+    job.entry.expires_at_epoch_ms = 2000000000000LL;
+    job.body_len = std::strlen(test_data);
+
+    EXPECT_TRUE(worker_queue_try_enqueue_store(q_.get(), job));
+    EXPECT_TRUE(worker_queue_execute_one_for_test(q_.get()));
+
+    EXPECT_EQ(metrics_.l2_async_store_success_total.load(), 1u);
+    EXPECT_EQ(metrics_.l2_async_store_encode_error_total.load(), 0u);
+    EXPECT_EQ(metrics_.l2_async_store_body_too_large_total.load(), 0u);
+
+    cache::l2_close(&l2);
+}
+
+TEST_F(RuntimePartitionedQueueTest, WorkerPathMetricsLookupMiss) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    worker_queue_init(q_.get(), cfg);
+    q_->running = true;
+    q_->resources.runtime_metrics = &metrics_;
+
+    cache::L2DiskCache* l2 = cache::l2_open(temp_dir.c_str());
+    ASSERT_NE(l2, nullptr);
+    q_->resources.l2_cache = l2;
+
+    L2LookupJob job;
+    std::strcpy(job.key, "non-existent-lookup-key");
+
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job));
+    EXPECT_TRUE(worker_queue_execute_one_for_test(q_.get()));
+
+    EXPECT_EQ(metrics_.l2_async_lookup_miss_total.load(), 1u);
+    EXPECT_EQ(metrics_.l2_async_lookup_hit_total.load(), 0u);
+
+    cache::l2_close(&l2);
+}
+
+TEST_F(RuntimePartitionedQueueTest, WorkerPathMetricsLookupHit) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    worker_queue_init(q_.get(), cfg);
+    q_->running = true;
+    q_->resources.runtime_metrics = &metrics_;
+
+    cache::L2DiskCache* l2 = cache::l2_open(temp_dir.c_str());
+    ASSERT_NE(l2, nullptr);
+    q_->resources.l2_cache = l2;
+
+    cache::CacheEntry entry{};
+    std::strcpy(entry.key, "hit-lookup-key");
+    entry.body = "hit body";
+    entry.body_len = 8;
+    entry.expires_at_epoch_ms = 2000000000000LL;
+    cache::l2_put(l2, entry);
+
+    L2LookupJob job;
+    std::strcpy(job.key, "hit-lookup-key");
+
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job));
+    EXPECT_TRUE(worker_queue_execute_one_for_test(q_.get()));
+
+    EXPECT_EQ(metrics_.l2_async_lookup_hit_total.load(), 1u);
+    EXPECT_EQ(metrics_.l2_async_lookup_miss_total.load(), 0u);
+
+    cache::l2_close(&l2);
+}
+
 } // namespace bytetaper::runtime

@@ -5,6 +5,7 @@
 #define BYTETAPER_RUNTIME_WORKER_QUEUE_H
 
 #include "cache/cache_entry.h"
+#include "cache/cache_entry_codec.h"
 #include "cache/l2_disk_cache.h"
 
 #include <atomic>
@@ -54,6 +55,9 @@ static constexpr std::size_t kAsyncL2StoreMaxBodySize = cache::kL2MaxBodySize;
 // because L1 bodies are bounded by the same limit as coalescing snapshots.
 static constexpr std::size_t kAsyncL2LookupScratchSize = 65536;
 
+static constexpr std::size_t kAsyncL2StoreEncScratchSize =
+    cache::kCacheEntryEncodedOverhead + cache::kL2MaxBodySize;
+
 // Sharding configuration.
 static constexpr std::size_t kRuntimeShardCount = 256;
 static constexpr std::size_t kRuntimeQueueSlotsPerShard = 16; // 256 * 8 = 2048 total slots
@@ -86,6 +90,7 @@ struct StoreBodyPool {
 
 struct WorkerScratch {
     char l2_lookup_body[kAsyncL2LookupScratchSize] = {};
+    char l2_store_enc_buf[kAsyncL2StoreEncScratchSize] = {};
 };
 
 struct WorkerReadyQueue {

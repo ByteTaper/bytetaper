@@ -115,8 +115,10 @@ static void execute_lookup_job(WorkerQueue* q, RuntimeShard* shard, L2LookupJob&
                                         std::chrono::system_clock::now().time_since_epoch())
                                         .count();
 
-        bool found = cache::l2_get(l2, job.key, now_ms, &hit, scratch_buf, scratch_len);
-        if (found) {
+        const cache::L2GetResult gr =
+            cache::l2_get_result(l2, job.key, now_ms, &hit, scratch_buf, scratch_len);
+        switch (gr) {
+        case cache::L2GetResult::Hit: {
             ::bytetaper::metrics::record_runtime_event(
                 m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupHit);
             if (l1 != nullptr) {
@@ -132,9 +134,30 @@ static void execute_lookup_job(WorkerQueue* q, RuntimeShard* shard, L2LookupJob&
                         m, ::bytetaper::metrics::RuntimeMetricEvent::L2ToL1StaleRejected);
                 }
             }
-        } else {
+            break;
+        }
+        case cache::L2GetResult::Miss:
             ::bytetaper::metrics::record_runtime_event(
                 m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupMiss);
+            break;
+        case cache::L2GetResult::Expired:
+            ::bytetaper::metrics::record_runtime_event(
+                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupExpired);
+            break;
+        case cache::L2GetResult::BodyTooLargeForBuffer:
+            ::bytetaper::metrics::record_runtime_event(
+                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupBodyTooLargeForBuffer);
+            break;
+        case cache::L2GetResult::DecodeError:
+            ::bytetaper::metrics::record_runtime_event(
+                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupDecodeError);
+            break;
+        case cache::L2GetResult::RocksDbError:
+            ::bytetaper::metrics::record_runtime_event(
+                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupRocksDbError);
+            ::bytetaper::metrics::record_runtime_event(
+                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupError);
+            break;
         }
     } else {
         ::bytetaper::metrics::record_runtime_event(
@@ -149,7 +172,8 @@ static void execute_lookup_job(WorkerQueue* q, RuntimeShard* shard, L2LookupJob&
     }
 }
 
-static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& job) {
+static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& job, char* enc_buf,
+                              std::size_t enc_buf_size) {
     ::bytetaper::metrics::record_runtime_event(
         q->resources.runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobExecuted);
 
@@ -163,7 +187,9 @@ static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& j
                                        .count());
 
     if (l2 != nullptr) {
-        if (cache::l2_put(l2, job.entry)) {
+        const cache::L2PutResult pr = cache::l2_put_result(l2, job.entry, enc_buf, enc_buf_size);
+        switch (pr) {
+        case cache::L2PutResult::Stored: {
             ::bytetaper::metrics::record_runtime_event(
                 m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreSuccess);
             if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
@@ -173,7 +199,37 @@ static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& j
                 ::bytetaper::metrics::record_coalescing_event(
                     cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffReady);
             }
-        } else {
+            break;
+        }
+        case cache::L2PutResult::EncodeError: {
+            ::bytetaper::metrics::record_runtime_event(
+                m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreEncodeError);
+            ::bytetaper::metrics::record_runtime_event(
+                m, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+            if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
+                coalescing::registry_complete_state_if_generation(
+                    job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
+                    coalescing::InFlightCompletionState::Failed, now_ms);
+                ::bytetaper::metrics::record_coalescing_event(
+                    cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
+            }
+            break;
+        }
+        case cache::L2PutResult::BodyTooLarge: {
+            ::bytetaper::metrics::record_runtime_event(
+                m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreBodyTooLarge);
+            ::bytetaper::metrics::record_runtime_event(
+                m, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+            if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
+                coalescing::registry_complete_state_if_generation(
+                    job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
+                    coalescing::InFlightCompletionState::Failed, now_ms);
+                ::bytetaper::metrics::record_coalescing_event(
+                    cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
+            }
+            break;
+        }
+        case cache::L2PutResult::StorageError: {
             ::bytetaper::metrics::record_runtime_event(
                 m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreError);
             ::bytetaper::metrics::record_runtime_event(
@@ -185,6 +241,8 @@ static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& j
                 ::bytetaper::metrics::record_coalescing_event(
                     cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
             }
+            break;
+        }
         }
     } else {
         ::bytetaper::metrics::record_runtime_event(
@@ -238,7 +296,9 @@ static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size
     for (std::size_t i = 0; i < kStoreLaneQuota; ++i) {
         L2StoreJob store_job{};
         if (shard_try_pop_store_job(q, shard_id, &store_job)) {
-            execute_store_job(q, &q->shards[shard_id], store_job);
+            execute_store_job(q, &q->shards[shard_id], store_job,
+                              q->worker_scratch[worker_id].l2_store_enc_buf,
+                              kAsyncL2StoreEncScratchSize);
         } else {
             break; // No more store jobs in this shard
         }
@@ -664,7 +724,8 @@ bool worker_queue_execute_one_for_test(WorkerQueue* q) {
 
         L2StoreJob store_job{};
         if (shard_try_pop_store_job(q, i, &store_job)) {
-            execute_store_job(q, &shard, store_job);
+            execute_store_job(q, &shard, store_job, q->worker_scratch[0].l2_store_enc_buf,
+                              kAsyncL2StoreEncScratchSize);
             return true;
         }
     }
@@ -713,7 +774,9 @@ bool worker_drain_owned_once(WorkerQueue* q, std::size_t worker_id) {
             L2StoreJob store_job{};
             if (shard_try_pop_store_job(q, s_idx, &store_job)) {
                 worked = true;
-                execute_store_job(q, &q->shards[s_idx], store_job);
+                execute_store_job(q, &q->shards[s_idx], store_job,
+                                  q->worker_scratch[worker_id].l2_store_enc_buf,
+                                  kAsyncL2StoreEncScratchSize);
             } else {
                 break;
             }

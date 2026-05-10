@@ -42,6 +42,16 @@ bool l2_destroy(const char* path);
 // Stores entry in the database. Returns true on success.
 bool l2_put(L2DiskCache* cache, const CacheEntry& entry);
 
+enum class L2PutResult : std::uint8_t {
+    Stored,
+    EncodeError,
+    BodyTooLarge,
+    StorageError,
+};
+
+L2PutResult l2_put_result(L2DiskCache* cache, const CacheEntry& entry, char* enc_buf,
+                          std::size_t enc_buf_size);
+
 // Retrieves entry by key.
 // body_buf[body_buf_size] is caller-owned storage; out->body points into it on hit.
 // If now_ms > 0 and the stored entry is expired, returns false.

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
+#include "cache/cache_entry_codec.h"
 #include "cache/l2_disk_cache.h"
 
 #include <cstring>
@@ -207,6 +208,44 @@ TEST(L2RocksDbCacheOptionsTest, TtlBehaviorUnchanged) {
 
     l2_close(&cache);
     l2_destroy(path);
+}
+
+TEST_F(L2RocksDbCacheTest, PutResultSuccessAndOversized) {
+    CacheEntry e{};
+    std::strncpy(e.key, "put_res_key", kCacheKeyMaxLen - 1);
+    e.status_code = 200;
+    std::strncpy(e.content_type, "text/plain", kCacheContentTypeMaxLen - 1);
+    const char body[] = "test_put_result";
+    e.body = body;
+    e.body_len = std::strlen(body);
+    e.created_at_epoch_ms = 1000;
+    e.expires_at_epoch_ms = 9999999;
+
+    char enc_buf[2048] = {};
+    L2PutResult pr = l2_put_result(cache_, e, enc_buf, sizeof(enc_buf));
+    EXPECT_EQ(pr, L2PutResult::Stored);
+
+    CacheEntry out{};
+    char body_buf[128] = {};
+    L2GetResult gr = l2_get_result(cache_, e.key, 0, &out, body_buf, sizeof(body_buf));
+    EXPECT_EQ(gr, L2GetResult::Hit);
+
+    // Buffer too small for encoding
+    char tiny_enc_buf[10] = {};
+    L2PutResult pr_tiny = l2_put_result(cache_, e, tiny_enc_buf, sizeof(tiny_enc_buf));
+    EXPECT_EQ(pr_tiny, L2PutResult::BodyTooLarge);
+
+    // Body exceeds limit
+    CacheEntry massive_entry = e;
+    massive_entry.body_len = kL2MaxBodySize + 10;
+    std::vector<char> large_enc_buf(kCacheEntryEncodedOverhead + massive_entry.body_len);
+    L2PutResult pr_massive =
+        l2_put_result(cache_, massive_entry, large_enc_buf.data(), large_enc_buf.size());
+    EXPECT_EQ(pr_massive, L2PutResult::BodyTooLarge);
+
+    // Null cache or buffer
+    L2PutResult pr_null = l2_put_result(nullptr, e, enc_buf, sizeof(enc_buf));
+    EXPECT_EQ(pr_null, L2PutResult::EncodeError);
 }
 
 } // namespace bytetaper::cache

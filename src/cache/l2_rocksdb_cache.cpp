@@ -94,6 +94,32 @@ bool l2_put(L2DiskCache* cache, const CacheEntry& entry) {
     return status.ok();
 }
 
+L2PutResult l2_put_result(L2DiskCache* cache, const CacheEntry& entry, char* enc_buf,
+                          std::size_t enc_buf_size) {
+    if (!cache || !cache->db || !enc_buf)
+        return L2PutResult::EncodeError;
+
+    if (entry.body_len > kL2MaxBodySize)
+        return L2PutResult::BodyTooLarge;
+
+    const std::size_t needed = kCacheEntryEncodedOverhead + entry.body_len;
+    if (enc_buf_size < needed)
+        return L2PutResult::BodyTooLarge;
+
+    const std::size_t written = cache_entry_encode(entry, enc_buf, enc_buf_size);
+    if (written == 0) {
+        return L2PutResult::EncodeError;
+    }
+
+    rocksdb::Status status =
+        cache->db->Put(cache->write_options, entry.key, rocksdb::Slice(enc_buf, written));
+    if (!status.ok()) {
+        return L2PutResult::StorageError;
+    }
+
+    return L2PutResult::Stored;
+}
+
 L2GetResult l2_get_result(L2DiskCache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
                           char* body_buf, std::size_t body_buf_size) {
     if (!cache || !cache->db || !key || !out)

@@ -55,6 +55,12 @@ void record_runtime_event(RuntimeMetrics* metrics, RuntimeMetricEvent event) {
     case RuntimeMetricEvent::L2StoreError:
         metrics->l2_async_store_error_total.fetch_add(1, std::memory_order_relaxed);
         break;
+    case RuntimeMetricEvent::L2StoreEncodeError:
+        metrics->l2_async_store_encode_error_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case RuntimeMetricEvent::L2StoreBodyTooLarge:
+        metrics->l2_async_store_body_too_large_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     case RuntimeMetricEvent::L2ToL1Promotion:
         metrics->l2_to_l1_promotion_total.fetch_add(1, std::memory_order_relaxed);
         break;
@@ -152,6 +158,15 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         "skipped because the response body exceeded the async size limit.\n"
         "# TYPE bytetaper_runtime_l2_async_store_oversized_skipped_total counter\n"
         "bytetaper_runtime_l2_async_store_oversized_skipped_total %lu\n"
+        "# HELP bytetaper_runtime_l2_async_store_encode_error_total Number of background L2 stores "
+        "that failed due to encode errors.\n"
+        "# TYPE bytetaper_runtime_l2_async_store_encode_error_total counter\n"
+        "bytetaper_runtime_l2_async_store_encode_error_total %lu\n"
+        "# HELP bytetaper_runtime_l2_async_store_body_too_large_total Number of background L2 "
+        "stores "
+        "that failed because the body was too large for the encode buffer.\n"
+        "# TYPE bytetaper_runtime_l2_async_store_body_too_large_total counter\n"
+        "bytetaper_runtime_l2_async_store_body_too_large_total %lu\n"
         "# HELP bytetaper_runtime_l2_to_l1_promotion_total Total number of successful cache "
         "promotions from L2 to L1.\n"
         "# TYPE bytetaper_runtime_l2_to_l1_promotion_total counter\n"
@@ -197,6 +212,8 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         metrics.l2_async_store_error_total.load(std::memory_order_relaxed),
         metrics.l2_async_store_dropped_total.load(std::memory_order_relaxed),
         metrics.l2_async_store_oversized_skipped_total.load(std::memory_order_relaxed),
+        metrics.l2_async_store_encode_error_total.load(std::memory_order_relaxed),
+        metrics.l2_async_store_body_too_large_total.load(std::memory_order_relaxed),
         metrics.l2_to_l1_promotion_total.load(std::memory_order_relaxed),
         metrics.l2_to_l1_stale_rejected_total.load(std::memory_order_relaxed),
         metrics.l2_to_l1_promotion_skipped_body_too_large_total.load(std::memory_order_relaxed),
