@@ -26,11 +26,12 @@ protected:
         cache::l1_init(l1_cache.get());
 
         l2_cache = reinterpret_cast<cache::L2DiskCache*>(0x1234);
+        worker_queue = std::make_unique<runtime::WorkerQueue>();
 
         runtime::WorkerQueueConfig wq_config{};
         wq_config.worker_count = 1;
-        runtime::worker_queue_init(&worker_queue, wq_config);
-        worker_queue.running = true;
+        runtime::worker_queue_init(worker_queue.get(), wq_config);
+        worker_queue->running = true;
 
         policy.cache.behavior = policy::CacheBehavior::Store;
         policy.route_id = "test_route";
@@ -38,7 +39,7 @@ protected:
         ctx.matched_policy = &policy;
         ctx.l1_cache = l1_cache.get();
         ctx.l2_cache = l2_cache;
-        ctx.worker_queue = &worker_queue;
+        ctx.worker_queue = worker_queue.get();
         ctx.runtime_metrics = &metrics;
         std::strcpy(ctx.raw_path, "/path");
         ctx.request_method = policy::HttpMethod::Get;
@@ -46,11 +47,12 @@ protected:
 
     void TearDown() override {
         bytetaper::hash::reset_process_hash_seed_for_test();
+        runtime::worker_queue_shutdown(worker_queue.get());
     }
 
     std::unique_ptr<cache::L1Cache> l1_cache;
     cache::L2DiskCache* l2_cache;
-    runtime::WorkerQueue worker_queue;
+    std::unique_ptr<runtime::WorkerQueue> worker_queue;
     metrics::RuntimeMetrics metrics{};
     policy::RoutePolicy policy;
     apg::ApgTransformContext ctx;
@@ -71,7 +73,7 @@ TEST_F(L2CacheAsyncLookupEnqueueStageTest, L1HitSkipsEnqueue) {
     EXPECT_STREQ(output.note, "l1-hit-skip");
     std::size_t total_count = 0;
     for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
-        total_count += worker_queue.shards[i].lookup_count;
+        total_count += worker_queue->shards[i].lookup_count;
     }
     EXPECT_EQ(total_count, 0u);
 }
@@ -85,8 +87,8 @@ TEST_F(L2CacheAsyncLookupEnqueueStageTest, L1MissEnqueuesAndContinues) {
     std::size_t total_count = 0;
     std::size_t pending_count = 0;
     for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
-        total_count += worker_queue.shards[i].lookup_count;
-        pending_count += worker_queue.shards[i].pending_count;
+        total_count += worker_queue->shards[i].lookup_count;
+        pending_count += worker_queue->shards[i].pending_count;
     }
     EXPECT_EQ(total_count, 1u);
     EXPECT_EQ(pending_count, 1u);
@@ -110,7 +112,7 @@ TEST_F(L2CacheAsyncLookupEnqueueStageTest, DuplicateKeySkipped) {
     runtime::L2LookupJob job{};
     std::strcpy(job.key, actual_key);
     for (int i = 0; i < 100; ++i) {
-        runtime::worker_queue_try_enqueue_lookup(&worker_queue, job);
+        runtime::worker_queue_try_enqueue_lookup(worker_queue.get(), job);
     }
 
     cache_key_prepare_stage(ctx);
@@ -120,7 +122,7 @@ TEST_F(L2CacheAsyncLookupEnqueueStageTest, DuplicateKeySkipped) {
 
     std::size_t total_count = 0;
     for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
-        total_count += worker_queue.shards[i].lookup_count;
+        total_count += worker_queue->shards[i].lookup_count;
     }
     EXPECT_EQ(total_count, 1u);
 }
@@ -141,7 +143,7 @@ TEST_F(L2CacheAsyncLookupEnqueueStageTest, QueueFullContinuesPendingCleared) {
         bytetaper::hash::hash_cstr_runtime(actual_key) % runtime::kRuntimeShardCount);
 
     // Directly saturate lookup queue for that shard
-    worker_queue.shards[shard_idx].lookup_count = runtime::kRuntimeQueueSlotsPerShard;
+    worker_queue->shards[shard_idx].lookup_count = runtime::kRuntimeQueueSlotsPerShard;
 
     cache_key_prepare_stage(ctx);
     auto output = l2_cache_async_lookup_enqueue_stage(ctx);
@@ -150,7 +152,7 @@ TEST_F(L2CacheAsyncLookupEnqueueStageTest, QueueFullContinuesPendingCleared) {
 
     std::size_t pending_count = 0;
     for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
-        pending_count += worker_queue.shards[i].pending_count;
+        pending_count += worker_queue->shards[i].pending_count;
     }
     EXPECT_EQ(pending_count, 0u); // Must be cleared on failed enqueue
 }

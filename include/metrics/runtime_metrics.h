@@ -41,6 +41,11 @@ enum class RuntimeMetricEvent : std::uint8_t {
     L2LookupExpired,
     L2LookupDecodeError,
     L2LookupRocksDbError,
+    // New metrics for BT-MAIN-005
+    L2AsyncStoreBodyPoolFull,
+    L2LookupLaneWait,
+    L2StoreLaneWait,
+    WorkerStoreLaneStarvation,
 };
 
 struct RuntimeMetrics {
@@ -79,9 +84,20 @@ struct RuntimeMetrics {
     std::atomic<std::uint64_t> l2_lookup_expired_total{ 0 };
     std::atomic<std::uint64_t> l2_lookup_decode_error_total{ 0 };
     std::atomic<std::uint64_t> l2_lookup_rocksdb_error_total{ 0 };
+
+    // New metrics for BT-MAIN-005
+    std::atomic<std::uint64_t> worker_store_body_pool_full_total{ 0 };
+    std::atomic<std::uint64_t> worker_lookup_lane_wait_ms_total{ 0 };
+    std::atomic<std::uint64_t> worker_lookup_lane_wait_count_total{ 0 };
+    std::atomic<std::uint64_t> worker_store_lane_wait_ms_total{ 0 };
+    std::atomic<std::uint64_t> worker_store_lane_wait_count_total{ 0 };
+    std::atomic<std::uint64_t> worker_store_lane_starvation_total{ 0 };
+    std::atomic<std::uint64_t> worker_store_body_pool_bytes_in_use{ 0 };
 };
 
 void record_runtime_event(RuntimeMetrics* metrics, RuntimeMetricEvent event);
+void record_runtime_wait_ms(RuntimeMetrics* metrics, RuntimeMetricEvent event,
+                            std::uint64_t wait_ms);
 
 std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, char* buf,
                                               std::size_t buf_size);

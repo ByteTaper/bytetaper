@@ -85,9 +85,13 @@ struct CoalescingMetrics {
     std::atomic<std::uint64_t> follower_guardrail_global_limit_total{ 0 };
     std::atomic<std::uint64_t> follower_guardrail_shard_limit_total{ 0 };
     std::atomic<std::uint32_t> active_follower_waiters{ 0 };
+
+    std::atomic<std::uint64_t> l2_handoff_publish_delay_ms_total{ 0 };
+    std::atomic<std::uint64_t> l2_handoff_publish_delay_count_total{ 0 };
 };
 
 void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent event);
+void record_coalescing_handoff_delay_ms(CoalescingMetrics* metrics, std::uint64_t delay_ms);
 
 // Renders all counters as Prometheus text into buf.
 // Returns bytes written (excluding null terminator), or 0 on overflow / null buf.

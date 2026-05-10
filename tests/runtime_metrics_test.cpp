@@ -73,6 +73,13 @@ TEST_F(RuntimeMetricsTest, RenderPrometheusFormat) {
     metrics.worker_queue_depth.store(5);
     metrics.worker_queue_capacity.store(capacity);
     metrics.l2_async_lookup_hit_total.store(7);
+    metrics.worker_store_body_pool_full_total.store(3);
+    metrics.worker_lookup_lane_wait_ms_total.store(120);
+    metrics.worker_lookup_lane_wait_count_total.store(4);
+    metrics.worker_store_lane_wait_ms_total.store(240);
+    metrics.worker_store_lane_wait_count_total.store(6);
+    metrics.worker_store_lane_starvation_total.store(2);
+    metrics.worker_store_body_pool_bytes_in_use.store(4096);
 
     char buf[8192];
     std::size_t len = render_runtime_metrics_prometheus(metrics, buf, sizeof(buf));
@@ -85,10 +92,17 @@ TEST_F(RuntimeMetricsTest, RenderPrometheusFormat) {
         "bytetaper_runtime_worker_queue_capacity " + std::to_string(capacity);
     EXPECT_NE(std::strstr(buf, expected_capacity_str.c_str()), nullptr);
     EXPECT_NE(std::strstr(buf, "bytetaper_runtime_l2_async_lookup_hit_total 7"), nullptr);
+    EXPECT_NE(std::strstr(buf, "bytetaper_worker_store_body_pool_full_total 3"), nullptr);
+    EXPECT_NE(std::strstr(buf, "bytetaper_worker_lookup_lane_wait_ms_avg 30.000"), nullptr);
+    EXPECT_NE(std::strstr(buf, "bytetaper_worker_store_lane_wait_ms_avg 40.000"), nullptr);
+    EXPECT_NE(std::strstr(buf, "bytetaper_worker_store_lane_starvation_total 2"), nullptr);
+    EXPECT_NE(std::strstr(buf, "bytetaper_worker_store_body_pool_bytes_in_use 4096"), nullptr);
 
     // Check HELP/TYPE lines
     EXPECT_NE(std::strstr(buf, "# HELP bytetaper_runtime_worker_queue_depth"), nullptr);
     EXPECT_NE(std::strstr(buf, "# TYPE bytetaper_runtime_worker_queue_depth gauge"), nullptr);
+    EXPECT_NE(std::strstr(buf, "# HELP bytetaper_worker_lookup_lane_wait_ms_avg"), nullptr);
+    EXPECT_NE(std::strstr(buf, "# HELP bytetaper_worker_store_lane_starvation_total"), nullptr);
 }
 
 TEST_F(RuntimeMetricsTest, RenderOverflowSafety) {

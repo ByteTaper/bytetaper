@@ -118,11 +118,25 @@ void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent e
     }
 }
 
+void record_coalescing_handoff_delay_ms(CoalescingMetrics* metrics, std::uint64_t delay_ms) {
+    if (metrics == nullptr) {
+        return;
+    }
+    metrics->l2_handoff_publish_delay_ms_total.fetch_add(delay_ms, std::memory_order_relaxed);
+    metrics->l2_handoff_publish_delay_count_total.fetch_add(1, std::memory_order_relaxed);
+}
+
 std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metrics, char* buf,
                                                  std::size_t buf_size) {
     if (buf == nullptr || buf_size == 0) {
         return 0;
     }
+
+    const std::uint64_t delay_total =
+        metrics.l2_handoff_publish_delay_ms_total.load(std::memory_order_relaxed);
+    const std::uint64_t delay_count =
+        metrics.l2_handoff_publish_delay_count_total.load(std::memory_order_relaxed);
+    const double delay_avg = delay_count > 0 ? static_cast<double>(delay_total) / delay_count : 0.0;
 
     int written = std::snprintf(
         buf, buf_size,
@@ -269,7 +283,11 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "# HELP bytetaper_coalescing_active_follower_waiters Current number of active follower "
         "threads waiting on the registry.\n"
         "# TYPE bytetaper_coalescing_active_follower_waiters gauge\n"
-        "bytetaper_coalescing_active_follower_waiters %u\n",
+        "bytetaper_coalescing_active_follower_waiters %u\n"
+        "# HELP bytetaper_coalescing_l2_handoff_publish_delay_ms_avg Average delay in milliseconds "
+        "to publish L2Ready handoff.\n"
+        "# TYPE bytetaper_coalescing_l2_handoff_publish_delay_ms_avg gauge\n"
+        "bytetaper_coalescing_l2_handoff_publish_delay_ms_avg %.3f\n",
         (unsigned long long) metrics.leader_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_cache_hit_total.load(std::memory_order_relaxed),
@@ -317,7 +335,7 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
             std::memory_order_relaxed),
         (unsigned long long) metrics.follower_guardrail_shard_limit_total.load(
             std::memory_order_relaxed),
-        (unsigned int) metrics.active_follower_waiters.load(std::memory_order_relaxed));
+        (unsigned int) metrics.active_follower_waiters.load(std::memory_order_relaxed), delay_avg);
 
     if (written < 0 || static_cast<std::size_t>(written) >= buf_size) {
         return 0;

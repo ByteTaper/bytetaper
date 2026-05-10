@@ -3,7 +3,9 @@
 
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
+#include "coalescing/inflight_registry.h"
 #include "hash/hash.h"
+#include "metrics/coalescing_metrics.h"
 #include "metrics/runtime_metrics.h"
 #include "runtime/worker_queue.h"
 
@@ -31,6 +33,7 @@ protected:
     }
 
     void TearDown() override {
+        worker_queue_shutdown(q_.get());
         bytetaper::hash::reset_process_hash_seed_for_test();
         std::filesystem::remove_all(temp_dir);
     }
@@ -105,8 +108,8 @@ TEST_F(RuntimePartitionedQueueTest, AsyncL2StoreStillOwnsBodyMemory) {
     L2StoreJob& slot = q_->shards[shard_idx].store_slots[q_->shards[shard_idx].store_head];
     std::uint32_t body_slot = slot.body_slot;
 
-    EXPECT_STREQ(q_->shards[shard_idx].body_pool.heap_bodies[body_slot], test_data);
-    EXPECT_EQ(slot.entry.body, q_->shards[shard_idx].body_pool.heap_bodies[body_slot]);
+    EXPECT_STREQ(q_->shards[shard_idx].body_pool.bodies[body_slot], test_data);
+    EXPECT_EQ(slot.entry.body, q_->shards[shard_idx].body_pool.bodies[body_slot]);
 }
 
 TEST_F(RuntimePartitionedQueueTest, AsyncL2LookupStalePromotionStillRejected) {
@@ -265,6 +268,53 @@ TEST_F(RuntimePartitionedQueueTest, WorkerPathMetricsStoreSuccess) {
     EXPECT_EQ(metrics_.l2_async_store_success_total.load(), 1u);
     EXPECT_EQ(metrics_.l2_async_store_encode_error_total.load(), 0u);
     EXPECT_EQ(metrics_.l2_async_store_body_too_large_total.load(), 0u);
+
+    cache::l2_close(&l2);
+}
+
+TEST_F(RuntimePartitionedQueueTest, CoalescingHandoffDelayRecordedOnL2Ready) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    worker_queue_init(q_.get(), cfg);
+    q_->running = true;
+    q_->resources.runtime_metrics = &metrics_;
+
+    bytetaper::metrics::CoalescingMetrics coalescing_metrics{};
+    q_->resources.coalescing_metrics = &coalescing_metrics;
+
+    cache::L2DiskCache* l2 = cache::l2_open(temp_dir.c_str());
+    ASSERT_NE(l2, nullptr);
+    q_->resources.l2_cache = l2;
+
+    auto registry = std::make_unique<coalescing::InFlightRegistry>();
+    coalescing::registry_init(registry.get());
+    const char* handoff_key = "coalescing-handoff-key";
+    const coalescing::RegistryRegistrationResult reg_res =
+        coalescing::registry_register(registry.get(), handoff_key, 1000, 1000, 10);
+    ASSERT_EQ(reg_res.role, coalescing::InFlightRole::Leader);
+
+    L2StoreJob job;
+    std::strcpy(job.key, "coalescing-store-key");
+    std::strcpy(job.entry.key, "coalescing-store-key");
+    std::strcpy(job.entry.content_type, "text/plain");
+    const char* body = "coalescing body";
+    job.entry.body = body;
+    job.entry.body_len = std::strlen(body);
+    job.entry.status_code = 200;
+    job.entry.created_at_epoch_ms = 1000;
+    job.entry.expires_at_epoch_ms = 2000000000000LL;
+    job.body_len = std::strlen(body);
+    job.coalescing_handoff_enabled = true;
+    job.coalescing_registry = registry.get();
+    std::strcpy(job.coalescing_key, handoff_key);
+    job.lifecycle_generation = reg_res.lifecycle_generation;
+
+    EXPECT_TRUE(worker_queue_try_enqueue_store(q_.get(), job));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    EXPECT_TRUE(worker_queue_execute_one_for_test(q_.get()));
+
+    EXPECT_EQ(coalescing_metrics.leader_l2_handoff_ready_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics.l2_handoff_publish_delay_count_total.load(), 1u);
 
     cache::l2_close(&l2);
 }

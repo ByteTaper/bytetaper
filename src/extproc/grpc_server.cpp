@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <grpcpp/grpcpp.h>
 #include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -473,7 +474,7 @@ public:
     cache::L2DiskCache* l2_cache = nullptr;
     metrics::MetricsRegistry* metrics_registry = nullptr;
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
-    runtime::WorkerQueue worker_queue{};
+    std::unique_ptr<runtime::WorkerQueue> worker_queue;
     policy::CompiledRouteMatcher route_matcher{};
     bool route_matcher_ready = false;
 
@@ -593,7 +594,7 @@ public:
                             &metrics_registry->coalescing_metrics;
                         filter_state.context.runtime_metrics = &metrics_registry->runtime_metrics;
                     }
-                    filter_state.context.worker_queue = &worker_queue;
+                    filter_state.context.worker_queue = worker_queue.get();
 
                     observability::TraceSpanScope cache_lookup_span{};
                     if (trace_enabled) {
@@ -1068,6 +1069,36 @@ struct WorkerQueueStartGuard {
     }
 };
 
+std::size_t derive_async_store_max_body_size(const policy::RoutePolicy* policies,
+                                             std::size_t policy_count) {
+    std::size_t max_body_size = 0;
+    bool has_unlimited_policy = false;
+    if (policies == nullptr) {
+        return runtime::kAsyncL2StoreDefaultMaxBodySize;
+    }
+    for (std::size_t i = 0; i < policy_count; ++i) {
+        const std::uint32_t route_limit = policies[i].max_response_bytes;
+        if (route_limit == 0) {
+            has_unlimited_policy = true;
+            continue;
+        }
+        std::size_t capped_limit = route_limit;
+        if (capped_limit > runtime::kAsyncL2StoreAbsoluteMaxBodySize) {
+            capped_limit = runtime::kAsyncL2StoreAbsoluteMaxBodySize;
+        }
+        if (capped_limit > max_body_size) {
+            max_body_size = capped_limit;
+        }
+    }
+    if (max_body_size == 0) {
+        return runtime::kAsyncL2StoreDefaultMaxBodySize;
+    }
+    if (has_unlimited_policy && max_body_size < runtime::kAsyncL2StoreDefaultMaxBodySize) {
+        return runtime::kAsyncL2StoreDefaultMaxBodySize;
+    }
+    return max_body_size;
+}
+
 } // namespace
 
 bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle) {
@@ -1104,10 +1135,18 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     impl->service.metrics_registry = config.metrics_registry;
     impl->service.coalescing_registry = config.coalescing_registry;
 
+    // Allocate worker queue on heap and handle OOM cleanly
+    impl->service.worker_queue.reset(new (std::nothrow) runtime::WorkerQueue{});
+    if (!impl->service.worker_queue) {
+        return false;
+    }
+
     // Initialize background worker resources
     runtime::WorkerQueueConfig wq_config{};
     wq_config.worker_count = 2;
-    const char* wq_err = runtime::worker_queue_init(&impl->service.worker_queue, wq_config);
+    wq_config.async_store_max_body_size =
+        derive_async_store_max_body_size(config.policies, config.policy_count);
+    const char* wq_err = runtime::worker_queue_init(impl->service.worker_queue.get(), wq_config);
     if (wq_err != nullptr) {
         return false;
     }
@@ -1120,11 +1159,11 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     wq_res.coalescing_metrics =
         config.metrics_registry ? &config.metrics_registry->coalescing_metrics : nullptr;
     WorkerQueueStartGuard worker_guard{};
-    wq_err = runtime::worker_queue_start(&impl->service.worker_queue, wq_res);
+    wq_err = runtime::worker_queue_start(impl->service.worker_queue.get(), wq_res);
     if (wq_err != nullptr) {
         return false;
     }
-    worker_guard.arm(&impl->service.worker_queue);
+    worker_guard.arm(impl->service.worker_queue.get());
 
     impl->server = builder.BuildAndStart();
     if (!impl->server) {
@@ -1161,7 +1200,7 @@ void stop_grpc_server(GrpcServerHandle* handle) {
         impl->server->Wait();
     }
 
-    runtime::worker_queue_shutdown(&impl->service.worker_queue);
+    runtime::worker_queue_shutdown(impl->service.worker_queue.get());
 
     delete impl;
     handle->impl = nullptr;

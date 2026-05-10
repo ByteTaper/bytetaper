@@ -10,6 +10,7 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 #include <thread>
 
 using namespace bytetaper::runtime;
@@ -23,6 +24,7 @@ protected:
     }
 
     void TearDown() override {
+        worker_queue_shutdown(q_.get());
         bytetaper::hash::reset_process_hash_seed_for_test();
     }
 
@@ -34,6 +36,21 @@ protected:
     std::uint32_t expected_shard(const char* key) const {
         return static_cast<std::uint32_t>(bytetaper::hash::hash_cstr_runtime(key) %
                                           kRuntimeShardCount);
+    }
+
+    std::string key_for_shard(const char* prefix, std::size_t shard_idx, int ordinal) const {
+        int seen = 0;
+        for (int i = 0; i < 100000; ++i) {
+            std::string candidate = std::string(prefix) + std::to_string(i);
+            if (expected_shard(candidate) != shard_idx) {
+                continue;
+            }
+            if (seen == ordinal) {
+                return candidate;
+            }
+            seen++;
+        }
+        return {};
     }
 
     std::unique_ptr<WorkerQueue> q_;
@@ -87,10 +104,8 @@ TEST_F(WorkerQueueTest, QueueFullReturnsFalse) {
     job.entry.body = "data";
     job.body_len = 4;
 
-    // shard capacity is kRuntimeQueueSlotsPerShard
-    for (std::size_t i = 0; i < kRuntimeQueueSlotsPerShard; ++i) {
-        EXPECT_TRUE(worker_queue_try_enqueue_store(q_.get(), job)) << "Failed at index " << i;
-    }
+    const std::uint32_t shard_idx = expected_shard("test-key");
+    q_->shards[shard_idx].store_count = kRuntimeQueueSlotsPerShard;
 
     EXPECT_FALSE(worker_queue_try_enqueue_store(q_.get(), job));
     EXPECT_EQ(metrics_.worker_enqueue_dropped_total.load(), 1u);
@@ -138,9 +153,39 @@ TEST_F(WorkerQueueTest, BodyPointerFixedInSlot) {
     // Check that slot entry body points inside shard body pool
     std::uint32_t slot_idx = q_->shards[found_shard].store_slots[0].body_slot;
     EXPECT_EQ(q_->shards[found_shard].store_slots[0].entry.body,
-              q_->shards[found_shard].body_pool.heap_bodies[slot_idx]);
+              q_->shards[found_shard].body_pool.bodies[slot_idx]);
     EXPECT_NE(q_->shards[found_shard].store_slots[0].entry.body, original_body);
-    EXPECT_STREQ(q_->shards[found_shard].body_pool.heap_bodies[slot_idx], original_body);
+    EXPECT_STREQ(q_->shards[found_shard].body_pool.bodies[slot_idx], original_body);
+}
+
+TEST_F(WorkerQueueTest, ConfiguredAsyncStoreMaxBodySizeControlsAdmission) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    cfg.async_store_max_body_size = 96 * 1024;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+    q_->resources.runtime_metrics = &metrics_;
+
+    std::string allowed_body(cfg.async_store_max_body_size, 'a');
+    L2StoreJob allowed_job;
+    std::strcpy(allowed_job.key, "configured-cap-allowed");
+    allowed_job.entry.body = allowed_body.c_str();
+    allowed_job.body_len = allowed_body.size();
+    ASSERT_TRUE(worker_queue_try_enqueue_store(q_.get(), allowed_job));
+
+    const std::uint32_t shard_idx = expected_shard("configured-cap-allowed");
+    ASSERT_EQ(q_->shards[shard_idx].store_count, 1u);
+    const std::uint32_t body_slot = q_->shards[shard_idx].store_slots[0].body_slot;
+    EXPECT_EQ(q_->shards[shard_idx].body_pool.body_sizes[body_slot], cfg.async_store_max_body_size);
+    EXPECT_EQ(q_->shards[shard_idx].body_pool.bodies[body_slot][0], 'a');
+
+    std::string oversized_body(cfg.async_store_max_body_size + 1, 'b');
+    L2StoreJob oversized_job;
+    std::strcpy(oversized_job.key, "configured-cap-oversized");
+    oversized_job.entry.body = oversized_body.c_str();
+    oversized_job.body_len = oversized_body.size();
+    EXPECT_FALSE(worker_queue_try_enqueue_store(q_.get(), oversized_job));
+    EXPECT_EQ(metrics_.l2_async_store_oversized_skipped_total.load(), 1u);
 }
 
 TEST_F(WorkerQueueTest, InitInvalidWorkerCountZero) {
@@ -964,4 +1009,106 @@ TEST_F(WorkerQueueTest, DrainOwnedOnceDoesNotBlockOnEmpty) {
 
     auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     EXPECT_LT(duration_ms, 5);
+}
+
+TEST_F(WorkerQueueTest, StoreBodyPoolFullAdmission) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    {
+        q_->running = true;
+        q_->resources.runtime_metrics = &metrics_;
+    }
+
+    L2StoreJob job;
+    const std::uint32_t target_shard = expected_shard("key-pool-test");
+    job.entry.body = "payload";
+    job.body_len = 7;
+
+    for (std::size_t i = 0; i < kRuntimeQueueSlotsPerShard; ++i) {
+        const std::string coll_key = key_for_shard("key-pool-", target_shard, static_cast<int>(i));
+        ASSERT_FALSE(coll_key.empty());
+        std::strcpy(job.key, coll_key.c_str());
+        ASSERT_TRUE(worker_queue_try_enqueue_store(q_.get(), job)) << "Failed at index " << i;
+    }
+
+    const std::string overflow_key = key_for_shard("overflow-", target_shard, 0);
+    ASSERT_FALSE(overflow_key.empty());
+    std::strcpy(job.key, overflow_key.c_str());
+    EXPECT_FALSE(worker_queue_try_enqueue_store(q_.get(), job));
+    EXPECT_EQ(metrics_.worker_store_body_pool_full_total.load(), 1u);
+
+    EXPECT_TRUE(worker_queue_execute_one_for_test(q_.get()));
+    EXPECT_EQ(q_->shards[target_shard].store_count, kRuntimeQueueSlotsPerShard - 1);
+
+    EXPECT_TRUE(worker_queue_try_enqueue_store(q_.get(), job));
+}
+
+TEST_F(WorkerQueueTest, WorkerLaneWaitTelemetry) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    {
+        q_->running = true;
+        q_->resources.runtime_metrics = &metrics_;
+    }
+
+    L2LookupJob lookup_job{};
+    std::strcpy(lookup_job.key, "lookup-wait-test");
+    lookup_job.enqueued_at_ms = 100;
+
+    ASSERT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), lookup_job));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    EXPECT_TRUE(worker_queue_execute_one_for_test(q_.get()));
+
+    EXPECT_EQ(metrics_.worker_lookup_lane_wait_count_total.load(), 1u);
+    EXPECT_GT(metrics_.worker_lookup_lane_wait_ms_total.load(), 0u);
+
+    L2StoreJob store_job{};
+    std::strcpy(store_job.key, "store-wait-test");
+    store_job.enqueued_at_ms = 100;
+    ASSERT_TRUE(worker_queue_try_enqueue_store(q_.get(), store_job));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    EXPECT_TRUE(worker_queue_execute_one_for_test(q_.get()));
+
+    EXPECT_EQ(metrics_.worker_store_lane_wait_count_total.load(), 1u);
+    EXPECT_GT(metrics_.worker_store_lane_wait_ms_total.load(), 0u);
+}
+
+TEST_F(WorkerQueueTest, StoreLaneStarvationDetection) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    {
+        q_->running = true;
+        q_->resources.runtime_metrics = &metrics_;
+    }
+
+    // Map keys to shard 0
+    std::size_t target_shard = 0;
+
+    for (int i = 0; i < 10; ++i) {
+        const std::string candidate = key_for_shard("lookup-starve-", target_shard, i);
+        ASSERT_FALSE(candidate.empty());
+        L2LookupJob lookup_job;
+        std::strcpy(lookup_job.key, candidate.c_str());
+        ASSERT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), lookup_job));
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        const std::string store_key = key_for_shard("store-starve-", target_shard, i);
+        ASSERT_FALSE(store_key.empty());
+        L2StoreJob store_job;
+        std::strcpy(store_job.key, store_key.c_str());
+        store_job.body_len = 0;
+        ASSERT_TRUE(worker_queue_try_enqueue_store(q_.get(), store_job));
+    }
+
+    EXPECT_EQ(metrics_.worker_store_lane_starvation_total.load(), 0u);
+
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+
+    EXPECT_EQ(q_->shards[target_shard].lookup_count, 6u);
+    EXPECT_EQ(q_->shards[target_shard].store_count, 2u);
+    EXPECT_EQ(metrics_.worker_store_lane_starvation_total.load(), 1u);
 }

@@ -27,48 +27,49 @@ public:
         l1_cache = std::make_unique<cache::L1Cache>();
         cache::l1_init(l1_cache.get());
         metrics_reg = std::make_unique<metrics::MetricsRegistry>();
+        worker_queue = std::make_unique<WorkerQueue>();
 
         WorkerQueueConfig config{};
         config.worker_count = 2;
-        worker_queue_init(&worker_queue, config);
+        worker_queue_init(worker_queue.get(), config);
 
         resources.l1_cache = l1_cache.get();
         resources.runtime_metrics = &metrics_reg->runtime_metrics;
     }
 
     void TearDown() override {
-        worker_queue_shutdown(&worker_queue);
+        worker_queue_shutdown(worker_queue.get());
     }
 
-    WorkerQueue worker_queue;
+    std::unique_ptr<WorkerQueue> worker_queue;
     std::unique_ptr<cache::L1Cache> l1_cache;
     std::unique_ptr<metrics::MetricsRegistry> metrics_reg;
     WorkerQueueResources resources;
 };
 
 TEST_F(WorkerQueueConcurrencyTest, ShutdownDoesNotHang) {
-    worker_queue_start(&worker_queue, resources);
+    worker_queue_start(worker_queue.get(), resources);
 
     // Enqueue some work
     for (int i = 0; i < 4; ++i) {
         L2LookupJob job{};
         std::string key = "key" + std::to_string(i);
         ::strncpy(job.key, key.c_str(), sizeof(job.key) - 1);
-        worker_queue_try_enqueue_lookup(&worker_queue, job);
+        worker_queue_try_enqueue_lookup(worker_queue.get(), job);
     }
 
     // Shutdown should join threads and complete
     // GTest will timeout if it hangs
-    worker_queue_shutdown(&worker_queue);
-    EXPECT_FALSE(worker_queue.running);
+    worker_queue_shutdown(worker_queue.get());
+    EXPECT_FALSE(worker_queue->running);
 }
 
 TEST_F(WorkerQueueConcurrencyTest, ShutdownStopsEnqueueBeforeJoin) {
-    worker_queue_start(&worker_queue, resources);
-    worker_queue_shutdown(&worker_queue);
+    worker_queue_start(worker_queue.get(), resources);
+    worker_queue_shutdown(worker_queue.get());
 
     L2LookupJob job{};
-    EXPECT_FALSE(worker_queue_try_enqueue_lookup(&worker_queue, job));
+    EXPECT_FALSE(worker_queue_try_enqueue_lookup(worker_queue.get(), job));
 }
 
 TEST_F(WorkerQueueConcurrencyTest, WorkerDoesNotReadExpiredRequestPointer) {
@@ -82,8 +83,9 @@ TEST_F(WorkerQueueConcurrencyTest, WorkerDoesNotReadExpiredRequestPointer) {
     job.entry.body = source_body;
     job.body_len = sizeof(source_body);
 
-    worker_queue_start(&worker_queue, resources);
-    worker_queue_try_enqueue_store(&worker_queue, job);
+    worker_queue->resources = resources;
+    worker_queue->running = true;
+    worker_queue_try_enqueue_store(worker_queue.get(), job);
 
     // Simulate source buffer being overwritten/reused
     std::memset(source_body, 0xBB, sizeof(source_body));
@@ -92,11 +94,12 @@ TEST_F(WorkerQueueConcurrencyTest, WorkerDoesNotReadExpiredRequestPointer) {
     {
         bool found = false;
         for (std::size_t i = 0; i < kRuntimeShardCount; ++i) {
-            std::lock_guard<std::mutex> lock(worker_queue.shards[i].mu);
-            if (worker_queue.shards[i].store_count > 0) {
-                std::uint32_t body_slot =
-                    worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head].body_slot;
-                EXPECT_EQ(worker_queue.shards[i].body_pool.heap_bodies[body_slot][0], (char) 0xAA);
+            std::lock_guard<std::mutex> lock(worker_queue->shards[i].mu);
+            if (worker_queue->shards[i].store_count > 0) {
+                std::uint32_t body_slot = worker_queue->shards[i]
+                                              .store_slots[worker_queue->shards[i].store_head]
+                                              .body_slot;
+                EXPECT_EQ(worker_queue->shards[i].body_pool.bodies[body_slot][0], (char) 0xAA);
                 found = true;
                 break;
             }
@@ -111,7 +114,7 @@ TEST_F(WorkerQueueConcurrencyTest, L1StoreBeforeLeaderCompletion) {
     ctx.cache_metrics = &this->metrics_reg->cache_metrics;
     ctx.coalescing_metrics = &this->metrics_reg->coalescing_metrics;
     ctx.runtime_metrics = &this->metrics_reg->runtime_metrics;
-    ctx.worker_queue = &this->worker_queue;
+    ctx.worker_queue = this->worker_queue.get();
     ctx.response_status_code = 200;
     ctx.request_epoch_ms = 1000;
 
@@ -162,7 +165,7 @@ TEST_F(WorkerQueueConcurrencyTest, FollowerCanReadL1AfterLeaderCompletion) {
     leader_ctx.cache_metrics = &this->metrics_reg->cache_metrics;
     leader_ctx.coalescing_metrics = &this->metrics_reg->coalescing_metrics;
     leader_ctx.runtime_metrics = &this->metrics_reg->runtime_metrics;
-    leader_ctx.worker_queue = &this->worker_queue;
+    leader_ctx.worker_queue = this->worker_queue.get();
     leader_ctx.response_status_code = 200;
     leader_ctx.request_epoch_ms = 1000;
 

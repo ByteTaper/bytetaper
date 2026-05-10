@@ -16,6 +16,7 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace bytetaper::stages {
 
@@ -29,20 +30,23 @@ protected:
 
         // L2 is needed for stage to run, but we don't need real RocksDB for these logic tests
         l2_cache = reinterpret_cast<cache::L2DiskCache*>(0x1234);
-
-        runtime::WorkerQueueConfig wq_config{};
-        wq_config.worker_count = 1;
-        runtime::worker_queue_init(&worker_queue, wq_config);
-        worker_queue.running = true;
+        worker_queue = std::make_unique<runtime::WorkerQueue>();
 
         policy.cache.behavior = policy::CacheBehavior::Store;
         policy.cache.ttl_seconds = 60;
         policy.route_id = "test_route";
+        policy.max_response_bytes = 128 * 1024;
+
+        runtime::WorkerQueueConfig wq_config{};
+        wq_config.worker_count = 1;
+        wq_config.async_store_max_body_size = policy.max_response_bytes;
+        runtime::worker_queue_init(worker_queue.get(), wq_config);
+        worker_queue->running = true;
 
         ctx.matched_policy = &policy;
         ctx.l1_cache = l1_cache.get();
         ctx.l2_cache = l2_cache;
-        ctx.worker_queue = &worker_queue;
+        ctx.worker_queue = worker_queue.get();
         ctx.runtime_metrics = &metrics;
         std::strcpy(ctx.raw_path, "/path");
         ctx.request_method = policy::HttpMethod::Get;
@@ -53,11 +57,12 @@ protected:
 
     void TearDown() override {
         bytetaper::hash::reset_process_hash_seed_for_test();
+        runtime::worker_queue_shutdown(worker_queue.get());
     }
 
     std::unique_ptr<cache::L1Cache> l1_cache;
     cache::L2DiskCache* l2_cache;
-    runtime::WorkerQueue worker_queue;
+    std::unique_ptr<runtime::WorkerQueue> worker_queue;
     metrics::RuntimeMetrics metrics{};
     policy::RoutePolicy policy;
     apg::ApgTransformContext ctx;
@@ -77,7 +82,7 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, EligibleResponseEnqueuesL2Store) {
     EXPECT_STREQ(output.note, "enqueued");
     std::size_t total_count = 0;
     for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
-        total_count += worker_queue.shards[i].store_count;
+        total_count += worker_queue->shards[i].store_count;
     }
     EXPECT_EQ(total_count, 1u);
     EXPECT_EQ(metrics.l2_async_store_total.load(), 1);
@@ -85,10 +90,10 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, EligibleResponseEnqueuesL2Store) {
     // Verify job content in whichever shard it landed
     bool found = false;
     for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
-        if (worker_queue.shards[i].store_count > 0) {
-            auto& slot = worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head];
+        if (worker_queue->shards[i].store_count > 0) {
+            auto& slot = worker_queue->shards[i].store_slots[worker_queue->shards[i].store_head];
             std::uint32_t body_slot = slot.body_slot;
-            EXPECT_STREQ(worker_queue.shards[i].body_pool.heap_bodies[body_slot], "hello");
+            EXPECT_STREQ(worker_queue->shards[i].body_pool.bodies[body_slot], "hello");
             EXPECT_EQ(slot.body_len, 5u);
             found = true;
             break;
@@ -112,7 +117,7 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, L2StoreQueueFullDoesNotFailResponse) {
         bytetaper::hash::hash_cstr_runtime(actual_key) % runtime::kRuntimeShardCount);
 
     // Directly saturate store queue for that shard
-    worker_queue.shards[shard_idx].store_count = runtime::kRuntimeQueueSlotsPerShard;
+    worker_queue->shards[shard_idx].store_count = runtime::kRuntimeQueueSlotsPerShard;
 
     cache_key_prepare_stage(ctx);
     auto output = l2_cache_async_store_enqueue_stage(ctx);
@@ -136,10 +141,10 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, L2StoreJobOwnsBodyMemory) {
     // Verify slot body is unchanged in whichever shard it landed
     bool found = false;
     for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
-        if (worker_queue.shards[i].store_count > 0) {
-            auto& slot = worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head];
+        if (worker_queue->shards[i].store_count > 0) {
+            auto& slot = worker_queue->shards[i].store_slots[worker_queue->shards[i].store_head];
             std::uint32_t body_slot = slot.body_slot;
-            EXPECT_STREQ(worker_queue.shards[i].body_pool.heap_bodies[body_slot], "world");
+            EXPECT_STREQ(worker_queue->shards[i].body_pool.bodies[body_slot], "world");
             found = true;
             break;
         }
@@ -147,8 +152,10 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, L2StoreJobOwnsBodyMemory) {
     EXPECT_TRUE(found);
 }
 
-TEST_F(L2CacheAsyncStoreEnqueueStageTest, Large65KBBodyEnqueuesSuccessfully) {
-    ctx.response_body_len = runtime::kAsyncL2LookupScratchSize + 1;
+TEST_F(L2CacheAsyncStoreEnqueueStageTest, BodyAtConfiguredMaxResponseBytesEnqueuesSuccessfully) {
+    std::string large_body(worker_queue->async_store_max_body_size, 'x');
+    ctx.response_body = large_body.c_str();
+    ctx.response_body_len = large_body.size();
     cache_key_prepare_stage(ctx);
     auto output = l2_cache_async_store_enqueue_stage(ctx);
     EXPECT_EQ(output.result, apg::StageResult::Continue);
@@ -178,8 +185,8 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, CoalescingHandoffEnabledForMediumBody)
     // Find the enqueued job and assert
     bool found = false;
     for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
-        if (worker_queue.shards[i].store_count > 0) {
-            auto& slot = worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head];
+        if (worker_queue->shards[i].store_count > 0) {
+            auto& slot = worker_queue->shards[i].store_slots[worker_queue->shards[i].store_head];
             EXPECT_TRUE(slot.coalescing_handoff_enabled);
             EXPECT_EQ(slot.coalescing_registry, test_registry.get());
             EXPECT_STREQ(slot.coalescing_key, "test-coalescing-key");
@@ -191,7 +198,7 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, CoalescingHandoffEnabledForMediumBody)
     EXPECT_TRUE(found);
 }
 
-TEST_F(L2CacheAsyncStoreEnqueueStageTest, CoalescingHandoffDisabledForLargeBody) {
+TEST_F(L2CacheAsyncStoreEnqueueStageTest, CoalescingHandoffSkippedForOversizedBody) {
     auto test_registry = std::make_unique<coalescing::InFlightRegistry>();
     coalescing::registry_init(test_registry.get());
 
@@ -200,31 +207,20 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, CoalescingHandoffDisabledForLargeBody)
     std::strcpy(ctx.coalescing_decision.key, "test-coalescing-key");
     ctx.coalescing_decision.lifecycle_generation = 456;
 
-    // Large body is > kL2BodyBufSize (65536) and <= kL2MaxBodySize (1048576)
-    ctx.response_body_len = apg::ApgTransformContext::kL2BodyBufSize + 100;
+    // Large body is above the bounded async store pool cap.
+    ctx.response_body_len = worker_queue->async_store_max_body_size + 100;
     std::string large_body(ctx.response_body_len, 'y');
     ctx.response_body = large_body.c_str();
 
     cache_key_prepare_stage(ctx);
     auto output = l2_cache_async_store_enqueue_stage(ctx);
     EXPECT_EQ(output.result, apg::StageResult::Continue);
-    EXPECT_STREQ(output.note, "enqueued");
-
-    // Find the enqueued job and assert
-    bool found = false;
-    for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
-        if (worker_queue.shards[i].store_count > 0) {
-            auto& slot = worker_queue.shards[i].store_slots[worker_queue.shards[i].store_head];
-            EXPECT_FALSE(slot.coalescing_handoff_enabled);
-            found = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(found);
+    EXPECT_STREQ(output.note, "body-too-large");
+    EXPECT_EQ(metrics.l2_async_store_oversized_skipped_total.load(), 1);
 }
 
 TEST_F(L2CacheAsyncStoreEnqueueStageTest, OversizedBodySkipsAsyncL2Store) {
-    ctx.response_body_len = runtime::kAsyncL2StoreMaxBodySize + 1;
+    ctx.response_body_len = worker_queue->async_store_max_body_size + 1;
     cache_key_prepare_stage(ctx);
     auto output = l2_cache_async_store_enqueue_stage(ctx);
     EXPECT_EQ(output.result, apg::StageResult::Continue);

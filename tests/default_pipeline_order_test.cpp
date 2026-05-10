@@ -47,6 +47,10 @@ protected:
         ctx.request_method = policy::HttpMethod::Get;
     }
 
+    void TearDown() override {
+        runtime::worker_queue_shutdown(q.get());
+    }
+
     std::unique_ptr<cache::L1Cache> l1;
     std::unique_ptr<coalescing::InFlightRegistry> registry;
     std::unique_ptr<runtime::WorkerQueue> q;

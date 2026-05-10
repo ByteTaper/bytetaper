@@ -48,15 +48,16 @@ enum class WorkerState : std::uint8_t {
 
 static constexpr std::size_t kAsyncL2MaxBodySize = 65536; // 64 KB
 
-// Max body accepted by the async L2 store path — matches disk cache limit.
-static constexpr std::size_t kAsyncL2StoreMaxBodySize = cache::kL2MaxBodySize;
+// Default max body accepted by the async L2 store path when policy has no explicit limit.
+static constexpr std::size_t kAsyncL2StoreDefaultMaxBodySize = 65536;
+static constexpr std::size_t kAsyncL2StoreAbsoluteMaxBodySize = cache::kL2MaxBodySize;
 
 // Lookup scratch buffer used for L2 → L1 body promotion. 64 KiB is sufficient
 // because L1 bodies are bounded by the same limit as coalescing snapshots.
 static constexpr std::size_t kAsyncL2LookupScratchSize = 65536;
 
 static constexpr std::size_t kAsyncL2StoreEncScratchSize =
-    cache::kCacheEntryEncodedOverhead + cache::kL2MaxBodySize;
+    cache::kCacheEntryEncodedOverhead + kAsyncL2StoreAbsoluteMaxBodySize;
 
 // Sharding configuration.
 static constexpr std::size_t kRuntimeShardCount = 256;
@@ -65,9 +66,13 @@ static constexpr std::size_t kRuntimePendingSlotsPerShard = 16;
 static constexpr std::size_t kWorkerQueueMaxWorkers = 8;
 static constexpr std::size_t kRuntimeMaxShardsPerWorker = kRuntimeShardCount;
 
+static constexpr std::size_t kAsyncL2StoreDefaultBodyPoolSlotSize =
+    kAsyncL2StoreDefaultMaxBodySize + 1;
+
 struct L2LookupJob {
     char key[cache::kCacheKeyMaxLen] = {};
     std::uint32_t key_hash = 0;
+    std::uint64_t enqueued_at_ms = 0;
 };
 
 struct L2StoreJob {
@@ -80,11 +85,13 @@ struct L2StoreJob {
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
     char coalescing_key[256] = {}; // matches CoalescingDecision::key capacity
     std::uint64_t lifecycle_generation = 0;
+    std::uint64_t enqueued_at_ms = 0;
 };
 
 struct StoreBodyPool {
-    char* heap_bodies[kRuntimeQueueSlotsPerShard] = {}; // malloc'd per enqueue
-    std::size_t heap_body_sizes[kRuntimeQueueSlotsPerShard] = {};
+    char* slab = nullptr;
+    char* bodies[kRuntimeQueueSlotsPerShard] = {};
+    std::size_t body_sizes[kRuntimeQueueSlotsPerShard] = {};
     bool occupied[kRuntimeQueueSlotsPerShard] = {};
 };
 
@@ -106,6 +113,9 @@ static constexpr std::size_t kRuntimeShardBatchQuota = 1;
 
 struct WorkerQueueConfig {
     std::size_t worker_count = 2; // >= 1, <= kWorkerQueueMaxWorkers
+    // 0 means use kAsyncL2StoreDefaultMaxBodySize. Server startup sets this from route
+    // max_response_bytes when configured.
+    std::size_t async_store_max_body_size = 0;
 };
 
 struct WorkerQueueResources {
@@ -155,6 +165,9 @@ struct WorkerQueue {
     WorkerScratch worker_scratch[kWorkerQueueMaxWorkers];
     WorkerReadyQueue worker_ready[kWorkerQueueMaxWorkers];
     WorkerQueueResources resources{};
+    std::atomic<std::size_t> store_body_pool_bytes_in_use{ 0 };
+    std::size_t async_store_max_body_size = kAsyncL2StoreDefaultMaxBodySize;
+    std::size_t async_store_body_pool_slot_size = kAsyncL2StoreDefaultBodyPoolSlotSize;
 };
 
 // Validates config and initialises queue fields. Does not start threads.

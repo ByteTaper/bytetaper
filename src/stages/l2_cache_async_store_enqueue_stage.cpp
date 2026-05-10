@@ -53,8 +53,8 @@ apg::StageOutput l2_cache_async_store_enqueue_stage(apg::ApgTransformContext& co
         return { apg::StageResult::Continue, "no-worker-queue" };
     }
 
-    // 8. Body size cap
-    if (context.response_body_len > runtime::kAsyncL2StoreMaxBodySize) {
+    // 8. Body size cap follows the worker pool configured from route max_response_bytes.
+    if (context.response_body_len > context.worker_queue->async_store_max_body_size) {
         metrics::record_runtime_event(context.runtime_metrics,
                                       metrics::RuntimeMetricEvent::L2StoreOversizedSkipped);
         return { apg::StageResult::Continue, "body-too-large" };
