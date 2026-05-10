@@ -1292,6 +1292,26 @@ if(BUILD_TESTING)
       COMMAND coalescing_follower_wait_test
     )
 
+    add_executable(follower_wait_guardrail_test
+      tests/follower_wait_guardrail_test.cpp
+    )
+    target_include_directories(follower_wait_guardrail_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(follower_wait_guardrail_test
+      PRIVATE
+        bytetaper_extproc_grpc_server
+        policy_yaml_loader
+        RocksDB::RocksDB
+        gtest_main
+    )
+
+    add_test(
+      NAME follower_wait_guardrail_test
+      COMMAND follower_wait_guardrail_test
+    )
+
     add_executable(coalescing_event_driven_wait_test
       tests/coalescing_event_driven_wait_test.cpp
     )

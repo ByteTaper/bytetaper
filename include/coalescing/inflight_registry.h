@@ -4,6 +4,7 @@
 #ifndef BYTETAPER_COALESCING_INFLIGHT_REGISTRY_H
 #define BYTETAPER_COALESCING_INFLIGHT_REGISTRY_H
 
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -92,6 +93,7 @@ static constexpr std::size_t kSlotsPerShard = 16; // 128 total capacity
 struct InFlightShard {
     std::mutex mutex;
     std::condition_variable cv; // notified by registry completion functions
+    std::atomic<std::uint32_t> active_waiters{ 0 };
     InFlightEntry slots[kSlotsPerShard];
 };
 
@@ -100,6 +102,7 @@ struct InFlightShard {
  * Uses lock striping to allow concurrent access to different shards.
  */
 struct InFlightRegistry {
+    std::atomic<std::uint32_t> active_waiters{ 0 };
     InFlightShard shards[kInFlightShards];
 };
 
@@ -188,6 +191,18 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
  * @param key The coalescing key.
  */
 void registry_remove_waiter(InFlightRegistry* registry, const char* key);
+
+// Read current global active waiter count (pre-increment snapshot).
+std::uint32_t registry_active_waiters(const InFlightRegistry* registry);
+
+// Read active waiter count for the shard that owns this key.
+std::uint32_t registry_shard_active_waiters(const InFlightRegistry* registry, const char* key);
+
+// Called just before blocking on registry_wait_for_completion.
+void registry_enter_wait(InFlightRegistry* registry, const char* key);
+
+// Called in every exit path after registry_wait_for_completion returns.
+void registry_exit_wait(InFlightRegistry* registry, const char* key);
 
 } // namespace bytetaper::coalescing
 

@@ -40,8 +40,10 @@ void reset_entry_for_reuse(InFlightEntry* entry) {
 void registry_init(InFlightRegistry* registry) {
     if (registry == nullptr)
         return;
+    registry->active_waiters.store(0, std::memory_order_relaxed);
     for (std::size_t i = 0; i < kInFlightShards; ++i) {
         std::lock_guard<std::mutex> lock(registry->shards[i].mutex);
+        registry->shards[i].active_waiters.store(0, std::memory_order_relaxed);
         for (std::size_t j = 0; j < kSlotsPerShard; ++j) {
             registry->shards[i].slots[j].active = false;
             registry->shards[i].slots[j].state = InFlightCompletionState::InFlight;
@@ -377,6 +379,42 @@ RegistryWaitResult registry_wait_for_completion(InFlightRegistry* registry, cons
     }
 
     return RegistryWaitResult::Missing;
+}
+
+std::uint32_t registry_active_waiters(const InFlightRegistry* registry) {
+    if (registry == nullptr) {
+        return 0;
+    }
+    return registry->active_waiters.load(std::memory_order_relaxed);
+}
+
+std::uint32_t registry_shard_active_waiters(const InFlightRegistry* registry, const char* key) {
+    if (registry == nullptr || key == nullptr) {
+        return 0;
+    }
+    std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
+    std::size_t shard_idx = hash % kInFlightShards;
+    return registry->shards[shard_idx].active_waiters.load(std::memory_order_relaxed);
+}
+
+void registry_enter_wait(InFlightRegistry* registry, const char* key) {
+    if (registry == nullptr || key == nullptr) {
+        return;
+    }
+    std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
+    std::size_t shard_idx = hash % kInFlightShards;
+    registry->active_waiters.fetch_add(1, std::memory_order_relaxed);
+    registry->shards[shard_idx].active_waiters.fetch_add(1, std::memory_order_relaxed);
+}
+
+void registry_exit_wait(InFlightRegistry* registry, const char* key) {
+    if (registry == nullptr || key == nullptr) {
+        return;
+    }
+    std::uint64_t hash = bytetaper::hash::hash_cstr_runtime(key);
+    std::size_t shard_idx = hash % kInFlightShards;
+    registry->active_waiters.fetch_sub(1, std::memory_order_relaxed);
+    registry->shards[shard_idx].active_waiters.fetch_sub(1, std::memory_order_relaxed);
 }
 
 } // namespace bytetaper::coalescing

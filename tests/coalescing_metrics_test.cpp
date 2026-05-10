@@ -27,6 +27,9 @@ TEST_F(CoalescingMetricsTest, RecordEvents) {
     record_coalescing_event(&metrics, CoalescingMetricEvent::FollowerL1Ready);
     record_coalescing_event(&metrics, CoalescingMetricEvent::FollowerL1ReadyButMiss);
     record_coalescing_event(&metrics, CoalescingMetricEvent::FollowerExpired);
+    record_coalescing_event(&metrics, CoalescingMetricEvent::FollowerGuardrailBudgetExceeded);
+    record_coalescing_event(&metrics, CoalescingMetricEvent::FollowerGuardrailGlobalLimit);
+    record_coalescing_event(&metrics, CoalescingMetricEvent::FollowerGuardrailShardLimit);
 
     EXPECT_EQ(metrics.leader_total.load(), 2u);
     EXPECT_EQ(metrics.follower_total.load(), 1u);
@@ -39,6 +42,9 @@ TEST_F(CoalescingMetricsTest, RecordEvents) {
     EXPECT_EQ(metrics.follower_l1_ready_total.load(), 1u);
     EXPECT_EQ(metrics.follower_l1_ready_but_miss_total.load(), 1u);
     EXPECT_EQ(metrics.follower_expired_total.load(), 1u);
+    EXPECT_EQ(metrics.follower_guardrail_budget_exceeded_total.load(), 1u);
+    EXPECT_EQ(metrics.follower_guardrail_global_limit_total.load(), 1u);
+    EXPECT_EQ(metrics.follower_guardrail_shard_limit_total.load(), 1u);
 }
 
 TEST_F(CoalescingMetricsTest, RenderPrometheus) {
@@ -47,7 +53,7 @@ TEST_F(CoalescingMetricsTest, RenderPrometheus) {
     record_coalescing_event(&metrics, CoalescingMetricEvent::LeaderL1StoreSuccess);
     record_coalescing_event(&metrics, CoalescingMetricEvent::FollowerExpired);
 
-    char buf[8192];
+    char buf[16384];
     std::size_t written = render_coalescing_metrics_prometheus(metrics, buf, sizeof(buf));
     ASSERT_GT(written, 0u);
 
@@ -57,6 +63,13 @@ TEST_F(CoalescingMetricsTest, RenderPrometheus) {
     EXPECT_NE(out.find("bytetaper_coalescing_follower_cache_hit_total 0"), std::string::npos);
     EXPECT_NE(out.find("bytetaper_coalescing_leader_l1_store_success_total 1"), std::string::npos);
     EXPECT_NE(out.find("bytetaper_coalescing_follower_expired_total 1"), std::string::npos);
+    EXPECT_NE(out.find("bytetaper_coalescing_follower_guardrail_budget_exceeded_total 0"),
+              std::string::npos);
+    EXPECT_NE(out.find("bytetaper_coalescing_follower_guardrail_global_limit_total 0"),
+              std::string::npos);
+    EXPECT_NE(out.find("bytetaper_coalescing_follower_guardrail_shard_limit_total 0"),
+              std::string::npos);
+    EXPECT_NE(out.find("bytetaper_coalescing_active_follower_waiters 0"), std::string::npos);
 }
 
 TEST_F(CoalescingMetricsTest, BufferOverflow) {

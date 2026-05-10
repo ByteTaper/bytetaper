@@ -104,6 +104,9 @@ static void compute_route_policy_identity(const RoutePolicy& p, char* out, std::
     feed_u32(p.coalescing.max_waiters_per_key);
     feed_u8(p.coalescing.require_cache_enabled ? 1 : 0);
     feed_u8(p.coalescing.allow_authenticated ? 1 : 0);
+    feed_u32(p.coalescing.max_follower_wait_budget_ms);
+    feed_u32(p.coalescing.max_active_follower_waiters);
+    feed_u32(p.coalescing.max_active_follower_waiters_per_shard);
 
     // Write as 16-char lowercase hex
     static const char kHex[] = "0123456789abcdef";
@@ -560,6 +563,18 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
             }
             if (coal_node["allow_authenticated"]) {
                 policy.coalescing.allow_authenticated = coal_node["allow_authenticated"].as<bool>();
+            }
+            if (coal_node["max_follower_wait_budget_ms"]) {
+                policy.coalescing.max_follower_wait_budget_ms =
+                    coal_node["max_follower_wait_budget_ms"].as<std::uint32_t>();
+            }
+            if (coal_node["max_active_follower_waiters"]) {
+                policy.coalescing.max_active_follower_waiters =
+                    coal_node["max_active_follower_waiters"].as<std::uint32_t>();
+            }
+            if (coal_node["max_active_follower_waiters_per_shard"]) {
+                policy.coalescing.max_active_follower_waiters_per_shard =
+                    coal_node["max_active_follower_waiters_per_shard"].as<std::uint32_t>();
             }
         }
     }

@@ -42,6 +42,9 @@ enum class CoalescingMetricEvent : std::uint8_t {
     LeaderTooLargeForHandoff,      // leader body > 64 KiB; L2Ready not published
     FollowerTooLargeForHandoff,    // follower woke with TooLargeForHandoff result
     FollowerTimeoutL2BodyTooLarge, // final probe found L2 entry but body too large
+    FollowerGuardrailBudgetExceeded,
+    FollowerGuardrailGlobalLimit,
+    FollowerGuardrailShardLimit,
 };
 
 struct CoalescingMetrics {
@@ -77,6 +80,11 @@ struct CoalescingMetrics {
     std::atomic<std::uint64_t> leader_too_large_for_handoff_total{ 0 };
     std::atomic<std::uint64_t> follower_too_large_for_handoff_total{ 0 };
     std::atomic<std::uint64_t> follower_timeout_l2_body_too_large_total{ 0 };
+
+    std::atomic<std::uint64_t> follower_guardrail_budget_exceeded_total{ 0 };
+    std::atomic<std::uint64_t> follower_guardrail_global_limit_total{ 0 };
+    std::atomic<std::uint64_t> follower_guardrail_shard_limit_total{ 0 };
+    std::atomic<std::uint32_t> active_follower_waiters{ 0 };
 };
 
 void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent event);

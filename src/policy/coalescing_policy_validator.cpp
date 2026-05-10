@@ -28,6 +28,15 @@ const char* validate_coalescing_policy_safe(const CoalescingPolicy& policy,
     if (policy.handoff_buffer_ms > policy.backend_timeout_ms) {
         return "coalescing handoff_buffer_ms exceeds backend_timeout_ms";
     }
+    if (policy.max_follower_wait_budget_ms > 0 &&
+        policy.max_follower_wait_budget_ms < policy.handoff_buffer_ms) {
+        return "coalescing max_follower_wait_budget_ms must be >= handoff_buffer_ms";
+    }
+    if (policy.max_active_follower_waiters > 0 &&
+        policy.max_active_follower_waiters_per_shard > policy.max_active_follower_waiters) {
+        return "coalescing max_active_follower_waiters_per_shard must be <= "
+               "max_active_follower_waiters";
+    }
 
     std::fprintf(stderr, "  coalescing.follower_wait_budget_ms = %u + %u = %u\n",
                  policy.backend_timeout_ms, policy.handoff_buffer_ms,

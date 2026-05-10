@@ -24,6 +24,11 @@ struct CoalescingPolicy {
     std::uint32_t max_waiters_per_key = 64;
     bool require_cache_enabled = true;
     bool allow_authenticated = false;
+
+    // Strict follower wait guardrails (0 = disabled)
+    std::uint32_t max_follower_wait_budget_ms = 0;
+    std::uint32_t max_active_follower_waiters = 0;
+    std::uint32_t max_active_follower_waiters_per_shard = 0;
 };
 
 struct CachePolicy;

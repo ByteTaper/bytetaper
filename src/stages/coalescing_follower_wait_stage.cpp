@@ -82,6 +82,51 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
         return { apg::StageResult::Continue, "no-registry" };
     }
 
+    // Guardrail 1: wait budget cap
+    if (policy.max_follower_wait_budget_ms > 0 &&
+        follower_wait_budget_ms > policy.max_follower_wait_budget_ms) {
+        coalescing::registry_remove_waiter(context.coalescing_registry,
+                                           context.coalescing_decision.key);
+        context.coalescing_decision.action = coalescing::CoalescingAction::Bypass;
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerGuardrailBudgetExceeded);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::Fallback);
+        return { apg::StageResult::Continue, "guardrail-budget-exceeded" };
+    }
+
+    // Guardrail 2: global active waiter cap
+    if (policy.max_active_follower_waiters > 0) {
+        const std::uint32_t global_w =
+            coalescing::registry_active_waiters(context.coalescing_registry);
+        if (global_w >= policy.max_active_follower_waiters) {
+            coalescing::registry_remove_waiter(context.coalescing_registry,
+                                               context.coalescing_decision.key);
+            context.coalescing_decision.action = coalescing::CoalescingAction::Bypass;
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerGuardrailGlobalLimit);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::Fallback);
+            return { apg::StageResult::Continue, "guardrail-global-limit" };
+        }
+    }
+
+    // Guardrail 3: per-shard active waiter cap
+    if (policy.max_active_follower_waiters_per_shard > 0) {
+        const std::uint32_t shard_w = coalescing::registry_shard_active_waiters(
+            context.coalescing_registry, context.coalescing_decision.key);
+        if (shard_w >= policy.max_active_follower_waiters_per_shard) {
+            coalescing::registry_remove_waiter(context.coalescing_registry,
+                                               context.coalescing_decision.key);
+            context.coalescing_decision.action = coalescing::CoalescingAction::Bypass;
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::FollowerGuardrailShardLimit);
+            record_coalescing_event(context.coalescing_metrics,
+                                    metrics::CoalescingMetricEvent::Fallback);
+            return { apg::StageResult::Continue, "guardrail-shard-limit" };
+        }
+    }
+
     // Step 1: L1 Check before waiting
     apg::StageOutput l1_res = l1_cache_lookup_stage(context);
     if (l1_res.result == apg::StageResult::SkipRemaining) {
@@ -97,10 +142,20 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
     }
 
     // Step 2: Block until leader completes or timeout.
+    if (context.coalescing_metrics != nullptr) {
+        context.coalescing_metrics->active_follower_waiters.fetch_add(1, std::memory_order_relaxed);
+    }
+    coalescing::registry_enter_wait(context.coalescing_registry, context.coalescing_decision.key);
+
     coalescing::RegistrySharedResponseOutput shared{};
     coalescing::RegistryWaitResult wait_result = coalescing::registry_wait_for_completion(
         context.coalescing_registry, context.coalescing_decision.key, follower_wait_budget_ms,
         context.coalescing_decision.lifecycle_generation, &shared);
+
+    coalescing::registry_exit_wait(context.coalescing_registry, context.coalescing_decision.key);
+    if (context.coalescing_metrics != nullptr) {
+        context.coalescing_metrics->active_follower_waiters.fetch_sub(1, std::memory_order_relaxed);
+    }
 
     // Step 3: Handle fast-path delivery if snapshot is ready
     if (wait_result == coalescing::RegistryWaitResult::SharedResponseReady) {

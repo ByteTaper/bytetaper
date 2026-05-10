@@ -106,6 +106,15 @@ void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent e
     case CoalescingMetricEvent::FollowerTimeoutL2BodyTooLarge:
         metrics->follower_timeout_l2_body_too_large_total.fetch_add(1, std::memory_order_relaxed);
         break;
+    case CoalescingMetricEvent::FollowerGuardrailBudgetExceeded:
+        metrics->follower_guardrail_budget_exceeded_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerGuardrailGlobalLimit:
+        metrics->follower_guardrail_global_limit_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case CoalescingMetricEvent::FollowerGuardrailShardLimit:
+        metrics->follower_guardrail_shard_limit_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     }
 }
 
@@ -243,7 +252,24 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "follower requests "
         "that timed out, checked L2, but found the body too large for the local buffer.\n"
         "# TYPE bytetaper_coalescing_follower_timeout_l2_body_too_large_total counter\n"
-        "bytetaper_coalescing_follower_timeout_l2_body_too_large_total %llu\n",
+        "bytetaper_coalescing_follower_timeout_l2_body_too_large_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_guardrail_budget_exceeded_total Total number of "
+        "follower requests bypassed because their wait budget exceeded the policy's max follower "
+        "wait budget.\n"
+        "# TYPE bytetaper_coalescing_follower_guardrail_budget_exceeded_total counter\n"
+        "bytetaper_coalescing_follower_guardrail_budget_exceeded_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_guardrail_global_limit_total Total number of "
+        "follower requests bypassed because the global active waiters limit was reached.\n"
+        "# TYPE bytetaper_coalescing_follower_guardrail_global_limit_total counter\n"
+        "bytetaper_coalescing_follower_guardrail_global_limit_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_guardrail_shard_limit_total Total number of follower "
+        "requests bypassed because the shard active waiters limit was reached.\n"
+        "# TYPE bytetaper_coalescing_follower_guardrail_shard_limit_total counter\n"
+        "bytetaper_coalescing_follower_guardrail_shard_limit_total %llu\n"
+        "# HELP bytetaper_coalescing_active_follower_waiters Current number of active follower "
+        "threads waiting on the registry.\n"
+        "# TYPE bytetaper_coalescing_active_follower_waiters gauge\n"
+        "bytetaper_coalescing_active_follower_waiters %u\n",
         (unsigned long long) metrics.leader_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_cache_hit_total.load(std::memory_order_relaxed),
@@ -284,7 +310,14 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         (unsigned long long) metrics.follower_too_large_for_handoff_total.load(
             std::memory_order_relaxed),
         (unsigned long long) metrics.follower_timeout_l2_body_too_large_total.load(
-            std::memory_order_relaxed));
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_guardrail_budget_exceeded_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_guardrail_global_limit_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_guardrail_shard_limit_total.load(
+            std::memory_order_relaxed),
+        (unsigned int) metrics.active_follower_waiters.load(std::memory_order_relaxed));
 
     if (written < 0 || static_cast<std::size_t>(written) >= buf_size) {
         return 0;
