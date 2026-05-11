@@ -8,6 +8,7 @@
 #include "cache/l2_disk_cache.h"
 #include "metrics/prometheus_registry.h"
 #include "policy/route_policy.h"
+#include "runtime/worker_queue.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -26,11 +27,14 @@ struct GrpcServerConfig {
     cache::L2DiskCache* l2_cache = nullptr;
     metrics::MetricsRegistry* metrics_registry = nullptr;
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
+    runtime::WorkerQueueConfig wq_config{};
 };
 
 struct GrpcServerHandle {
     void* impl = nullptr;
     std::uint16_t bound_port = 0;
+    const char* startup_error = nullptr;
+    runtime::WorkerQueueConfig effective_wq_config{};
 };
 
 bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle);

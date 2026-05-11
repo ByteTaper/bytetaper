@@ -1106,11 +1106,16 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     if (handle == nullptr) {
         return false;
     }
+    handle->startup_error = nullptr;
+    handle->effective_wq_config = {};
+
     observability::trace_init(observability::trace_config_from_env());
     if (handle->impl != nullptr) {
+        handle->startup_error = "server already started";
         return false;
     }
     if (config.listen_address == nullptr) {
+        handle->startup_error = "missing listen address";
         return false;
     }
 
@@ -1139,16 +1144,19 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     // Allocate worker queue on heap and handle OOM cleanly
     impl->service.worker_queue.reset(new (std::nothrow) runtime::WorkerQueue{});
     if (!impl->service.worker_queue) {
+        handle->startup_error = "out of memory allocating worker queue";
         return false;
     }
 
     // Initialize background worker resources
-    runtime::WorkerQueueConfig wq_config{};
-    wq_config.worker_count = 2;
-    wq_config.async_store_max_body_size =
-        derive_async_store_max_body_size(config.policies, config.policy_count);
+    runtime::WorkerQueueConfig wq_config = config.wq_config;
+    if (wq_config.async_store_max_body_size == 0) {
+        wq_config.async_store_max_body_size =
+            derive_async_store_max_body_size(config.policies, config.policy_count);
+    }
     const char* wq_err = runtime::worker_queue_init(impl->service.worker_queue.get(), wq_config);
     if (wq_err != nullptr) {
+        handle->startup_error = wq_err;
         return false;
     }
 
@@ -1164,21 +1172,32 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     WorkerQueueStartGuard worker_guard{};
     wq_err = runtime::worker_queue_start(impl->service.worker_queue.get(), wq_res);
     if (wq_err != nullptr) {
+        handle->startup_error = wq_err;
         return false;
     }
     worker_guard.arm(impl->service.worker_queue.get());
 
     impl->server = builder.BuildAndStart();
     if (!impl->server) {
+        handle->startup_error = "failed to build and start gRPC server";
         return false;
     }
     if (selected_port <= 0 || selected_port > 65535) {
         impl->server->Shutdown();
         impl->server->Wait();
+        handle->startup_error = "invalid bound port";
         return false;
     }
 
     handle->bound_port = static_cast<std::uint16_t>(selected_port);
+    handle->effective_wq_config.worker_count = impl->service.worker_queue->effective_worker_count;
+    handle->effective_wq_config.lookup_lane_quota =
+        impl->service.worker_queue->effective_lookup_lane_quota;
+    handle->effective_wq_config.store_lane_quota =
+        impl->service.worker_queue->effective_store_lane_quota;
+    handle->effective_wq_config.async_store_max_body_size =
+        impl->service.worker_queue->effective_async_store_max_body_size;
+
     handle->impl = impl.release();
     worker_guard.release();
     return true;

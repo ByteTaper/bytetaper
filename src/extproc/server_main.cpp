@@ -12,6 +12,7 @@
 #include "policy/yaml_loader.h"
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -25,6 +26,22 @@ std::atomic<bool> g_should_stop{ false };
 
 void on_signal(int) {
     g_should_stop.store(true);
+}
+
+static bool parse_env_size(const char* name, std::size_t* out, const char** err_msg) {
+    const char* val = std::getenv(name);
+    if (val == nullptr || val[0] == '\0') {
+        return true;
+    }
+    char* end = nullptr;
+    errno = 0;
+    const unsigned long parsed = std::strtoul(val, &end, 10);
+    if (*end != '\0' || errno != 0 || parsed == 0) {
+        *err_msg = name;
+        return false;
+    }
+    *out = static_cast<std::size_t>(parsed);
+    return true;
 }
 
 struct ServerArgs {
@@ -193,12 +210,28 @@ int main(int argc, char** argv) {
         // non-fatal, but good to know
     }
 
+    bytetaper::runtime::WorkerQueueConfig wq_config{};
+    const char* parse_err = nullptr;
+    if (!parse_env_size("BYTETAPER_WORKER_COUNT", &wq_config.worker_count, &parse_err) ||
+        !parse_env_size("BYTETAPER_LOOKUP_LANE_QUOTA", &wq_config.lookup_lane_quota, &parse_err) ||
+        !parse_env_size("BYTETAPER_STORE_LANE_QUOTA", &wq_config.store_lane_quota, &parse_err) ||
+        !parse_env_size("BYTETAPER_ASYNC_STORE_MAX_BODY_SIZE", &wq_config.async_store_max_body_size,
+                        &parse_err)) {
+        std::fprintf(stderr, "error: invalid value for env var %s\n", parse_err);
+        if (l2_cache != nullptr) {
+            bytetaper::cache::l2_close(&l2_cache);
+        }
+        bytetaper::observability::logger_shutdown();
+        return 1;
+    }
+
     bytetaper::extproc::GrpcServerConfig config{};
     config.listen_address = args.listen_address;
     config.l1_cache = l1_cache.get();
     config.l2_cache = l2_cache;
     config.metrics_registry = &metrics_registry;
     config.coalescing_registry = coalescing_registry.get();
+    config.wq_config = wq_config;
     if (policy_result.ok) {
         config.policies = policy_result.policies;
         config.policy_count = policy_result.count;
@@ -206,13 +239,24 @@ int main(int argc, char** argv) {
 
     bytetaper::extproc::GrpcServerHandle handle{};
     if (!bytetaper::extproc::start_grpc_server(config, &handle)) {
-        std::fprintf(stderr, "failed to start extproc server on %s\n", args.listen_address);
+        if (handle.startup_error != nullptr) {
+            std::fprintf(stderr, "failed to start extproc server on %s: %s\n", args.listen_address,
+                         handle.startup_error);
+        } else {
+            std::fprintf(stderr, "failed to start extproc server on %s\n", args.listen_address);
+        }
         if (l2_cache != nullptr) {
             bytetaper::cache::l2_close(&l2_cache);
         }
         bytetaper::observability::logger_shutdown();
         return 1;
     }
+
+    std::fprintf(
+        stderr, "worker_queue: workers=%zu lookup_quota=%zu store_quota=%zu store_max_body=%zu\n",
+        handle.effective_wq_config.worker_count, handle.effective_wq_config.lookup_lane_quota,
+        handle.effective_wq_config.store_lane_quota,
+        handle.effective_wq_config.async_store_max_body_size);
 
     char buf[512];
     std::snprintf(buf, sizeof(buf), "bytetaper-extproc-server listening on %s (L1 enabled, L2 %s)",

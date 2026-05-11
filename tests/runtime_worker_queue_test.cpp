@@ -1112,3 +1112,168 @@ TEST_F(WorkerQueueTest, StoreLaneStarvationDetection) {
     EXPECT_EQ(q_->shards[target_shard].store_count, 2u);
     EXPECT_EQ(metrics_.worker_store_lane_starvation_total.load(), 1u);
 }
+
+TEST_F(WorkerQueueTest, LookupLaneQuotaZeroFails) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    cfg.lookup_lane_quota = 0;
+    const char* err = worker_queue_init(q_.get(), cfg);
+    ASSERT_NE(err, nullptr);
+    EXPECT_STREQ(err, "worker_queue: lookup_lane_quota must be >= 1");
+}
+
+TEST_F(WorkerQueueTest, StoreLaneQuotaZeroFails) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    cfg.store_lane_quota = 0;
+    const char* err = worker_queue_init(q_.get(), cfg);
+    ASSERT_NE(err, nullptr);
+    EXPECT_STREQ(err, "worker_queue: store_lane_quota must be >= 1");
+}
+
+TEST_F(WorkerQueueTest, AsyncStoreMaxBodySizeAboveCapFails) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    cfg.async_store_max_body_size = kAsyncL2StoreAbsoluteMaxBodySize + 1;
+    const char* err = worker_queue_init(q_.get(), cfg);
+    ASSERT_NE(err, nullptr);
+    EXPECT_STREQ(err, "worker_queue: async_store_max_body_size exceeds absolute cap");
+}
+
+TEST_F(WorkerQueueTest, DynamicLaneQuotasRespected) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    cfg.lookup_lane_quota = 6;
+    cfg.store_lane_quota = 2;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    std::size_t shard_idx = 0;
+
+    // Enqueue 10 lookup jobs
+    for (int i = 0; i < 10; ++i) {
+        const std::string cand = key_for_shard("lookup-dyn-", shard_idx, i);
+        L2LookupJob job;
+        std::strcpy(job.key, cand.c_str());
+        ASSERT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job));
+    }
+
+    // Enqueue 4 store jobs
+    for (int i = 0; i < 4; ++i) {
+        const std::string cand = key_for_shard("store-dyn-", shard_idx, i);
+        L2StoreJob job;
+        std::strcpy(job.key, cand.c_str());
+        job.body_len = 0;
+        ASSERT_TRUE(worker_queue_try_enqueue_store(q_.get(), job));
+    }
+
+    // Run one event
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+
+    // Lookup should be decreased by exactly 6 (from 10 to 4)
+    EXPECT_EQ(q_->shards[shard_idx].lookup_count, 4u);
+    // Store should be decreased by exactly 2 (from 4 to 2)
+    EXPECT_EQ(q_->shards[shard_idx].store_count, 2u);
+}
+
+TEST_F(WorkerQueueTest, PrometheusEffectiveMetricsRendered) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 3;
+    cfg.lookup_lane_quota = 5;
+    cfg.store_lane_quota = 2;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+
+    WorkerQueueResources res{};
+    res.runtime_metrics = &metrics_;
+    ASSERT_EQ(worker_queue_start(q_.get(), res), nullptr);
+
+    char buf[16384];
+    std::size_t rendered =
+        bytetaper::metrics::render_runtime_metrics_prometheus(metrics_, buf, sizeof(buf));
+    ASSERT_GT(rendered, 0u);
+    std::string output(buf, rendered);
+
+    EXPECT_NE(
+        output.find(
+            "# TYPE bytetaper_worker_count_effective gauge\nbytetaper_worker_count_effective 3\n"),
+        std::string::npos);
+    EXPECT_NE(output.find("# TYPE bytetaper_worker_lookup_lane_quota_effective "
+                          "gauge\nbytetaper_worker_lookup_lane_quota_effective 5\n"),
+              std::string::npos);
+    EXPECT_NE(output.find("# TYPE bytetaper_worker_store_lane_quota_effective "
+                          "gauge\nbytetaper_worker_store_lane_quota_effective 2\n"),
+              std::string::npos);
+
+    worker_queue_shutdown(q_.get());
+}
+
+TEST_F(WorkerQueueTest, StarvationCorrectlyTriggeredWithCustomLaneQuota) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    cfg.lookup_lane_quota = 3;
+    cfg.store_lane_quota = 2;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+    q_->resources.runtime_metrics = &metrics_;
+
+    std::size_t target_shard = 0;
+
+    // Enqueue 3 lookups (exactly matching the custom lookup quota)
+    for (int i = 0; i < 3; ++i) {
+        const std::string candidate = key_for_shard("lookup-starve-custom-", target_shard, i);
+        L2LookupJob lookup_job;
+        std::strcpy(lookup_job.key, candidate.c_str());
+        ASSERT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), lookup_job));
+    }
+
+    // Enqueue 3 stores (exceeding custom store quota of 2)
+    for (int i = 0; i < 3; ++i) {
+        const std::string store_key = key_for_shard("store-starve-custom-", target_shard, i);
+        L2StoreJob store_job;
+        std::strcpy(store_job.key, store_key.c_str());
+        store_job.body_len = 0;
+        ASSERT_TRUE(worker_queue_try_enqueue_store(q_.get(), store_job));
+    }
+
+    EXPECT_EQ(metrics_.worker_store_lane_starvation_total.load(), 0u);
+
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+
+    // After 1 cycle:
+    // lookups drained: 3 (count becomes 0)
+    // stores drained: 2 (count becomes 1)
+    EXPECT_EQ(q_->shards[target_shard].lookup_count, 0u);
+    EXPECT_EQ(q_->shards[target_shard].store_count, 1u);
+
+    // Starvation triggers because:
+    // lookup_executed == lookup_lane_quota (3)
+    // AND store_executed == store_lane_quota (2)
+    // AND stores still remain (1)
+    EXPECT_EQ(metrics_.worker_store_lane_starvation_total.load(), 1u);
+}
+
+TEST_F(WorkerQueueTest, DynamicAsyncStoreMaxBodySizeValidation) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    cfg.async_store_max_body_size = 4096;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+    q_->resources.runtime_metrics = &metrics_;
+
+    // Allowed body
+    std::string allowed_body(4096, 'x');
+    L2StoreJob allowed_job;
+    std::strcpy(allowed_job.key, "key-allowed-custom");
+    allowed_job.entry.body = allowed_body.c_str();
+    allowed_job.body_len = allowed_body.size();
+    EXPECT_TRUE(worker_queue_try_enqueue_store(q_.get(), allowed_job));
+
+    // Oversized body
+    std::string oversized_body(4097, 'y');
+    L2StoreJob oversized_job;
+    std::strcpy(oversized_job.key, "key-oversized-custom");
+    oversized_job.entry.body = oversized_body.c_str();
+    oversized_job.body_len = oversized_body.size();
+    EXPECT_FALSE(worker_queue_try_enqueue_store(q_.get(), oversized_job));
+    EXPECT_EQ(metrics_.l2_async_store_oversized_skipped_total.load(), 1u);
+}

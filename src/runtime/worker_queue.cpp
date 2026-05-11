@@ -320,7 +320,7 @@ static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size
     RuntimeShard& shard = q->shards[shard_id];
 
     std::size_t lookup_executed = 0;
-    for (std::size_t i = 0; i < kLookupLaneQuota; ++i) {
+    for (std::size_t i = 0; i < q->effective_lookup_lane_quota; ++i) {
         L2LookupJob lookup_job{};
         if (shard_try_pop_lookup_job(q, shard_id, &lookup_job)) {
             execute_lookup_job(q, &shard, lookup_job, q->worker_scratch[worker_id].l2_lookup_body,
@@ -331,9 +331,9 @@ static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size
         }
     }
 
-    // Process up to 1 store job
+    // Process up to store quota
     std::size_t store_executed = 0;
-    for (std::size_t i = 0; i < kStoreLaneQuota; ++i) {
+    for (std::size_t i = 0; i < q->effective_store_lane_quota; ++i) {
         L2StoreJob store_job{};
         if (shard_try_pop_store_job(q, shard_id, &store_job)) {
             execute_store_job(q, &shard, store_job, q->worker_scratch[worker_id].l2_store_enc_buf,
@@ -351,7 +351,8 @@ static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size
         stores_remain = (shard.store_count > 0);
     }
 
-    if (lookup_executed == kLookupLaneQuota && store_executed == kStoreLaneQuota && stores_remain) {
+    if (lookup_executed == q->effective_lookup_lane_quota &&
+        store_executed == q->effective_store_lane_quota && stores_remain) {
         ::bytetaper::metrics::record_runtime_event(
             q->resources.runtime_metrics,
             ::bytetaper::metrics::RuntimeMetricEvent::WorkerStoreLaneStarvation);
@@ -531,18 +532,30 @@ const char* worker_queue_init(WorkerQueue* q, const WorkerQueueConfig& config) {
         return "invalid worker_count";
     }
 
+    if (config.lookup_lane_quota == 0) {
+        return "worker_queue: lookup_lane_quota must be >= 1";
+    }
+
+    if (config.store_lane_quota == 0) {
+        return "worker_queue: store_lane_quota must be >= 1";
+    }
+
     std::size_t async_store_max_body_size = config.async_store_max_body_size;
     if (async_store_max_body_size == 0) {
         async_store_max_body_size = kAsyncL2StoreDefaultMaxBodySize;
     }
     if (async_store_max_body_size > kAsyncL2StoreAbsoluteMaxBodySize) {
-        async_store_max_body_size = kAsyncL2StoreAbsoluteMaxBodySize;
+        return "worker_queue: async_store_max_body_size exceeds absolute cap";
     }
 
     q->worker_count = config.worker_count;
     q->running.store(false, std::memory_order_release);
     q->async_store_max_body_size = async_store_max_body_size;
     q->async_store_body_pool_slot_size = async_store_max_body_size + 1;
+    q->effective_worker_count = config.worker_count;
+    q->effective_lookup_lane_quota = config.lookup_lane_quota;
+    q->effective_store_lane_quota = config.store_lane_quota;
+    q->effective_async_store_max_body_size = async_store_max_body_size;
     release_body_pools(q);
 
     // Reset ownership arrays and worker ready queues
@@ -617,6 +630,12 @@ const char* worker_queue_start(WorkerQueue* q, const WorkerQueueResources& res) 
     if (res.runtime_metrics != nullptr) {
         res.runtime_metrics->worker_queue_capacity.store(
             kRuntimeShardCount * kRuntimeQueueSlotsPerShard, std::memory_order_relaxed);
+        res.runtime_metrics->worker_count_effective.store(q->effective_worker_count,
+                                                          std::memory_order_relaxed);
+        res.runtime_metrics->worker_lookup_lane_quota_effective.store(
+            q->effective_lookup_lane_quota, std::memory_order_relaxed);
+        res.runtime_metrics->worker_store_lane_quota_effective.store(q->effective_store_lane_quota,
+                                                                     std::memory_order_relaxed);
     }
     for (std::size_t i = 0; i < q->worker_count; ++i) {
         q->workers[i] = std::thread(worker_loop, q, i);
@@ -842,8 +861,8 @@ bool worker_drain_owned_once(WorkerQueue* q, std::size_t worker_id) {
     for (std::size_t i = 0; i < owned_count; ++i) {
         const std::size_t s_idx = q->worker_owned_shards[worker_id][i];
 
-        // Process up to 4 lookup jobs
-        for (std::size_t j = 0; j < kLookupLaneQuota; ++j) {
+        // Process up to effective lookup lane quota lookup jobs
+        for (std::size_t j = 0; j < q->effective_lookup_lane_quota; ++j) {
             L2LookupJob lookup_job{};
             if (shard_try_pop_lookup_job(q, s_idx, &lookup_job)) {
                 worked = true;
@@ -855,8 +874,8 @@ bool worker_drain_owned_once(WorkerQueue* q, std::size_t worker_id) {
             }
         }
 
-        // Process up to 1 store job
-        for (std::size_t j = 0; j < kStoreLaneQuota; ++j) {
+        // Process up to effective store lane quota store jobs
+        for (std::size_t j = 0; j < q->effective_store_lane_quota; ++j) {
             L2StoreJob store_job{};
             if (shard_try_pop_store_job(q, s_idx, &store_job)) {
                 worked = true;

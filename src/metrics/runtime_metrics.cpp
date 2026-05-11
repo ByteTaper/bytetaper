@@ -171,6 +171,15 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         "queue.\n"
         "# TYPE bytetaper_runtime_worker_queue_capacity gauge\n"
         "bytetaper_runtime_worker_queue_capacity %lu\n"
+        "# HELP bytetaper_worker_count_effective Effective number of background worker threads.\n"
+        "# TYPE bytetaper_worker_count_effective gauge\n"
+        "bytetaper_worker_count_effective %lu\n"
+        "# HELP bytetaper_worker_lookup_lane_quota_effective Effective lookup lane quota.\n"
+        "# TYPE bytetaper_worker_lookup_lane_quota_effective gauge\n"
+        "bytetaper_worker_lookup_lane_quota_effective %lu\n"
+        "# HELP bytetaper_worker_store_lane_quota_effective Effective store lane quota.\n"
+        "# TYPE bytetaper_worker_store_lane_quota_effective gauge\n"
+        "bytetaper_worker_store_lane_quota_effective %lu\n"
         "# HELP bytetaper_runtime_l2_async_lookup_total Total number of asynchronous L2 lookups "
         "attempted.\n"
         "# TYPE bytetaper_runtime_l2_async_lookup_total counter\n"
@@ -290,6 +299,9 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         metrics.worker_job_error_total.load(std::memory_order_relaxed),
         metrics.worker_queue_depth.load(std::memory_order_relaxed),
         metrics.worker_queue_capacity.load(std::memory_order_relaxed),
+        metrics.worker_count_effective.load(std::memory_order_relaxed),
+        metrics.worker_lookup_lane_quota_effective.load(std::memory_order_relaxed),
+        metrics.worker_store_lane_quota_effective.load(std::memory_order_relaxed),
         metrics.l2_async_lookup_total.load(std::memory_order_relaxed),
         metrics.l2_async_lookup_hit_total.load(std::memory_order_relaxed),
         metrics.l2_async_lookup_miss_total.load(std::memory_order_relaxed),

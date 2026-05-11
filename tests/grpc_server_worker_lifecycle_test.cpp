@@ -101,4 +101,68 @@ TEST(GrpcServerWorkerLifecycle, NoDoubleShutdownOnNormalStop) {
     EXPECT_FALSE(queue->workers[0].joinable());
 }
 
+TEST(GrpcServerWorkerLifecycle, WorkerCountExceedsMaxFails) {
+    GrpcServerConfig config{};
+    config.listen_address = "127.0.0.1:0";
+    config.wq_config.worker_count = runtime::kWorkerQueueMaxWorkers + 1;
+
+    GrpcServerHandle handle{};
+    EXPECT_FALSE(start_grpc_server(config, &handle));
+    EXPECT_EQ(handle.impl, nullptr);
+    ASSERT_NE(handle.startup_error, nullptr);
+    EXPECT_STREQ(handle.startup_error, "invalid worker_count");
+}
+
+TEST(GrpcServerWorkerLifecycle, AsyncStoreMaxBodySizeExceedsAbsoluteCapFails) {
+    GrpcServerConfig config{};
+    config.listen_address = "127.0.0.1:0";
+    config.wq_config.async_store_max_body_size = runtime::kAsyncL2StoreAbsoluteMaxBodySize + 1;
+
+    GrpcServerHandle handle{};
+    EXPECT_FALSE(start_grpc_server(config, &handle));
+    EXPECT_EQ(handle.impl, nullptr);
+    ASSERT_NE(handle.startup_error, nullptr);
+    EXPECT_STREQ(handle.startup_error,
+                 "worker_queue: async_store_max_body_size exceeds absolute cap");
+}
+
+TEST(GrpcServerWorkerLifecycle, ValidCustomConfigStartsSuccessfully) {
+    GrpcServerConfig config{};
+    config.listen_address = "127.0.0.1:0";
+    config.wq_config.worker_count = 3;
+    config.wq_config.lookup_lane_quota = 5;
+    config.wq_config.store_lane_quota = 2;
+    config.wq_config.async_store_max_body_size = 12345;
+
+    GrpcServerHandle handle{};
+    EXPECT_TRUE(start_grpc_server(config, &handle));
+    EXPECT_NE(handle.impl, nullptr);
+    EXPECT_EQ(handle.effective_wq_config.worker_count, 3u);
+    EXPECT_EQ(handle.effective_wq_config.lookup_lane_quota, 5u);
+    EXPECT_EQ(handle.effective_wq_config.store_lane_quota, 2u);
+    EXPECT_EQ(handle.effective_wq_config.async_store_max_body_size, 12345u);
+    EXPECT_EQ(handle.startup_error, nullptr);
+
+    stop_grpc_server(&handle);
+}
+
+TEST(GrpcServerWorkerLifecycle, DerivedBodySizeFromPolicyRoute) {
+    policy::RoutePolicy policy{};
+    policy.max_response_bytes = 54321;
+
+    GrpcServerConfig config{};
+    config.listen_address = "127.0.0.1:0";
+    config.policies = &policy;
+    config.policy_count = 1;
+    config.wq_config.async_store_max_body_size = 0; // Trigger derivation
+
+    GrpcServerHandle handle{};
+    EXPECT_TRUE(start_grpc_server(config, &handle));
+    EXPECT_NE(handle.impl, nullptr);
+    EXPECT_EQ(handle.effective_wq_config.async_store_max_body_size, 54321u);
+    EXPECT_EQ(handle.startup_error, nullptr);
+
+    stop_grpc_server(&handle);
+}
+
 } // namespace bytetaper::extproc

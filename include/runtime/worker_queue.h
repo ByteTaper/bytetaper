@@ -117,6 +117,8 @@ struct WorkerQueueConfig {
     // 0 means use kAsyncL2StoreDefaultMaxBodySize. Server startup sets this from route
     // max_response_bytes when configured.
     std::size_t async_store_max_body_size = 0;
+    std::size_t lookup_lane_quota = 4; // >= 1
+    std::size_t store_lane_quota = 1;  // >= 1
 };
 
 struct WorkerQueueResources {
@@ -170,6 +172,10 @@ struct WorkerQueue {
     std::atomic<std::size_t> store_body_pool_bytes_in_use{ 0 };
     std::size_t async_store_max_body_size = kAsyncL2StoreDefaultMaxBodySize;
     std::size_t async_store_body_pool_slot_size = kAsyncL2StoreDefaultBodyPoolSlotSize;
+    std::size_t effective_worker_count = 0;
+    std::size_t effective_lookup_lane_quota = 4;
+    std::size_t effective_store_lane_quota = 1;
+    std::size_t effective_async_store_max_body_size = 0;
 };
 
 // Validates config and initialises queue fields. Does not start threads.

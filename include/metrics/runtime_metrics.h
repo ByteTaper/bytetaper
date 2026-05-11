@@ -61,6 +61,9 @@ struct RuntimeMetrics {
     // Gauge fields
     std::atomic<std::uint64_t> worker_queue_depth{ 0 };
     std::atomic<std::uint64_t> worker_queue_capacity{ 0 };
+    std::atomic<std::uint64_t> worker_count_effective{ 0 };
+    std::atomic<std::uint64_t> worker_lookup_lane_quota_effective{ 0 };
+    std::atomic<std::uint64_t> worker_store_lane_quota_effective{ 0 };
 
     // Async L2 lookup
     std::atomic<std::uint64_t> l2_async_lookup_total{ 0 };
