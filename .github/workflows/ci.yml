@@ -29,6 +29,22 @@ jobs:
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-integration-test
 
+  sanitizer:
+    runs-on: ubuntu-24.04
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [tsan, asan, ubsan]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run ${{ matrix.sanitizer }} tests
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+            docker compose run --rm bytetaper-${{ matrix.sanitizer }}-test
+
   benchmark:
     runs-on: ubuntu-24.04
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')

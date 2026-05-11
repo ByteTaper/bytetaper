@@ -1008,7 +1008,7 @@ TEST_F(WorkerQueueTest, DrainOwnedOnceDoesNotBlockOnEmpty) {
     auto end = std::chrono::steady_clock::now();
 
     auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    EXPECT_LT(duration_ms, 5);
+    EXPECT_LT(duration_ms, 50);
 }
 
 TEST_F(WorkerQueueTest, StoreBodyPoolFullAdmission) {

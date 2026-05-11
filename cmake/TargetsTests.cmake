@@ -1051,10 +1051,7 @@ if(BUILD_TESTING)
         gtest_main
         Threads::Threads
     )
-    if(BYTETAPER_ENABLE_TSAN)
-      target_compile_options(l1_cache_concurrency_test PRIVATE -fsanitize=thread)
-      target_link_options(l1_cache_concurrency_test PRIVATE -fsanitize=thread)
-    endif()
+
 
     add_test(
       NAME l1_cache_concurrency_test

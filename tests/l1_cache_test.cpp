@@ -243,7 +243,7 @@ TEST_F(L1CacheTest, BoundaryExactlyMaxBodySizeAllowed) {
     EXPECT_TRUE(l1_put_if_newer(cache.get(), e));
 
     CacheEntry out{};
-    char body_buf[kL1MaxBodySize] = {};
+    char body_buf[kL1MaxBodySize + 1] = {};
     EXPECT_TRUE(l1_get(cache.get(), "boundary_key", 0, &out, body_buf, sizeof(body_buf)));
     EXPECT_STREQ(out.key, "boundary_key");
     EXPECT_EQ(out.body_len, kL1MaxBodySize);

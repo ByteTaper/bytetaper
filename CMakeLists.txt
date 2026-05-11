@@ -7,6 +7,12 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 option(BYTETAPER_ENABLE_GTEST_TESTS "Enable GoogleTest-based unit tests" OFF)
 option(BYTETAPER_ENABLE_INTEGRATION_TESTS "Enable integration-style extproc adapter tests" OFF)
 option(BYTETAPER_ENABLE_TSAN "Enable ThreadSanitizer for concurrency tests" OFF)
+option(BYTETAPER_ENABLE_ASAN  "Enable AddressSanitizer (mutually exclusive with TSAN)" OFF)
+option(BYTETAPER_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer (combinable with ASAN)" OFF)
+
+if(BYTETAPER_ENABLE_TSAN AND BYTETAPER_ENABLE_ASAN)
+    message(FATAL_ERROR "BYTETAPER_ENABLE_TSAN and BYTETAPER_ENABLE_ASAN are mutually exclusive.")
+endif()
 
 include(cmake/CompilerOptions.cmake)
 include(cmake/Dependencies.cmake)

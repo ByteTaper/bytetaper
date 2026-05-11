@@ -958,7 +958,73 @@ services:
         echo "SUCCESS: Production runtime smoke test validator passed!"
     profiles: ["runtime-test"]
 
+  bytetaper-tsan-test:
+    image: bytetaper-dev:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - bt-build-tsan:/workspace/build-tsan
+      - bt-ccache:/home/bytetaper/.cache/ccache
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        cmake -S . -B build-tsan -G Ninja \
+          -DBYTETAPER_ENABLE_GTEST_TESTS=ON \
+          -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
+          -DBYTETAPER_ENABLE_TSAN=ON \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        cmake --build build-tsan
+        ctest --test-dir build-tsan -R "concurrency" --output-on-failure
+
+  bytetaper-asan-test:
+    image: bytetaper-dev:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - bt-build-asan:/workspace/build-asan
+      - bt-ccache:/home/bytetaper/.cache/ccache
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        cmake -S . -B build-asan -G Ninja \
+          -DBYTETAPER_ENABLE_GTEST_TESTS=ON \
+          -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
+          -DBYTETAPER_ENABLE_ASAN=ON \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        cmake --build build-asan
+        ctest --test-dir build-asan --output-on-failure
+
+  bytetaper-ubsan-test:
+    image: bytetaper-dev:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - bt-build-ubsan:/workspace/build-ubsan
+      - bt-ccache:/home/bytetaper/.cache/ccache
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        cmake -S . -B build-ubsan -G Ninja \
+          -DBYTETAPER_ENABLE_GTEST_TESTS=ON \
+          -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
+          -DBYTETAPER_ENABLE_UBSAN=ON \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        cmake --build build-ubsan
+        ctest --test-dir build-ubsan --output-on-failure
+
 volumes:
   bt-l2-cache: {}
   bt-build: {}
+  bt-build-tsan: {}
+  bt-build-asan: {}
+  bt-build-ubsan: {}
   bt-ccache: {}

@@ -30,6 +30,7 @@
 
 # Build directories
 build/
+build-*/
 bin/
 obj/
 out/
