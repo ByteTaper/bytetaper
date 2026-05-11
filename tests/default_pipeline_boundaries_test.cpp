@@ -10,6 +10,13 @@
 namespace bytetaper::extproc {
 
 /**
+ * NOTE: These tests check the compiled stage arrays at runtime.
+ * To detect sync I/O hidden inside stage implementations, see:
+ *   tools/check_runtime_boundaries.py
+ * That script enforces the same contract at the source level and is run in CI.
+ */
+
+/**
  * Helper: search for a forbidden stage in a pipeline array.
  * This is used to enforce the RUNTIME_BOUNDARIES.md contract.
  */
