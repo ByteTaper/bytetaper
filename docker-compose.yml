@@ -190,7 +190,7 @@ services:
       - "18080:18080"
       - "18081:18081"
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -256,6 +256,24 @@ services:
         set -eu
         python3 tests/integration/e2e/cache_e2e_test.py
 
+  bytetaper-healthz-readyz-test:
+    image: bytetaper-dev:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - bt-build:/workspace/build
+    environment:
+      - BYTETAPER_METRICS_URL=http://bytetaper-extproc:18081
+    depends_on:
+      bytetaper-extproc:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        python3 tests/integration/e2e/healthz_readyz_test.py
+
   bytetaper-extproc-compression:
     image: bytetaper-dev:latest
     depends_on:
@@ -289,7 +307,7 @@ services:
         mkdir -p /tmp/bytetaper-cache-compression
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/compression-benchmark-policy.yaml --l2-cache-path /tmp/bytetaper-cache-compression --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -382,7 +400,7 @@ services:
         mkdir -p /tmp/bytetaper-cache-observe
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/observe-mode-policy.yaml --l2-cache-path /tmp/bytetaper-cache-observe --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -449,7 +467,7 @@ services:
         mkdir -p /tmp/bytetaper-cache-field-filtering
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/field-filtering-policy.yaml --l2-cache-path /tmp/bytetaper-cache-field-filtering --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -516,7 +534,7 @@ services:
         mkdir -p /tmp/bytetaper-cache-shared-l2
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/cache-benchmark-policy.yaml --l2-cache-path /tmp/bytetaper-cache-shared-l2 --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -583,7 +601,7 @@ services:
         mkdir -p /tmp/bytetaper-cache-header-variance
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/header-variance-benchmark-policy.yaml --l2-cache-path /tmp/bytetaper-cache-header-variance --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -650,7 +668,7 @@ services:
         mkdir -p /tmp/bytetaper-cache-pagination
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/pagination-benchmark-policy.yaml --l2-cache-path /tmp/bytetaper-cache-pagination --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -717,7 +735,7 @@ services:
         mkdir -p /tmp/bytetaper-cache-coalescing
         exec ./build/bytetaper-extproc-server --listen-address 0.0.0.0:18080 --policy-file examples/policy/coalescing-benchmark-policy.yaml --l2-cache-path /tmp/bytetaper-cache-coalescing --metrics-address 0.0.0.0 --metrics-port 18081
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -952,7 +970,7 @@ services:
       - "--metrics-port"
       - "18081"
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
       timeout: 2s
       retries: 10

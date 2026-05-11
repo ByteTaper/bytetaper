@@ -19,12 +19,13 @@ namespace {
 
 struct MetricsHttpServerImpl {
     MetricsRegistry* registry = nullptr;
+    RuntimeHealthState* health_state = nullptr;
     int listen_fd = -1;
     std::atomic<bool> stop_flag{ false };
     std::thread accept_thread{};
 };
 
-void handle_connection(int conn_fd, MetricsRegistry* registry) {
+void handle_connection(int conn_fd, MetricsHttpServerImpl* impl) {
     char buffer[4096];
     std::string request;
     while (true) {
@@ -40,12 +41,44 @@ void handle_connection(int conn_fd, MetricsRegistry* registry) {
 
     std::string response;
     if (request.find("GET /metrics") != std::string::npos) {
-        std::string body = render_prometheus_text(*registry);
+        std::string body = render_prometheus_text(*(impl->registry));
         response = "HTTP/1.0 200 OK\r\n";
         response += "Content-Type: text/plain; version=0.0.4\r\n";
         response += "Content-Length: " + std::to_string(body.size()) + "\r\n";
         response += "\r\n";
         response += body;
+    } else if (request.find("GET /healthz") != std::string::npos) {
+        std::string body = "ok\n";
+        response = "HTTP/1.0 200 OK\r\n";
+        response += "Content-Type: text/plain\r\n";
+        response += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+        response += "\r\n";
+        response += body;
+    } else if (request.find("GET /readyz") != std::string::npos) {
+        if (impl->health_state == nullptr) {
+            std::string body = "health state unavailable\n";
+            response = "HTTP/1.0 503 Service Unavailable\r\n";
+            response += "Content-Type: text/plain\r\n";
+            response += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+            response += "\r\n";
+            response += body;
+        } else if (impl->health_state->ready.load(std::memory_order_acquire)) {
+            std::string body = "ok\n";
+            response = "HTTP/1.0 200 OK\r\n";
+            response += "Content-Type: text/plain\r\n";
+            response += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+            response += "\r\n";
+            response += body;
+        } else {
+            const char* reason =
+                impl->health_state->not_ready_reason.load(std::memory_order_acquire);
+            std::string body = std::string(reason ? reason : "unknown reason") + "\n";
+            response = "HTTP/1.0 503 Service Unavailable\r\n";
+            response += "Content-Type: text/plain\r\n";
+            response += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+            response += "\r\n";
+            response += body;
+        }
     } else {
         response = "HTTP/1.0 404 Not Found\r\n\r\n";
     }
@@ -68,7 +101,7 @@ void accept_loop(MetricsHttpServerImpl* impl) {
                 break;
             continue;
         }
-        handle_connection(conn_fd, impl->registry);
+        handle_connection(conn_fd, impl);
     }
 }
 
@@ -110,6 +143,7 @@ bool start_metrics_http_server(const MetricsHttpServerConfig& config,
 
     auto* impl = new MetricsHttpServerImpl();
     impl->registry = config.registry;
+    impl->health_state = config.health_state;
     impl->listen_fd = fd;
     impl->accept_thread = std::thread(accept_loop, impl);
 

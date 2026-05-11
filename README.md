@@ -160,7 +160,7 @@ docker compose up bytetaper-extproc envoy
 The `bytetaper-extproc` service exposes:
 
 - `18080`: ExtProc server listen port
-- `18081`: metrics endpoint
+- `18081`: HTTP server exposing `/metrics` (Prometheus), `/healthz` (liveness), and `/readyz` (readiness) endpoints
 
 Stop the local stack:
 

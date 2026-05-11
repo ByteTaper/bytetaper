@@ -123,15 +123,16 @@ static void shard_pending_clear(RuntimeShard* s, const char* key, std::uint32_t 
 
 static void execute_lookup_job(WorkerQueue* q, RuntimeShard* shard, L2LookupJob& job,
                                char* scratch_buf, std::size_t scratch_len) {
-    auto* m = q->resources.runtime_metrics;
+    auto* resources_runtime_metrics = q->resources.runtime_metrics;
     const std::uint64_t now_ms = current_time_ms();
 
     const std::uint64_t wait_ms = now_ms > job.enqueued_at_ms ? now_ms - job.enqueued_at_ms : 0;
     ::bytetaper::metrics::record_runtime_wait_ms(
-        m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupLaneWait, wait_ms);
+        resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupLaneWait,
+        wait_ms);
 
     ::bytetaper::metrics::record_runtime_event(
-        m, ::bytetaper::metrics::RuntimeMetricEvent::JobExecuted);
+        resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobExecuted);
 
     auto* l1 = q->resources.l1_cache;
     auto* l2 = q->resources.l2_cache;
@@ -144,50 +145,56 @@ static void execute_lookup_job(WorkerQueue* q, RuntimeShard* shard, L2LookupJob&
         switch (gr) {
         case cache::L2GetResult::Hit: {
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupHit);
+                resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupHit);
             if (l1 != nullptr) {
                 if (!cache::l1_can_store_entry(hit)) {
                     ::bytetaper::metrics::record_runtime_event(
-                        m, ::bytetaper::metrics::RuntimeMetricEvent::
-                               L2ToL1PromotionSkippedBodyTooLarge);
+                        resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::
+                                                       L2ToL1PromotionSkippedBodyTooLarge);
                 } else if (cache::l1_put_if_newer(l1, hit, q->resources.cache_metrics)) {
                     ::bytetaper::metrics::record_runtime_event(
-                        m, ::bytetaper::metrics::RuntimeMetricEvent::L2ToL1Promotion);
+                        resources_runtime_metrics,
+                        ::bytetaper::metrics::RuntimeMetricEvent::L2ToL1Promotion);
                 } else {
                     ::bytetaper::metrics::record_runtime_event(
-                        m, ::bytetaper::metrics::RuntimeMetricEvent::L2ToL1StaleRejected);
+                        resources_runtime_metrics,
+                        ::bytetaper::metrics::RuntimeMetricEvent::L2ToL1StaleRejected);
                 }
             }
             break;
         }
         case cache::L2GetResult::Miss:
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupMiss);
+                resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupMiss);
             break;
         case cache::L2GetResult::Expired:
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupExpired);
+                resources_runtime_metrics,
+                ::bytetaper::metrics::RuntimeMetricEvent::L2LookupExpired);
             break;
         case cache::L2GetResult::BodyTooLargeForBuffer:
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupBodyTooLargeForBuffer);
+                resources_runtime_metrics,
+                ::bytetaper::metrics::RuntimeMetricEvent::L2LookupBodyTooLargeForBuffer);
             break;
         case cache::L2GetResult::DecodeError:
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupDecodeError);
+                resources_runtime_metrics,
+                ::bytetaper::metrics::RuntimeMetricEvent::L2LookupDecodeError);
             break;
         case cache::L2GetResult::RocksDbError:
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupRocksDbError);
+                resources_runtime_metrics,
+                ::bytetaper::metrics::RuntimeMetricEvent::L2LookupRocksDbError);
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupError);
+                resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupError);
             break;
         }
     } else {
         ::bytetaper::metrics::record_runtime_event(
-            m, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupError);
+            resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2LookupError);
         ::bytetaper::metrics::record_runtime_event(
-            m, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+            resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
     }
 
     {
@@ -198,17 +205,18 @@ static void execute_lookup_job(WorkerQueue* q, RuntimeShard* shard, L2LookupJob&
 
 static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& job, char* enc_buf,
                               std::size_t enc_buf_size) {
-    auto* m = q->resources.runtime_metrics;
-    auto* cm = q->resources.coalescing_metrics;
+    auto* resources_runtime_metrics = q->resources.runtime_metrics;
+    auto* resources_coalescing_metrics = q->resources.coalescing_metrics;
 
     const std::uint64_t now_ms = current_time_ms();
 
     const std::uint64_t wait_ms = now_ms > job.enqueued_at_ms ? now_ms - job.enqueued_at_ms : 0;
     ::bytetaper::metrics::record_runtime_wait_ms(
-        m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreLaneWait, wait_ms);
+        resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreLaneWait,
+        wait_ms);
 
     ::bytetaper::metrics::record_runtime_event(
-        m, ::bytetaper::metrics::RuntimeMetricEvent::JobExecuted);
+        resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobExecuted);
 
     auto* l2 = q->resources.l2_cache;
 
@@ -217,73 +225,82 @@ static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& j
         switch (pr) {
         case cache::L2PutResult::Stored: {
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreSuccess);
+                resources_runtime_metrics,
+                ::bytetaper::metrics::RuntimeMetricEvent::L2StoreSuccess);
             if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
                 coalescing::registry_complete_state_if_generation(
                     job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
                     coalescing::InFlightCompletionState::L2Ready, now_ms);
                 ::bytetaper::metrics::record_coalescing_event(
-                    cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffReady);
+                    resources_coalescing_metrics,
+                    ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffReady);
                 const std::uint64_t delay_ms =
                     now_ms > job.enqueued_at_ms ? now_ms - job.enqueued_at_ms : 0;
-                ::bytetaper::metrics::record_coalescing_handoff_delay_ms(cm, delay_ms);
+                ::bytetaper::metrics::record_coalescing_handoff_delay_ms(
+                    resources_coalescing_metrics, delay_ms);
             }
             break;
         }
         case cache::L2PutResult::EncodeError: {
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreEncodeError);
+                resources_runtime_metrics,
+                ::bytetaper::metrics::RuntimeMetricEvent::L2StoreEncodeError);
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+                resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
             if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
                 coalescing::registry_complete_state_if_generation(
                     job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
                     coalescing::InFlightCompletionState::Failed, now_ms);
                 ::bytetaper::metrics::record_coalescing_event(
-                    cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
+                    resources_coalescing_metrics,
+                    ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
             }
             break;
         }
         case cache::L2PutResult::BodyTooLarge: {
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreBodyTooLarge);
+                resources_runtime_metrics,
+                ::bytetaper::metrics::RuntimeMetricEvent::L2StoreBodyTooLarge);
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+                resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
             if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
                 coalescing::registry_complete_state_if_generation(
                     job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
                     coalescing::InFlightCompletionState::Failed, now_ms);
                 ::bytetaper::metrics::record_coalescing_event(
-                    cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
+                    resources_coalescing_metrics,
+                    ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
             }
             break;
         }
         case cache::L2PutResult::StorageError: {
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreError);
+                resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreError);
             ::bytetaper::metrics::record_runtime_event(
-                m, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+                resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
             if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
                 coalescing::registry_complete_state_if_generation(
                     job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
                     coalescing::InFlightCompletionState::Failed, now_ms);
                 ::bytetaper::metrics::record_coalescing_event(
-                    cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
+                    resources_coalescing_metrics,
+                    ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
             }
             break;
         }
         }
     } else {
         ::bytetaper::metrics::record_runtime_event(
-            m, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreError);
+            resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2StoreError);
         ::bytetaper::metrics::record_runtime_event(
-            m, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+            resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
         if (job.coalescing_handoff_enabled && job.coalescing_registry != nullptr) {
             coalescing::registry_complete_state_if_generation(
                 job.coalescing_registry, job.coalescing_key, job.lifecycle_generation,
                 coalescing::InFlightCompletionState::Failed, now_ms);
             ::bytetaper::metrics::record_coalescing_event(
-                cm, ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
+                resources_coalescing_metrics,
+                ::bytetaper::metrics::CoalescingMetricEvent::LeaderL2HandoffFailed);
         }
     }
 
@@ -297,8 +314,8 @@ static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& j
             shard->body_pool.occupied[slot] = false;
             if (q != nullptr) {
                 q->store_body_pool_bytes_in_use.fetch_sub(size_freed, std::memory_order_relaxed);
-                if (m != nullptr) {
-                    m->worker_store_body_pool_bytes_in_use.store(
+                if (resources_runtime_metrics != nullptr) {
+                    resources_runtime_metrics->worker_store_body_pool_bytes_in_use.store(
                         q->store_body_pool_bytes_in_use.load(std::memory_order_relaxed),
                         std::memory_order_relaxed);
                 }

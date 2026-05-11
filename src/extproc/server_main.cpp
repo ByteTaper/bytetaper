@@ -152,11 +152,28 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
 
+    bytetaper::metrics::RuntimeHealthState health_state;
+    bytetaper::metrics::MetricsRegistry metrics_registry{};
+    bytetaper::metrics::MetricsHttpServerConfig metrics_config{};
+    metrics_config.listen_address = args.metrics_listen_address;
+    metrics_config.port = args.metrics_port;
+    metrics_config.registry = &metrics_registry;
+    metrics_config.health_state = &health_state;
+
+    bytetaper::metrics::MetricsHttpServerHandle metrics_handle{};
+    if (!bytetaper::metrics::start_metrics_http_server(metrics_config, &metrics_handle)) {
+        std::fprintf(stderr, "failed to start metrics http server on %s:%u\n",
+                     args.metrics_listen_address, args.metrics_port);
+        // non-fatal, but good to know
+    }
+
     bytetaper::policy::PolicyFileResult policy_result{};
     if (args.policy_file != nullptr) {
         if (!bytetaper::policy::load_policy_from_file(args.policy_file, &policy_result)) {
             std::fprintf(stderr, "failed to load policy file %s: %s\n", args.policy_file,
                          policy_result.error ? policy_result.error : "unknown error");
+            health_state.not_ready_reason.store("policy loading error", std::memory_order_release);
+            bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
             bytetaper::observability::logger_shutdown();
             return 3;
         }
@@ -184,6 +201,9 @@ int main(int argc, char** argv) {
             !bytetaper::extproc::startup::parse_env_positive_int(
                 "BYTETAPER_L2_MAX_BACKGROUND_JOBS", &l2_opts.max_background_jobs, &l2_parse_err)) {
             std::fprintf(stderr, "error: invalid value for env var %s\n", l2_parse_err);
+            health_state.not_ready_reason.store("L2 cache configuration parsing error",
+                                                std::memory_order_release);
+            bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
             bytetaper::observability::logger_shutdown();
             return 1;
         }
@@ -195,6 +215,9 @@ int main(int argc, char** argv) {
         l2_cache = bytetaper::cache::l2_open_with_options(args.l2_cache_path, l2_opts);
         if (l2_cache == nullptr) {
             std::fprintf(stderr, "failed to open L2 cache at %s\n", args.l2_cache_path);
+            health_state.not_ready_reason.store("failed to open L2 cache",
+                                                std::memory_order_release);
+            bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
             bytetaper::observability::logger_shutdown();
             return 4;
         }
@@ -202,19 +225,6 @@ int main(int argc, char** argv) {
 
     auto coalescing_registry = std::make_unique<bytetaper::coalescing::InFlightRegistry>();
     bytetaper::coalescing::registry_init(coalescing_registry.get());
-
-    bytetaper::metrics::MetricsRegistry metrics_registry{};
-    bytetaper::metrics::MetricsHttpServerConfig metrics_config{};
-    metrics_config.listen_address = args.metrics_listen_address;
-    metrics_config.port = args.metrics_port;
-    metrics_config.registry = &metrics_registry;
-
-    bytetaper::metrics::MetricsHttpServerHandle metrics_handle{};
-    if (!bytetaper::metrics::start_metrics_http_server(metrics_config, &metrics_handle)) {
-        std::fprintf(stderr, "failed to start metrics http server on %s:%u\n",
-                     args.metrics_listen_address, args.metrics_port);
-        // non-fatal, but good to know
-    }
 
     bytetaper::runtime::WorkerQueueConfig wq_config{};
     const char* parse_err = nullptr;
@@ -228,6 +238,9 @@ int main(int argc, char** argv) {
                                                      &wq_config.async_store_max_body_size,
                                                      &parse_err)) {
         std::fprintf(stderr, "error: invalid value for env var %s\n", parse_err);
+        health_state.not_ready_reason.store("worker configuration parsing error",
+                                            std::memory_order_release);
+        bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
         if (l2_cache != nullptr) {
             bytetaper::cache::l2_close(&l2_cache);
         }
@@ -252,15 +265,20 @@ int main(int argc, char** argv) {
         if (handle.startup_error != nullptr) {
             std::fprintf(stderr, "failed to start extproc server on %s: %s\n", args.listen_address,
                          handle.startup_error);
+            health_state.not_ready_reason.store(handle.startup_error, std::memory_order_release);
         } else {
             std::fprintf(stderr, "failed to start extproc server on %s\n", args.listen_address);
+            health_state.not_ready_reason.store("gRPC startup error", std::memory_order_release);
         }
+        bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
         if (l2_cache != nullptr) {
             bytetaper::cache::l2_close(&l2_cache);
         }
         bytetaper::observability::logger_shutdown();
         return 1;
     }
+
+    health_state.ready.store(true, std::memory_order_release);
 
     std::fprintf(
         stderr, "worker_queue: workers=%zu lookup_quota=%zu store_quota=%zu store_max_body=%zu\n",
@@ -282,6 +300,9 @@ int main(int argc, char** argv) {
     }
 
     bytetaper::observability::log_info("exiting main loop, stopping server");
+
+    health_state.not_ready_reason.store("shutting down", std::memory_order_release);
+    health_state.ready.store(false, std::memory_order_release);
 
     bytetaper::extproc::stop_grpc_server(&handle);
     bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
