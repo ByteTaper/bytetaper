@@ -13,7 +13,10 @@ namespace bytetaper::cache {
 
 struct L2DiskCache; // opaque; defined in l2_rocksdb_cache.cpp
 
-static constexpr std::size_t kL2MaxBodySize = 1 * 1024 * 1024; // 1 MiB
+// Maximum body size stored to L2. Bodies > kL2BodyBufSize and <= kL2MaxBodySize are stored
+// for future reuse but bypass follower handoff — see body-size contract in
+// include/coalescing/coalescing_completion_handoff.h.
+static constexpr std::size_t kL2MaxBodySize = 1 * 1024 * 1024;
 
 struct L2CacheOptions {
     std::size_t block_cache_mb = 64;

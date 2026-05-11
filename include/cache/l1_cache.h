@@ -14,7 +14,9 @@ namespace bytetaper::cache {
 
 static constexpr std::size_t kL1ShardCount = 256;
 static constexpr std::size_t kL1SlotsPerShard = 16;
-static constexpr std::size_t kL1MaxBodySize = 3072; // 3KiB per slot
+// Maximum body size stored in L1 (shared inline snapshot path).
+// See body-size contract in include/coalescing/coalescing_completion_handoff.h.
+static constexpr std::size_t kL1MaxBodySize = 3072;
 
 struct L1CacheShard {
     mutable std::mutex mutex;

@@ -111,7 +111,10 @@ struct ApgTransformContext {
     char response_content_type[cache::kCacheContentTypeMaxLen] = {};
     std::size_t response_content_type_len = 0;
 
-    static constexpr std::size_t kL2BodyBufSize = 65536; // 64 KiB
+    // Follower synchronous L2 read buffer. Responses larger than this are stored to L2
+    // but cannot be delivered through the immediate follower path — see body-size contract
+    // in include/coalescing/coalescing_completion_handoff.h.
+    static constexpr std::size_t kL2BodyBufSize = 65536;
 
     // --- L2 cache input (set by caller before running pipeline) ---
     cache::L2DiskCache* l2_cache = nullptr;

@@ -8,6 +8,7 @@
 
 #include <cstring>
 #include <gtest/gtest.h>
+#include <vector>
 
 namespace bytetaper::stages {
 
@@ -142,6 +143,49 @@ TEST_F(L2CacheLookupStageTest, ExpiredEntryRejected) {
     EXPECT_EQ(out.result, apg::StageResult::Continue);
     EXPECT_FALSE(ctx.cache_hit);
     EXPECT_STREQ(out.note, "l2-expired");
+}
+
+TEST_F(L2CacheLookupStageTest, BodyTooLargeForBufferDistinctFromMiss) {
+    // Store an entry larger than the follower L2 read buffer (kL2BodyBufSize = 65536).
+    // The lookup stage must return "l2-body-too-large-for-buffer", not "l2-miss".
+    const std::size_t large_body_len = apg::ApgTransformContext::kL2BodyBufSize + 1;
+    std::vector<char> large_body(large_body_len, 'X');
+
+    char key_buf[cache::kCacheKeyMaxLen] = {};
+    std::snprintf(key_buf, sizeof(key_buf), "GET:/large-body");
+
+    cache::CacheEntry entry{};
+    std::strncpy(entry.key, key_buf, sizeof(entry.key) - 1);
+    entry.body = large_body.data();
+    entry.body_len = large_body_len;
+    entry.status_code = 200;
+    entry.expires_at_epoch_ms = 99999999; // far future
+
+    // Write directly to L2 (bypassing async queue — this is a unit test)
+    ASSERT_TRUE(cache::l2_put(l2_, entry));
+
+    // Set up context
+    policy::RoutePolicy pol{};
+    pol.route_id = "rt1";
+    pol.cache.behavior = policy::CacheBehavior::Store;
+
+    apg::ApgTransformContext ctx{};
+    ctx.matched_policy = &pol;
+    ctx.l2_cache = l2_;
+    ctx.cache_key_ready = true;
+    std::strncpy(ctx.cache_key, key_buf, sizeof(ctx.cache_key) - 1);
+    ctx.request_epoch_ms = 1000;
+
+    metrics::RuntimeMetrics runtime_metrics_{};
+    ctx.runtime_metrics = &runtime_metrics_;
+
+    apg::StageOutput out = l2_cache_lookup_stage(ctx);
+
+    EXPECT_EQ(out.result, apg::StageResult::Continue);
+    EXPECT_STREQ(out.note, "l2-body-too-large-for-buffer");
+    EXPECT_FALSE(ctx.cache_hit);
+    // Distinct from a plain miss — l2_lookup_body_too_large_for_buffer_total must be non-zero
+    EXPECT_GE(runtime_metrics_.l2_lookup_body_too_large_for_buffer_total.load(), 1u);
 }
 
 } // namespace bytetaper::stages
