@@ -228,6 +228,67 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, OversizedBodySkipsAsyncL2Store) {
     EXPECT_EQ(metrics.l2_async_store_oversized_skipped_total.load(), 1);
 }
 
+TEST_F(L2CacheAsyncStoreEnqueueStageTest, LargeBodyAboveL2BufSizeEnqueuesWithoutCoalescingHandoff) {
+    auto test_registry = std::make_unique<coalescing::InFlightRegistry>();
+    coalescing::registry_init(test_registry.get());
+
+    ctx.coalescing_registry = test_registry.get();
+    ctx.coalescing_decision.action = coalescing::CoalescingAction::Leader;
+    std::strcpy(ctx.coalescing_decision.key, "test-coalescing-key");
+    ctx.coalescing_decision.lifecycle_generation = 123;
+
+    ctx.response_body_len = apg::ApgTransformContext::kL2BodyBufSize + 1;
+    std::string large_body(ctx.response_body_len, 'x');
+    ctx.response_body = large_body.c_str();
+
+    cache_key_prepare_stage(ctx);
+    auto output = l2_cache_async_store_enqueue_stage(ctx);
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+    EXPECT_STREQ(output.note, "enqueued");
+
+    // Job was enqueued
+    EXPECT_EQ(metrics.l2_async_store_total.load(), 1u);
+
+    // Find the enqueued job and assert handoff is disabled (and registry/keys are not populated)
+    bool found = false;
+    for (std::size_t i = 0; i < runtime::kRuntimeShardCount; ++i) {
+        if (worker_queue->shards[i].store_count > 0) {
+            auto& slot = worker_queue->shards[i].store_slots[worker_queue->shards[i].store_head];
+            EXPECT_FALSE(slot.coalescing_handoff_enabled);
+            EXPECT_EQ(slot.coalescing_registry, nullptr);
+            EXPECT_STREQ(slot.coalescing_key, "");
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(L2CacheAsyncStoreEnqueueStageTest, BodyAboveL2MaxSizeRejectedFromAsyncStore) {
+    // Elevate the limits above kL2MaxBodySize to ensure kL2MaxBodySize acts as the absolute
+    // floor/ceiling
+    policy.max_response_bytes = cache::kL2MaxBodySize + 100 * 1024;
+
+    // Shut down worker queue and reinitialize with elevated limit
+    runtime::worker_queue_shutdown(worker_queue.get());
+    runtime::WorkerQueueConfig wq_config{};
+    wq_config.worker_count = 1;
+    wq_config.async_store_max_body_size = policy.max_response_bytes;
+    runtime::worker_queue_init(worker_queue.get(), wq_config);
+    worker_queue->running = true;
+
+    ctx.response_body_len = cache::kL2MaxBodySize + 1;
+    std::string extreme_body(ctx.response_body_len, 'y');
+    ctx.response_body = extreme_body.c_str();
+
+    cache_key_prepare_stage(ctx);
+    auto output = l2_cache_async_store_enqueue_stage(ctx);
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+    EXPECT_STREQ(output.note, "body-too-large");
+    EXPECT_EQ(metrics.l2_async_store_oversized_skipped_total.load(), 1u);
+    EXPECT_EQ(metrics.l2_async_store_total.load(), 0u);
+}
+
 TEST_F(L2CacheAsyncStoreEnqueueStageTest, NonGetRequestSkips) {
     ctx.request_method = policy::HttpMethod::Post;
     cache_key_prepare_stage(ctx);
