@@ -6,6 +6,7 @@ set -euo pipefail
 
 SCENARIO="coalescing_burst"
 ENVOY_HOST="${ENVOY_COALESCING_URL:-http://envoy-bytetaper-coalescing:10000}"
+ENVOY_BASELINE_URL="${ENVOY_BASELINE_URL:-http://envoy-baseline:10000}"
 METRICS_HOST="${METRICS_COALESCING_URL:-http://bytetaper-extproc-coalescing:18081}"
 MOCK_HOST="${MOCK_URL:-http://mock-api:8080}"
 REPORT_DIR="reports/benchmarks"
@@ -36,6 +37,11 @@ mkdir -p "$REPORT_DIR"
 cat "$REPORT_FILE"
 
 echo "Checking target availability..."
+if ! curl -s --fail "${ENVOY_BASELINE_URL}/api/v1/small" > /dev/null; then
+    echo "ERROR: Baseline Envoy at ${ENVOY_BASELINE_URL} is unavailable."
+    echo "Status: BASELINE_UNAVAILABLE" >> "$REPORT_FILE"
+    exit 1
+fi
 if ! curl -s --fail "${ENVOY_HOST}/products/fast/healthcheck-target-availability" > /dev/null; then
     echo "ERROR: Target Envoy at ${ENVOY_HOST} is unavailable."
     echo "Status: UNAVAILABLE" >> "$REPORT_FILE"
@@ -138,6 +144,28 @@ for t in threads: t.join()
         exit 1
     fi
 }
+
+BASE_URL="${ENVOY_BASELINE_URL}/api/v1/small"
+
+echo "--------------------------------------------------" | tee -a "$REPORT_FILE"
+echo "Leg Baseline" | tee -a "$REPORT_FILE"
+echo "--------------------------------------------------" | tee -a "$REPORT_FILE"
+
+echo "Running wrk latency check for Leg Baseline..."
+wrk_out=$(mktemp)
+wrk -t2 -c5 -d3s -s benchmarks/lib/latency_reporter.lua --latency "$BASE_URL" | tee "$wrk_out"
+latency_json=$(./benchmarks/lib/latency_parser.sh "$wrk_out")
+throughput_json=$(./benchmarks/lib/throughput_parser.sh "$wrk_out")
+rm -f "$wrk_out"
+
+{
+    echo "Leg Baseline Latency JSON: $latency_json"
+    echo "Leg Baseline Throughput JSON: $throughput_json"
+    echo ""
+} | tee -a "$REPORT_FILE"
+
+echo "Cooling down socket pools..."
+sleep 3
 
 LEG_A_URL="${ENVOY_HOST}/products/fast/123?_b=${TIMESTAMP}a"
 LEG_B_URL="${ENVOY_HOST}/products/slow/123?_b=${TIMESTAMP}b"

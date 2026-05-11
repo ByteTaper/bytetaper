@@ -27,7 +27,11 @@ compression_coordination:
   min_payload_reduction_ratio: 0.00
 
 coalescing_burst:
-  max_p95_ms: 800.0      # was 150; slow path includes follower fallbacks
+  # Latency: overhead-relative
+  baseline_leg: "Leg Baseline"
+  target_leg: "Leg A"
+  max_p95_overhead_ms: 300.0      # Leg A may be at most 300ms slower than baseline
+  max_p95_overhead_ratio: 4.0     # or at most 4× baseline p95
   max_error_rate: 0.0    # was 0.05 — correctness threshold: zero non-2xx
   min_payload_reduction_ratio: 0.00
   # Coalescing correctness thresholds (Leg A fast path)
@@ -56,6 +60,7 @@ envoy_only:
 
 performance_smoke:
   max_p95_overhead_ms: 350.0
+  max_p95_overhead_ratio: 10.0
   max_error_rate: 0.0
   min_payload_reduction_ratio: 0.00
   baseline_leg: Baseline

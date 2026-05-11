@@ -129,6 +129,89 @@ while IFS= read -r leg; do
     } >> "$OUT_MD_FILE"
 done < <(jq -r '.latency_ms | keys[]' "$JSON_FILE" || echo "main")
 
+# Overhead Analysis Section
+THRESHOLDS_FILE="benchmarks/performance-thresholds.yaml"
+get_threshold_internal() {
+    local scen=$1
+    local key=$2
+    awk -v s="$scen" -v k="$key" '
+        $0 ~ "^" s ":" { in_scen=1; next }
+        in_scen && /^[^ ]/ { in_scen=0 }
+        in_scen && $1 ~ k {
+            sub(/^[^:]*:[[:space:]]*/, "", $0)
+            sub(/[[:space:]]*#.*/, "", $0)
+            gsub(/^"|"$|^'\''|'\''$/, "", $0)
+            gsub(/[[:space:]]+$/, "", $0)
+            print $0
+            exit
+        }
+    ' "$THRESHOLDS_FILE"
+}
+
+baseline_leg_cfg=$(get_threshold_internal "$scenario" "baseline_leg")
+target_leg_cfg=$(get_threshold_internal "$scenario" "target_leg")
+
+if [ -n "$baseline_leg_cfg" ] && [ -n "$target_leg_cfg" ]; then
+    baseline_p95=$(jq -r ".latency_ms.\"$baseline_leg_cfg\".latency_ms.p95" "$JSON_FILE" || echo "null")
+    target_p95=$(jq -r ".latency_ms.\"$target_leg_cfg\".latency_ms.p95" "$JSON_FILE" || echo "null")
+    max_p95_overhead_ms=$(get_threshold_internal "$scenario" "max_p95_overhead_ms")
+    max_p95_overhead_ratio=$(get_threshold_internal "$scenario" "max_p95_overhead_ratio")
+
+    if [ "$baseline_p95" != "null" ] && [ "$baseline_p95" != "unavailable" ] && [ "$target_p95" != "null" ] && [ "$target_p95" != "unavailable" ]; then
+        overhead_ms=$(awk -v t="$target_p95" -v b="$baseline_p95" 'BEGIN {
+            diff = t - b
+            if (diff < 0) diff = 0.0
+            print diff
+        }')
+        overhead_ratio=$(awk -v t="$target_p95" -v b="$baseline_p95" 'BEGIN {
+            ratio = t / b
+            printf "%.2f", ratio
+        }')
+
+        # Helper to compare floats
+        is_greater_internal() {
+            awk -v n1="$1" -v n2="$2" 'BEGIN { if (n1 > n2) exit 0; else exit 1 }'
+        }
+
+        status_desc="🟢 **PASS**"
+        
+        # Check absolute overhead
+        if [ -n "$max_p95_overhead_ms" ]; then
+            if is_greater_internal "$overhead_ms" "$max_p95_overhead_ms"; then
+                status_desc="🔴 **FAIL**"
+            fi
+        fi
+
+        # Check ratio overhead
+        if [ -n "$max_p95_overhead_ratio" ]; then
+            if is_greater_internal "$overhead_ratio" "$max_p95_overhead_ratio"; then
+                status_desc="🔴 **FAIL**"
+            fi
+        fi
+
+        threshold_desc=""
+        if [ -n "$max_p95_overhead_ms" ]; then
+            threshold_desc="≤ ${max_p95_overhead_ms} ms"
+        fi
+        if [ -n "$max_p95_overhead_ratio" ]; then
+            if [ -n "$threshold_desc" ]; then
+                threshold_desc="${threshold_desc} / "
+            fi
+            threshold_desc="${threshold_desc}≤ ${max_p95_overhead_ratio}x"
+        fi
+
+        {
+            echo ""
+            echo "## ⚖️ Overhead Analysis (${target_leg_cfg} vs ${baseline_leg_cfg})"
+            echo ""
+            echo "| Metric | Baseline p95 | Target p95 | Overhead (ms) | Overhead Ratio | Threshold Limit | Status |"
+            echo "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |"
+            echo "| **p95** | \`${baseline_p95} ms\` | \`${target_p95} ms\` | \`+${overhead_ms} ms\` | \`${overhead_ratio}x\` | \`${threshold_desc}\` | ${status_desc} |"
+            echo ""
+        } >> "$OUT_MD_FILE"
+    fi
+fi
+
 # Coalescing Effectiveness table
 if jq -e '.coalescing and (.coalescing | length > 0)' "$JSON_FILE" > /dev/null 2>&1; then
     {

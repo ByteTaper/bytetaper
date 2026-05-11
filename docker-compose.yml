@@ -877,6 +877,9 @@ services:
       - ./:/workspace
     environment:
       - ENVOY_URL=http://envoy:10000
+      - ENVOY_BASELINE_URL=http://envoy-baseline:10000
+      - ENVOY_COALESCING_URL=http://envoy-bytetaper-coalescing:10000
+      - METRICS_COALESCING_URL=http://bytetaper-extproc-coalescing:18081
     depends_on:
       mock-api:
         condition: service_healthy
