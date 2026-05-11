@@ -41,11 +41,15 @@ enum class RuntimeMetricEvent : std::uint8_t {
     L2LookupExpired,
     L2LookupDecodeError,
     L2LookupRocksDbError,
-    // New metrics for BT-MAIN-005
     L2AsyncStoreBodyPoolFull,
     L2LookupLaneWait,
     L2StoreLaneWait,
     WorkerStoreLaneStarvation,
+    // Route matching metrics
+    RouteMatchExactScan,
+    RouteMatchPrefixScan,
+    RouteMatchExactHashHit,
+    RouteMatchNoMatch,
 };
 
 struct RuntimeMetrics {
@@ -85,7 +89,6 @@ struct RuntimeMetrics {
     std::atomic<std::uint64_t> l2_lookup_decode_error_total{ 0 };
     std::atomic<std::uint64_t> l2_lookup_rocksdb_error_total{ 0 };
 
-    // New metrics for BT-MAIN-005
     std::atomic<std::uint64_t> worker_store_body_pool_full_total{ 0 };
     std::atomic<std::uint64_t> worker_lookup_lane_wait_ms_total{ 0 };
     std::atomic<std::uint64_t> worker_lookup_lane_wait_count_total{ 0 };
@@ -93,6 +96,11 @@ struct RuntimeMetrics {
     std::atomic<std::uint64_t> worker_store_lane_wait_count_total{ 0 };
     std::atomic<std::uint64_t> worker_store_lane_starvation_total{ 0 };
     std::atomic<std::uint64_t> worker_store_body_pool_bytes_in_use{ 0 };
+
+    std::atomic<std::uint64_t> route_match_exact_scan_total{ 0 };
+    std::atomic<std::uint64_t> route_match_prefix_scan_total{ 0 };
+    std::atomic<std::uint64_t> route_match_exact_hash_hit_total{ 0 };
+    std::atomic<std::uint64_t> route_match_no_match_total{ 0 };
 };
 
 void record_runtime_event(RuntimeMetrics* metrics, RuntimeMetricEvent event);

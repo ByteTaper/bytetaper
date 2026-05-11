@@ -981,6 +981,8 @@ if(BUILD_TESTING)
     target_link_libraries(policy_route_matcher_test
       PRIVATE
         gtest_main
+        bytetaper_hash
+        bytetaper_prometheus_registry
     )
 
     add_test(

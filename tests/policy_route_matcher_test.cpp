@@ -294,4 +294,148 @@ TEST(CompiledRouteMatcherTest, NoMatch_ReturnsNullptr) {
     EXPECT_EQ(match_route_compiled(matcher, "/unknown"), nullptr);
 }
 
+TEST(CompiledRouteMatcherTest, HashStrategyMatchesLinearResult) {
+    RoutePolicy policies[10] = {};
+    policies[0].route_id = "r0";
+    policies[0].match_prefix = "/path0";
+    policies[0].match_kind = RouteMatchKind::Exact;
+    policies[1].route_id = "r1";
+    policies[1].match_prefix = "/path1";
+    policies[1].match_kind = RouteMatchKind::Exact;
+    policies[2].route_id = "r2";
+    policies[2].match_prefix = "/path2";
+    policies[2].match_kind = RouteMatchKind::Exact;
+    policies[3].route_id = "r3";
+    policies[3].match_prefix = "/path3";
+    policies[3].match_kind = RouteMatchKind::Exact;
+    policies[4].route_id = "r4";
+    policies[4].match_prefix = "/path4";
+    policies[4].match_kind = RouteMatchKind::Exact;
+    policies[5].route_id = "r5";
+    policies[5].match_prefix = "/path5";
+    policies[5].match_kind = RouteMatchKind::Exact;
+    policies[6].route_id = "r6";
+    policies[6].match_prefix = "/path6";
+    policies[6].match_kind = RouteMatchKind::Exact;
+    policies[7].route_id = "r7";
+    policies[7].match_prefix = "/path7";
+    policies[7].match_kind = RouteMatchKind::Exact;
+    policies[8].route_id = "r8";
+    policies[8].match_prefix = "/path8";
+    policies[8].match_kind = RouteMatchKind::Exact;
+    policies[9].route_id = "r9";
+    policies[9].match_prefix = "/path9";
+    policies[9].match_kind = RouteMatchKind::Exact;
+
+    CompiledRouteMatcher linear_matcher;
+    compile_route_matcher(policies, 10, &linear_matcher, RouteMatcherStrategy::LinearSmall);
+
+    CompiledRouteMatcher hash_matcher;
+    compile_route_matcher(policies, 10, &hash_matcher, RouteMatcherStrategy::ExactHashPrefixLinear);
+
+    EXPECT_EQ(linear_matcher.strategy, RouteMatcherStrategy::LinearSmall);
+    EXPECT_EQ(hash_matcher.strategy, RouteMatcherStrategy::ExactHashPrefixLinear);
+
+    const char* paths[] = { "/path0", "/path5", "/path9", "/path_unknown", nullptr };
+    for (const char* path : paths) {
+        if (path == nullptr)
+            continue;
+        const RoutePolicy* linear_res = match_route_compiled(linear_matcher, path);
+        const RoutePolicy* hash_res = match_route_compiled(hash_matcher, path);
+        EXPECT_EQ(linear_res, hash_res) << "Mismatch on path: " << path;
+    }
+}
+
+TEST(CompiledRouteMatcherTest, HashStrategyExactHitMetric) {
+    RoutePolicy policies[10] = {};
+    policies[0].route_id = "r0";
+    policies[0].match_prefix = "/path0";
+    policies[0].match_kind = RouteMatchKind::Exact;
+    policies[1].route_id = "r1";
+    policies[1].match_prefix = "/path1";
+    policies[1].match_kind = RouteMatchKind::Exact;
+    policies[2].route_id = "r2";
+    policies[2].match_prefix = "/path2";
+    policies[2].match_kind = RouteMatchKind::Exact;
+    policies[3].route_id = "r3";
+    policies[3].match_prefix = "/path3";
+    policies[3].match_kind = RouteMatchKind::Exact;
+    policies[4].route_id = "r4";
+    policies[4].match_prefix = "/path4";
+    policies[4].match_kind = RouteMatchKind::Exact;
+    policies[5].route_id = "r5";
+    policies[5].match_prefix = "/path5";
+    policies[5].match_kind = RouteMatchKind::Exact;
+    policies[6].route_id = "r6";
+    policies[6].match_prefix = "/path6";
+    policies[6].match_kind = RouteMatchKind::Exact;
+    policies[7].route_id = "r7";
+    policies[7].match_prefix = "/path7";
+    policies[7].match_kind = RouteMatchKind::Exact;
+    policies[8].route_id = "r8";
+    policies[8].match_prefix = "/path8";
+    policies[8].match_kind = RouteMatchKind::Exact;
+    policies[9].route_id = "r9";
+    policies[9].match_prefix = "/path9";
+    policies[9].match_kind = RouteMatchKind::Exact;
+
+    CompiledRouteMatcher matcher;
+    compile_route_matcher(policies, 10, &matcher);
+    EXPECT_EQ(matcher.strategy, RouteMatcherStrategy::ExactHashPrefixLinear);
+
+    metrics::RuntimeMetrics m{};
+    const RoutePolicy* matched = match_route_compiled(matcher, "/path5", &m);
+    ASSERT_NE(matched, nullptr);
+    EXPECT_STREQ(matched->route_id, "r5");
+
+    EXPECT_EQ(m.route_match_exact_hash_hit_total.load(), 1u);
+    EXPECT_EQ(m.route_match_exact_scan_total.load(), 0u);
+    EXPECT_EQ(m.route_match_prefix_scan_total.load(), 0u);
+    EXPECT_EQ(m.route_match_no_match_total.load(), 0u);
+}
+
+TEST(CompiledRouteMatcherTest, HashStrategyNoMatchMetric) {
+    RoutePolicy policies[10] = {};
+    policies[0].route_id = "r0";
+    policies[0].match_prefix = "/path0";
+    policies[0].match_kind = RouteMatchKind::Exact;
+    policies[1].route_id = "r1";
+    policies[1].match_prefix = "/path1";
+    policies[1].match_kind = RouteMatchKind::Exact;
+    policies[2].route_id = "r2";
+    policies[2].match_prefix = "/path2";
+    policies[2].match_kind = RouteMatchKind::Exact;
+    policies[3].route_id = "r3";
+    policies[3].match_prefix = "/path3";
+    policies[3].match_kind = RouteMatchKind::Exact;
+    policies[4].route_id = "r4";
+    policies[4].match_prefix = "/path4";
+    policies[4].match_kind = RouteMatchKind::Exact;
+    policies[5].route_id = "r5";
+    policies[5].match_prefix = "/path5";
+    policies[5].match_kind = RouteMatchKind::Exact;
+    policies[6].route_id = "r6";
+    policies[6].match_prefix = "/path6";
+    policies[6].match_kind = RouteMatchKind::Exact;
+    policies[7].route_id = "r7";
+    policies[7].match_prefix = "/path7";
+    policies[7].match_kind = RouteMatchKind::Exact;
+    policies[8].route_id = "r8";
+    policies[8].match_prefix = "/path8";
+    policies[8].match_kind = RouteMatchKind::Exact;
+    policies[9].route_id = "r9";
+    policies[9].match_prefix = "/path9";
+    policies[9].match_kind = RouteMatchKind::Exact;
+
+    CompiledRouteMatcher matcher;
+    compile_route_matcher(policies, 10, &matcher);
+
+    metrics::RuntimeMetrics m{};
+    const RoutePolicy* matched = match_route_compiled(matcher, "/unknown_path", &m);
+    EXPECT_EQ(matched, nullptr);
+
+    EXPECT_EQ(m.route_match_no_match_total.load(), 1u);
+    EXPECT_EQ(m.route_match_exact_hash_hit_total.load(), 0u);
+}
+
 } // namespace bytetaper::policy

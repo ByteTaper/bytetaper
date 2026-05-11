@@ -89,6 +89,18 @@ void record_runtime_event(RuntimeMetrics* metrics, RuntimeMetricEvent event) {
     case RuntimeMetricEvent::WorkerStoreLaneStarvation:
         metrics->worker_store_lane_starvation_total.fetch_add(1, std::memory_order_relaxed);
         break;
+    case RuntimeMetricEvent::RouteMatchExactScan:
+        metrics->route_match_exact_scan_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case RuntimeMetricEvent::RouteMatchPrefixScan:
+        metrics->route_match_prefix_scan_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case RuntimeMetricEvent::RouteMatchExactHashHit:
+        metrics->route_match_exact_hash_hit_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case RuntimeMetricEvent::RouteMatchNoMatch:
+        metrics->route_match_no_match_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     default:
         break;
     }
@@ -256,7 +268,22 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         "# HELP bytetaper_worker_store_body_pool_bytes_in_use Total memory bytes occupied "
         "by active stores in the body pools.\n"
         "# TYPE bytetaper_worker_store_body_pool_bytes_in_use gauge\n"
-        "bytetaper_worker_store_body_pool_bytes_in_use %lu\n",
+        "bytetaper_worker_store_body_pool_bytes_in_use %lu\n"
+        "# HELP bytetaper_route_match_exact_scan_total Total number of exact route linear scans.\n"
+        "# TYPE bytetaper_route_match_exact_scan_total counter\n"
+        "bytetaper_route_match_exact_scan_total %lu\n"
+        "# HELP bytetaper_route_match_prefix_scan_total Total number of prefix route linear "
+        "scans.\n"
+        "# TYPE bytetaper_route_match_prefix_scan_total counter\n"
+        "bytetaper_route_match_prefix_scan_total %lu\n"
+        "# HELP bytetaper_route_match_exact_hash_hit_total Total number of exact route hash table "
+        "hits.\n"
+        "# TYPE bytetaper_route_match_exact_hash_hit_total counter\n"
+        "bytetaper_route_match_exact_hash_hit_total %lu\n"
+        "# HELP bytetaper_route_match_no_match_total Total number of requests with no route "
+        "match.\n"
+        "# TYPE bytetaper_route_match_no_match_total counter\n"
+        "bytetaper_route_match_no_match_total %lu\n",
         metrics.worker_enqueue_total.load(std::memory_order_relaxed),
         metrics.worker_enqueue_dropped_total.load(std::memory_order_relaxed),
         metrics.worker_job_executed_total.load(std::memory_order_relaxed),
@@ -284,7 +311,11 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         metrics.l2_lookup_rocksdb_error_total.load(std::memory_order_relaxed),
         metrics.worker_store_body_pool_full_total.load(std::memory_order_relaxed), lookup_wait_avg,
         store_wait_avg, metrics.worker_store_lane_starvation_total.load(std::memory_order_relaxed),
-        metrics.worker_store_body_pool_bytes_in_use.load(std::memory_order_relaxed));
+        metrics.worker_store_body_pool_bytes_in_use.load(std::memory_order_relaxed),
+        metrics.route_match_exact_scan_total.load(std::memory_order_relaxed),
+        metrics.route_match_prefix_scan_total.load(std::memory_order_relaxed),
+        metrics.route_match_exact_hash_hit_total.load(std::memory_order_relaxed),
+        metrics.route_match_no_match_total.load(std::memory_order_relaxed));
 
     if (n < 0 || static_cast<std::size_t>(n) >= buf_size) {
         return 0;

@@ -545,8 +545,9 @@ public:
                 const auto req_view = apply_request_headers_selection(request, &filter_state);
                 filter_state.matched_policy = nullptr;
                 if (route_matcher_ready && filter_state.context.raw_path_length > 0) {
-                    filter_state.matched_policy =
-                        policy::match_route_compiled(route_matcher, filter_state.context.raw_path);
+                    filter_state.matched_policy = policy::match_route_compiled(
+                        route_matcher, filter_state.context.raw_path,
+                        metrics_registry ? &metrics_registry->runtime_metrics : nullptr);
                 }
 
                 if (trace_enabled) {

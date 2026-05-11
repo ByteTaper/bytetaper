@@ -4,14 +4,32 @@
 #ifndef BYTETAPER_POLICY_ROUTE_MATCHER_H
 #define BYTETAPER_POLICY_ROUTE_MATCHER_H
 
+#include "hash/hash.h"
+#include "metrics/runtime_metrics.h"
 #include "policy/route_policy.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 
 namespace bytetaper::policy {
 
 static constexpr std::size_t kMaxCompiledRoutes = 64;
+
+enum class RouteMatcherStrategy : std::uint8_t {
+    LinearSmall,
+    ExactHashPrefixLinear,
+    PrefixTrieExperimental,
+};
+
+static constexpr std::size_t kExactHashTableSize = 128;
+static constexpr std::size_t kExactHashStrategyThreshold = 8;
+
+struct ExactRouteHashTable {
+    const char* paths[kExactHashTableSize] = {};
+    const RoutePolicy* policies[kExactHashTableSize] = {};
+    std::uint32_t original_orders[kExactHashTableSize] = {};
+};
 
 struct CompiledExactRoute {
     const char* path = nullptr;
@@ -27,15 +45,20 @@ struct CompiledPrefixRoute {
 };
 
 struct CompiledRouteMatcher {
+    RouteMatcherStrategy strategy = RouteMatcherStrategy::LinearSmall;
+
     CompiledExactRoute exact_routes[kMaxCompiledRoutes];
     std::size_t exact_count = 0;
 
     CompiledPrefixRoute prefix_routes[kMaxCompiledRoutes];
     std::size_t prefix_count = 0;
+
+    ExactRouteHashTable exact_hash_table;
 };
 
 inline CompiledRouteMatcher* compile_route_matcher(const RoutePolicy* policies, std::size_t count,
                                                    CompiledRouteMatcher* matcher) {
+    matcher->strategy = RouteMatcherStrategy::LinearSmall;
     matcher->exact_count = 0;
     matcher->prefix_count = 0;
 
@@ -62,49 +85,130 @@ inline CompiledRouteMatcher* compile_route_matcher(const RoutePolicy* policies, 
             }
         }
     }
+
+    // Auto-select strategy based on exact route count
+    matcher->strategy = (matcher->exact_count > kExactHashStrategyThreshold)
+                            ? RouteMatcherStrategy::ExactHashPrefixLinear
+                            : RouteMatcherStrategy::LinearSmall;
+
+    // Build hash table if using hash strategy
+    if (matcher->strategy == RouteMatcherStrategy::ExactHashPrefixLinear) {
+        for (std::size_t i = 0; i < kExactHashTableSize; ++i) {
+            matcher->exact_hash_table.paths[i] = nullptr;
+            matcher->exact_hash_table.policies[i] = nullptr;
+            matcher->exact_hash_table.original_orders[i] = 0;
+        }
+
+        for (std::size_t i = 0; i < matcher->exact_count; ++i) {
+            const auto& e = matcher->exact_routes[i];
+            std::uint32_t h = bytetaper::hash::hash_cstr_runtime(e.path);
+            std::size_t slot = h & (kExactHashTableSize - 1);
+            while (matcher->exact_hash_table.paths[slot] != nullptr) {
+                slot = (slot + 1) & (kExactHashTableSize - 1);
+            }
+            matcher->exact_hash_table.paths[slot] = e.path;
+            matcher->exact_hash_table.policies[slot] = e.policy;
+            matcher->exact_hash_table.original_orders[slot] = e.original_order;
+        }
+    }
+
+    return matcher;
+}
+
+inline CompiledRouteMatcher* compile_route_matcher(const RoutePolicy* policies, std::size_t count,
+                                                   CompiledRouteMatcher* matcher,
+                                                   RouteMatcherStrategy force_strategy) {
+    compile_route_matcher(policies, count, matcher);
+    matcher->strategy = force_strategy;
+    if (matcher->strategy == RouteMatcherStrategy::ExactHashPrefixLinear) {
+        for (std::size_t i = 0; i < kExactHashTableSize; ++i) {
+            matcher->exact_hash_table.paths[i] = nullptr;
+            matcher->exact_hash_table.policies[i] = nullptr;
+            matcher->exact_hash_table.original_orders[i] = 0;
+        }
+
+        for (std::size_t i = 0; i < matcher->exact_count; ++i) {
+            const auto& e = matcher->exact_routes[i];
+            std::uint32_t h = bytetaper::hash::hash_cstr_runtime(e.path);
+            std::size_t slot = h & (kExactHashTableSize - 1);
+            while (matcher->exact_hash_table.paths[slot] != nullptr) {
+                slot = (slot + 1) & (kExactHashTableSize - 1);
+            }
+            matcher->exact_hash_table.paths[slot] = e.path;
+            matcher->exact_hash_table.policies[slot] = e.policy;
+            matcher->exact_hash_table.original_orders[slot] = e.original_order;
+        }
+    }
     return matcher;
 }
 
 inline const RoutePolicy* match_route_compiled(const CompiledRouteMatcher& matcher,
-                                               const char* request_path) {
+                                               const char* request_path,
+                                               metrics::RuntimeMetrics* metrics) {
     if (request_path == nullptr) {
         return nullptr;
     }
 
-    const CompiledExactRoute* best_exact = nullptr;
+    const RoutePolicy* best_exact_policy = nullptr;
+    std::uint32_t best_exact_order = UINT32_MAX;
     const CompiledPrefixRoute* best_prefix = nullptr;
 
-    // Scan exact routes
-    for (std::size_t i = 0; i < matcher.exact_count; ++i) {
-        const auto& e = matcher.exact_routes[i];
-        if (std::strcmp(request_path, e.path) == 0) {
-            best_exact = &e;
-            break; // First match wins in the sorted order
+    // --- Exact matching ---
+    if (matcher.strategy == RouteMatcherStrategy::ExactHashPrefixLinear) {
+        const std::uint32_t h = bytetaper::hash::hash_cstr_runtime(request_path);
+        std::size_t slot = h & (kExactHashTableSize - 1);
+        while (matcher.exact_hash_table.paths[slot] != nullptr) {
+            if (std::strcmp(matcher.exact_hash_table.paths[slot], request_path) == 0) {
+                metrics::record_runtime_event(metrics,
+                                              metrics::RuntimeMetricEvent::RouteMatchExactHashHit);
+                best_exact_policy = matcher.exact_hash_table.policies[slot];
+                best_exact_order = matcher.exact_hash_table.original_orders[slot];
+                break;
+            }
+            slot = (slot + 1) & (kExactHashTableSize - 1);
+        }
+    } else {
+        for (std::size_t i = 0; i < matcher.exact_count; ++i) {
+            metrics::record_runtime_event(metrics,
+                                          metrics::RuntimeMetricEvent::RouteMatchExactScan);
+            if (std::strcmp(request_path, matcher.exact_routes[i].path) == 0) {
+                best_exact_policy = matcher.exact_routes[i].policy;
+                best_exact_order = matcher.exact_routes[i].original_order;
+                break;
+            }
         }
     }
 
-    // Scan prefix routes
+    // --- Prefix matching (always linear) ---
     for (std::size_t i = 0; i < matcher.prefix_count; ++i) {
+        metrics::record_runtime_event(metrics, metrics::RuntimeMetricEvent::RouteMatchPrefixScan);
         const auto& pr = matcher.prefix_routes[i];
         if (std::strncmp(request_path, pr.prefix, pr.prefix_len) == 0) {
             best_prefix = &pr;
-            break; // First match wins in the sorted order
+            break;
         }
     }
 
-    if (best_exact == nullptr && best_prefix == nullptr) {
+    // --- Tiebreak and no-match ---
+    if (best_exact_policy == nullptr && best_prefix == nullptr) {
+        metrics::record_runtime_event(metrics, metrics::RuntimeMetricEvent::RouteMatchNoMatch);
         return nullptr;
     }
-    if (best_exact == nullptr) {
+    if (best_exact_policy == nullptr) {
         return best_prefix->policy;
     }
     if (best_prefix == nullptr) {
-        return best_exact->policy;
+        return best_exact_policy;
     }
 
     // Both matched — return whichever appeared first in the original array
-    return (best_exact->original_order < best_prefix->original_order) ? best_exact->policy
-                                                                      : best_prefix->policy;
+    return (best_exact_order < best_prefix->original_order) ? best_exact_policy
+                                                            : best_prefix->policy;
+}
+
+inline const RoutePolicy* match_route_compiled(const CompiledRouteMatcher& matcher,
+                                               const char* request_path) {
+    return match_route_compiled(matcher, request_path, nullptr);
 }
 
 /**
