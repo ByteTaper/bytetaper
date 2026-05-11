@@ -9,6 +9,7 @@
 
 namespace bytetaper::coalescing {
 
+// Body-size tier classification. See docs/runtime/BODY_SIZE_CONTRACT.md.
 CoalescingCompletionHandoffTarget decide_coalescing_completion_handoff(std::size_t body_len) {
     if (body_len == 0) {
         return CoalescingCompletionHandoffTarget::NotCacheable;

@@ -101,6 +101,7 @@ coalescing:
 1. **Leader**: The first request for a unique resource (defined by URI and headers) becomes the **Leader**. ByteTaper registers this request in an internal in-flight registry and forwards it to the upstream.
 2. **Follower**: Subsequent concurrent requests for the same resource become **Followers**. ByteTaper "parks" gRPC stream threads at the Envoy edge, holding them without sending duplicate upstream calls.
 3. **Completion**: When the Leader's response returns, it is stored in the cache. ByteTaper then notifies the parked Followers. They perform an immediate cache lookup, find the response, and write it back to their respective clients.
+   - *Note*: Immediate follower handoff is subject to response body size limits. If the body is larger than the 64 KiB buffer (`kL2BodyBufSize`), it can still be cached in L2 for future hits but cannot be transferred directly to the waiting follower (fallback to upstream occurs). For details, see the [Body Size Contract](runtime/BODY_SIZE_CONTRACT.md).
 
 ### Safety & Constraints
 

@@ -85,6 +85,9 @@ Runs synchronously on the gRPC response thread per response body.
 - Metrics counter updates
 - Fail-open / fail-closed safety evaluation
 
+Body-size tier rules determine which store operations run.
+See [Body Size Contract](BODY_SIZE_CONTRACT.md) for tier definitions.
+
 **Forbidden:**
 - Synchronous L2 store (`l2_cache_store_stage`) — disk I/O
 - Unbounded allocation or body accumulation
