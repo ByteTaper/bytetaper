@@ -59,6 +59,11 @@ jobs:
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-benchmark ./benchmarks/scenarios/coalescing_burst.sh
 
+      - name: Run coalescing body-size tier benchmark
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+            docker compose run --rm bytetaper-coalescing-body-size-tiers-test
+
       - name: Collect benchmark artifacts
         run: benchmarks/collect_artifacts.sh
 

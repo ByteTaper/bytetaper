@@ -183,6 +183,24 @@ if jq -e '.coalescing and (.coalescing | length > 0)' "$JSON_FILE" > /dev/null 2
             fun=$(jq -r --arg l "$leg" '.coalescing[$l].follower_unaccounted     // "0"' "$JSON_FILE")
             echo "| $leg | $fsr | $fl1 | $flr | $flm | $fto | $fex | $fmi | $fss | $fnc | $ffa | $fqu | $fun |"
         done < <(jq -r '.coalescing | keys[]' "$JSON_FILE" 2>/dev/null || true)
+
+        echo ""
+        echo "### 🔍 Synchronous L2 Cache Probing Outcomes"
+        echo ""
+        echo "| Leg | Total Probes | Probe Hits | Probe Misses | L2 Ready | Body Too Large | Timeout Final | Avg Latency | Max Latency |"
+        echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|"
+
+        while IFS= read -r leg; do
+            p_tot=$(jq -r --arg l "$leg" '.coalescing[$l].probe_total // "0"' "$JSON_FILE")
+            p_hit=$(jq -r --arg l "$leg" '.coalescing[$l].probe_hit   // "0"' "$JSON_FILE")
+            p_mis=$(jq -r --arg l "$leg" '.coalescing[$l].probe_miss  // "0"' "$JSON_FILE")
+            p_rdy=$(jq -r --arg l "$leg" '.coalescing[$l].probe_l2ready // "0"' "$JSON_FILE")
+            p_btl=$(jq -r --arg l "$leg" '.coalescing[$l].probe_body_too_large // "0"' "$JSON_FILE")
+            p_tof=$(jq -r --arg l "$leg" '.coalescing[$l].probe_timeout_final // "0"' "$JSON_FILE")
+            p_avg=$(jq -r --arg l "$leg" '.coalescing[$l].probe_latency_avg // "0"' "$JSON_FILE")
+            p_max=$(jq -r --arg l "$leg" '.coalescing[$l].probe_latency_max // "0"' "$JSON_FILE")
+            echo "| $leg | $p_tot | $p_hit | $p_mis | $p_rdy | $p_btl | $p_tof | ${p_avg} ms | ${p_max} ms |"
+        done < <(jq -r '.coalescing | keys[]' "$JSON_FILE" 2>/dev/null || true)
     } >> "$OUT_MD_FILE"
 fi
 

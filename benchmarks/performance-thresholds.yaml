@@ -60,3 +60,20 @@ performance_smoke:
   min_payload_reduction_ratio: 0.00
   baseline_leg: Baseline
   target_leg: Observe
+
+coalescing_body_size_tiers:
+  max_error_rate: 0.0
+  max_upstream_calls_per_leg: 1
+  max_follower_unaccounted: 0
+  max_follower_missing: 0
+
+  l1_inline_min_follower_l1_hit_ratio: 0.60
+  l1_inline_max_p95_ms: 200.0
+
+  l2_completion_min_probe_hit_total: 1
+  l2_completion_max_p95_ms: 400.0
+
+  l2_warmonly_min_fallbacks: 1
+  l2_warmonly_max_p95_ms: 800.0
+  l2_warmonly_warn_upstream_calls: 1
+

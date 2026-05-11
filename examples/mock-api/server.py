@@ -255,6 +255,21 @@ class Handler(BaseHTTPRequestHandler):
             self.write_response(200, FIXTURES["huge-json"], fixture_name="huge-json")
             return
 
+        if path.startswith("/products/tier-l1/"):
+            self.write_response(200, FIXTURES["small-json"], delay_kind=delay_kind,
+                                fixture_name="small-json")
+            return
+
+        if path.startswith("/products/tier-l2complete/"):
+            self.write_response(200, FIXTURES["medium-json"], delay_kind=delay_kind,
+                                fixture_name="medium-json")
+            return
+
+        if path.startswith("/products/tier-l2warmonly/"):
+            self.write_response(200, FIXTURES["large-json"], delay_kind=delay_kind,
+                                fixture_name="large-json")
+            return
+
         if path.startswith("/products/"):
             self.write_response(200, FIXTURES["products-by-id"], delay_kind=delay_kind,
                                 fixture_name="products-by-id")

@@ -262,6 +262,141 @@ if [ "$scenario" = "coalescing_burst" ]; then
     done
 fi
 
+if [ "$scenario" = "coalescing_body_size_tiers" ]; then
+    max_calls=$(get_threshold "$scenario" "max_upstream_calls_per_leg")
+    max_unaccounted=$(get_threshold "$scenario" "max_follower_unaccounted")
+    max_missing=$(get_threshold "$scenario" "max_follower_missing")
+
+    # L1-Inline thresholds
+    l1_min_hit_ratio=$(get_threshold "$scenario" "l1_inline_min_follower_l1_hit_ratio")
+    l1_max_p95=$(get_threshold "$scenario" "l1_inline_max_p95_ms")
+
+    # L2-Completion thresholds
+    l2c_min_probe_hits=$(get_threshold "$scenario" "l2_completion_min_probe_hit_total")
+    l2c_max_p95=$(get_threshold "$scenario" "l2_completion_max_p95_ms")
+
+    # L2-Warm-Only thresholds
+    l2w_min_fallbacks=$(get_threshold "$scenario" "l2_warmonly_min_fallbacks")
+    l2w_max_p95=$(get_threshold "$scenario" "l2_warmonly_max_p95_ms")
+    l2w_warn_calls=$(get_threshold "$scenario" "l2_warmonly_warn_upstream_calls")
+
+    for leg in "Leg L1-Inline" "Leg L2-Completion" "Leg L2-Warm-Only"; do
+        echo "Validating specialized metrics for Leg: '$leg'..."
+
+        # 1. Base checks (upstream calls, unaccounted, missing)
+        upstream_calls=$(jq -r --arg l "$leg" '.coalescing[$l].upstream_mock_calls // "n/a"' "$JSON_FILE")
+        unaccounted=$(jq -r --arg l "$leg" '.coalescing[$l].follower_unaccounted // "n/a"' "$JSON_FILE")
+        missing=$(jq -r --arg l "$leg" '.coalescing[$l].follower_missing // "n/a"' "$JSON_FILE")
+        p95=$(jq -r ".latency_ms.\"$leg\".latency_ms.p95" "$JSON_FILE" || echo "n/a")
+
+        if [ "$leg" != "Leg L2-Warm-Only" ] && [ "$upstream_calls" != "n/a" ] && [ -n "$max_calls" ] && [ "$upstream_calls" != "null" ]; then
+            if [ "$upstream_calls" -gt "$max_calls" ]; then
+                echo "  [FAIL] $leg upstream calls: $upstream_calls (max $max_calls)" >&2
+                failed_checks=$((failed_checks + 1))
+            else
+                echo "  [PASS] $leg upstream calls: $upstream_calls (Threshold: max $max_calls)"
+            fi
+        fi
+
+        if [ "$unaccounted" != "n/a" ] && [ -n "$max_unaccounted" ] && [ "$unaccounted" != "null" ]; then
+            if [ "$unaccounted" -gt "$max_unaccounted" ]; then
+                echo "  [FAIL] $leg follower_unaccounted: $unaccounted (max $max_unaccounted)" >&2
+                failed_checks=$((failed_checks + 1))
+            else
+                echo "  [PASS] $leg follower_unaccounted: $unaccounted (Threshold: max $max_unaccounted)"
+            fi
+        fi
+
+        if [ "$missing" != "n/a" ] && [ -n "$max_missing" ] && [ "$missing" != "null" ]; then
+            if [ "$missing" -gt "$max_missing" ]; then
+                echo "  [FAIL] $leg follower_missing: $missing (max $max_missing)" >&2
+                failed_checks=$((failed_checks + 1))
+            else
+                echo "  [PASS] $leg follower_missing: $missing (Threshold: max $max_missing)"
+            fi
+        fi
+
+        # 2. Leg-specific checks
+        if [ "$leg" = "Leg L1-Inline" ]; then
+            # P95 latency check for inline
+            if [ "$p95" != "n/a" ] && [ -n "$l1_max_p95" ] && [ "$p95" != "null" ]; then
+                if is_greater "$p95" "$l1_max_p95"; then
+                    echo "  [FAIL] $leg p95 latency: $p95 ms (max $l1_max_p95 ms)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg p95 latency: $p95 ms (Threshold: max $l1_max_p95 ms)"
+                fi
+            fi
+
+            # Follower L1 hit ratio check
+            followers=$(jq -r --arg l "$leg" '.coalescing[$l].followers // "0"' "$JSON_FILE")
+            l1_hit=$(jq -r --arg l "$leg" '.coalescing[$l].follower_l1_hit // "0"' "$JSON_FILE")
+            if [ "$followers" -gt 0 ] && [ -n "$l1_min_hit_ratio" ] && [ "$followers" != "null" ]; then
+                hit_ratio=$(awk -v h="$l1_hit" -v f="$followers" 'BEGIN { print h / f }')
+                if is_less "$hit_ratio" "$l1_min_hit_ratio"; then
+                    echo "  [FAIL] $leg follower_l1_hit_ratio: $hit_ratio (min $l1_min_hit_ratio)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg follower_l1_hit_ratio: $hit_ratio (Threshold: min $l1_min_hit_ratio)"
+                fi
+            fi
+        fi
+
+        if [ "$leg" = "Leg L2-Completion" ]; then
+            # P95 latency check
+            if [ "$p95" != "n/a" ] && [ -n "$l2c_max_p95" ] && [ "$p95" != "null" ]; then
+                if is_greater "$p95" "$l2c_max_p95"; then
+                    echo "  [FAIL] $leg p95 latency: $p95 ms (max $l2c_max_p95 ms)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg p95 latency: $p95 ms (Threshold: max $l2c_max_p95 ms)"
+                fi
+            fi
+
+            # Sync L2 probe hit check
+            probe_hit=$(jq -r --arg l "$leg" '.coalescing[$l].probe_hit // "n/a"' "$JSON_FILE")
+            if [ "$probe_hit" != "n/a" ] && [ -n "$l2c_min_probe_hits" ] && [ "$probe_hit" != "null" ]; then
+                if [ "$probe_hit" -lt "$l2c_min_probe_hits" ]; then
+                    echo "  [FAIL] $leg sync L2 probe hit: $probe_hit (min $l2c_min_probe_hits)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg sync L2 probe hit: $probe_hit (Threshold: min $l2c_min_probe_hits)"
+                fi
+            fi
+        fi
+
+        if [ "$leg" = "Leg L2-Warm-Only" ]; then
+            # P95 latency check
+            if [ "$p95" != "n/a" ] && [ -n "$l2w_max_p95" ] && [ "$p95" != "null" ]; then
+                if is_greater "$p95" "$l2w_max_p95"; then
+                    echo "  [FAIL] $leg p95 latency: $p95 ms (max $l2w_max_p95 ms)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg p95 latency: $p95 ms (Threshold: max $l2w_max_p95 ms)"
+                fi
+            fi
+
+            # Fallback check
+            fallbacks=$(jq -r --arg l "$leg" '.coalescing[$l].fallbacks // "n/a"' "$JSON_FILE")
+            if [ "$fallbacks" != "n/a" ] && [ -n "$l2w_min_fallbacks" ] && [ "$fallbacks" != "null" ]; then
+                if [ "$fallbacks" -lt "$l2w_min_fallbacks" ]; then
+                    echo "  [FAIL] $leg fallbacks: $fallbacks (min $l2w_min_fallbacks)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg fallbacks: $fallbacks (Threshold: min $l2w_min_fallbacks)"
+                fi
+            fi
+
+            # Upstream calls warning
+            if [ "$upstream_calls" != "n/a" ] && [ -n "$l2w_warn_calls" ] && [ "$upstream_calls" != "null" ]; then
+                if [ "$upstream_calls" -gt "$l2w_warn_calls" ]; then
+                    echo "  [WARN] $leg upstream calls: $upstream_calls (exceeds warning threshold $l2w_warn_calls)"
+                fi
+            fi
+        fi
+    done
+fi
+
 if [ "$failed_checks" -gt 0 ]; then
     echo "=== Threshold Validation FAILED ($failed_checks breaches detected) ===" >&2
     exit 1

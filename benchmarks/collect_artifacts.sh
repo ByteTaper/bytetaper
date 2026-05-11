@@ -39,30 +39,27 @@ jq -n \
   '{
     scenario: $bj.scenario,
     timestamp: $bj.timestamp,
-    total_requests: (($bj.throughput["Leg A"].total_requests // 0) + ($bj.throughput["Leg B"].total_requests // 0)),
-    non_2xx_count: (($bj.throughput["Leg A"].failed_requests // 0) + ($bj.throughput["Leg B"].failed_requests // 0)),
-    requests_per_sec: (($bj.throughput["Leg A"].throughput.requests_per_second // 0) + ($bj.throughput["Leg B"].throughput.requests_per_second // 0)),
-    latency_ms: {
-      "Leg A": ($bj.latency_ms["Leg A"].latency_ms // "UNAVAILABLE"),
-      "Leg B": ($bj.latency_ms["Leg B"].latency_ms // "UNAVAILABLE")
-    },
+    total_requests: (if $bj.throughput == null then 0 else ([$bj.throughput[].total_requests // 0] | add) end),
+    non_2xx_count: (if $bj.throughput == null then 0 else ([$bj.throughput[].failed_requests // 0] | add) end),
+    requests_per_sec: (if $bj.throughput == null then 0 else ([$bj.throughput[].throughput.requests_per_second // 0] | add) end),
+    latency_ms: (if $bj.latency_ms == null then "UNAVAILABLE" else ($bj.latency_ms | map_values(.latency_ms // "UNAVAILABLE")) end),
     legs: ($bj.coalescing // "UNAVAILABLE"),
     totals: {
-      leaders: ((($bj.coalescing["Leg A"].leaders // 0) + ($bj.coalescing["Leg B"].leaders // 0)) // "UNAVAILABLE"),
-      followers: ((($bj.coalescing["Leg A"].followers // 0) + ($bj.coalescing["Leg B"].followers // 0)) // "UNAVAILABLE"),
-      fallbacks: ((($bj.coalescing["Leg A"].fallbacks // 0) + ($bj.coalescing["Leg B"].fallbacks // 0)) // "UNAVAILABLE")
+      leaders: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].leaders // 0] | add) end),
+      followers: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].followers // 0] | add) end),
+      fallbacks: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].fallbacks // 0] | add) end)
     },
     l2_handoff: {
-      pending: ((($bj.coalescing["Leg A"].l2_pending // 0) + ($bj.coalescing["Leg B"].l2_pending // 0)) // "UNAVAILABLE"),
-      ready: ((($bj.coalescing["Leg A"].l2_ready // 0) + ($bj.coalescing["Leg B"].l2_ready // 0)) // "UNAVAILABLE"),
-      failed: ((($bj.coalescing["Leg A"].l2_failed // 0) + ($bj.coalescing["Leg B"].l2_failed // 0)) // "UNAVAILABLE"),
-      delay_ms_avg: ((if (($bj.coalescing["Leg A"].l2_delay // 0) > 0) then ($bj.coalescing["Leg A"].l2_delay // 0) else ($bj.coalescing["Leg B"].l2_delay // 0) end) // "UNAVAILABLE")
+      pending: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].l2_pending // 0] | add) end),
+      ready: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].l2_ready // 0] | add) end),
+      failed: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].l2_failed // 0] | add) end),
+      delay_ms_avg: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].l2_delay // 0] | max) end)
     },
     worker_queue: {
-      dropped: ((($bj.coalescing["Leg A"].w_dropped // 0) + ($bj.coalescing["Leg B"].w_dropped // 0)) // "UNAVAILABLE"),
-      full: ((($bj.coalescing["Leg A"].w_full // 0) + ($bj.coalescing["Leg B"].w_full // 0)) // "UNAVAILABLE"),
-      starvation: ((($bj.coalescing["Leg A"].w_starve // 0) + ($bj.coalescing["Leg B"].w_starve // 0)) // "UNAVAILABLE"),
-      bytes_in_use: ((if (($bj.coalescing["Leg A"].w_bytes // 0) > 0) then ($bj.coalescing["Leg A"].w_bytes // 0) else ($bj.coalescing["Leg B"].w_bytes // 0) end) // "UNAVAILABLE")
+      dropped: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].w_dropped // 0] | add) end),
+      full: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].w_full // 0] | add) end),
+      starvation: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].w_starve // 0] | add) end),
+      bytes_in_use: (if $bj.coalescing == null or $bj.coalescing == "UNAVAILABLE" then "UNAVAILABLE" else ([$bj.coalescing[].w_bytes // 0] | max) end)
     }
   }' > coalescing-summary.json
 

@@ -793,6 +793,26 @@ services:
         set -eu
         sh ./tests/load/coalescing_burst_test.sh
 
+  bytetaper-coalescing-body-size-tiers-test:
+    build:
+      context: .
+      dockerfile: docker/benchmark.Dockerfile
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    depends_on:
+      mock-api:
+        condition: service_healthy
+      bytetaper-extproc-coalescing:
+        condition: service_healthy
+      envoy-bytetaper-coalescing:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-lc"]
+    command:
+      - |
+        chmod +x ./benchmarks/scenarios/coalescing_body_size_tiers.sh
+        ./benchmarks/scenarios/coalescing_body_size_tiers.sh
+
   bytetaper-coalescing-e2e-test:
     image: bytetaper-dev:latest
     working_dir: /workspace

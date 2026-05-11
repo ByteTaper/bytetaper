@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-SCENARIO="coalescing_burst"
+SCENARIO="coalescing_body_size_tiers"
 ENVOY_HOST="${ENVOY_COALESCING_URL:-http://envoy-bytetaper-coalescing:10000}"
 METRICS_HOST="${METRICS_COALESCING_URL:-http://bytetaper-extproc-coalescing:18081}"
 MOCK_HOST="${MOCK_URL:-http://mock-api:8080}"
@@ -54,11 +54,12 @@ fi
 
 echo "All targets are UP."
 
-
-run_burst_leg() {
+run_tier_leg() {
     local leg_name=$1
     local url=$2
-    local require_fallback=$3
+    local expect_l1_hit=$3      # "yes"/"no"
+    local expect_probe_hit=$4   # "yes"/"no"
+    local expect_fallback=$5    # "yes"/"no"
 
     echo "--------------------------------------------------" | tee -a "$REPORT_FILE"
     echo "$leg_name" | tee -a "$REPORT_FILE"
@@ -79,6 +80,7 @@ run_burst_leg() {
     before_metrics=$(snapshot_coalescing_metrics)
     mock_api_reset_metrics "$MOCK_HOST"
 
+    # Fast delay-kind to ensure overlap: self.path with "/fast/" delays mock-api response by 20ms
     python3 -c "
 import threading, urllib.request
 def req():
@@ -120,9 +122,13 @@ for t in threads: t.join()
 
     local leaders
     local followers
+    local l1_hits
+    local probe_hits
     local fallbacks
     leaders=$(jq -r '.leaders' <<< "$coal_json")
     followers=$(jq -r '.followers' <<< "$coal_json")
+    l1_hits=$(jq -r '.follower_l1_hit' <<< "$coal_json")
+    probe_hits=$(jq -r '.probe_hit' <<< "$coal_json")
     fallbacks=$(jq -r '.fallbacks' <<< "$coal_json")
 
     if [ "$leaders" -eq 0 ]; then
@@ -133,26 +139,45 @@ for t in threads: t.join()
         echo "ERROR: Expected followers for overlapping requests in $leg_name, got 0"
         exit 1
     fi
-    if [ "$require_fallback" = "yes" ] && [ "$fallbacks" -eq 0 ]; then
-        echo "ERROR: Expected fallback requests for $leg_name, got 0"
+    if [ "$expect_l1_hit" = "yes" ] && [ "$l1_hits" -eq 0 ]; then
+        echo "ERROR: Expected L1 hits for $leg_name, got 0"
+        exit 1
+    fi
+    if [ "$expect_probe_hit" = "yes" ] && [ "$probe_hits" -eq 0 ]; then
+        echo "ERROR: Expected sync L2 probe hits for $leg_name, got 0"
+        exit 1
+    fi
+    if [ "$expect_fallback" = "yes" ] && [ "$fallbacks" -eq 0 ]; then
+        echo "ERROR: Expected follower fallback requests for $leg_name, got 0"
         exit 1
     fi
 }
 
-LEG_A_URL="${ENVOY_HOST}/products/fast/123?_b=${TIMESTAMP}a"
-LEG_B_URL="${ENVOY_HOST}/products/slow/123?_b=${TIMESTAMP}b"
-
-run_burst_leg "Leg A" "$LEG_A_URL" "no"
+# Leg L1-Inline (small-json, 527 bytes, must hit L1 inline)
+run_tier_leg "Leg L1-Inline" \
+    "${ENVOY_HOST}/products/tier-l1/fast/burst-${TIMESTAMP}" \
+    "yes" "no" "no"
 
 echo "Cooling down socket pools..."
 sleep 3
 
-run_burst_leg "Leg B" "$LEG_B_URL" "yes"
+# Leg L2-Completion (medium-json, 8071 bytes, must probe and hit L2)
+run_tier_leg "Leg L2-Completion" \
+    "${ENVOY_HOST}/products/tier-l2complete/fast/burst-${TIMESTAMP}" \
+    "no" "yes" "no"
+
+echo "Cooling down socket pools..."
+sleep 3
+
+# Leg L2-Warm-Only (large-json, 127268 bytes, too large for follower handoff so fallback is expected)
+run_tier_leg "Leg L2-Warm-Only" \
+    "${ENVOY_HOST}/products/tier-l2warmonly/fast/burst-${TIMESTAMP}" \
+    "no" "no" "yes"
 
 ./benchmarks/report/validate.sh "$REPORT_FILE"
 ./benchmarks/report/generate_json_report.sh "$REPORT_FILE"
 ./benchmarks/report/generate_markdown_report.sh "${REPORT_FILE%.txt}.json"
 ./benchmarks/report/check_thresholds.sh "${REPORT_FILE%.txt}.json"
 
-echo "Benchmark complete."
+echo "Scenario $SCENARIO benchmark complete."
 echo "Results saved to: $REPORT_FILE"
