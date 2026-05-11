@@ -62,6 +62,24 @@ get_metric() {
 }
 
 snapshot_coalescing_metrics() {
+    local l2_pending
+    local l2_ready
+    local l2_failed
+    local l2_delay
+    local w_dropped
+    local w_full
+    local w_starve
+    local w_bytes
+
+    l2_pending=$(get_metric bytetaper_coalescing_leader_l2_handoff_pending_total)
+    l2_ready=$(get_metric bytetaper_coalescing_leader_l2_handoff_ready_total)
+    l2_failed=$(get_metric bytetaper_coalescing_leader_l2_handoff_failed_total)
+    l2_delay=$(get_metric bytetaper_coalescing_l2_handoff_publish_delay_ms_avg)
+    w_dropped=$(get_metric bytetaper_runtime_worker_enqueue_dropped_total)
+    w_full=$(get_metric bytetaper_worker_store_body_pool_full_total)
+    w_starve=$(get_metric bytetaper_worker_store_lane_starvation_total)
+    w_bytes=$(get_metric bytetaper_worker_store_body_pool_bytes_in_use)
+
     jq -c -n \
       --argjson leader "$(get_metric bytetaper_coalescing_leader_total)" \
       --argjson follower "$(get_metric bytetaper_coalescing_follower_total)" \
@@ -82,6 +100,14 @@ snapshot_coalescing_metrics() {
       --argjson follower_l1_ready "$(get_metric bytetaper_coalescing_follower_l1_ready_total)" \
       --argjson follower_l1_ready_but_miss "$(get_metric bytetaper_coalescing_follower_l1_ready_but_miss_total)" \
       --argjson follower_expired "$(get_metric bytetaper_coalescing_follower_expired_total)" \
+      --argjson l2_pending "$l2_pending" \
+      --argjson l2_ready "$l2_ready" \
+      --argjson l2_failed "$l2_failed" \
+      --argjson l2_delay "$l2_delay" \
+      --argjson w_dropped "$w_dropped" \
+      --argjson w_full "$w_full" \
+      --argjson w_starve "$w_starve" \
+      --argjson w_bytes "$w_bytes" \
       '{leader:$leader,follower:$follower,cache_hit:$cache_hit,fallback:$fallback,bypass:$bypass,
         follower_shared_response:$follower_shared_response,follower_l1_hit:$follower_l1_hit,
         follower_timeout:$follower_timeout,follower_missing:$follower_missing,
@@ -90,7 +116,9 @@ snapshot_coalescing_metrics() {
         follower_pool_queue_full:$follower_pool_queue_full,follower_unaccounted:$follower_unaccounted,
         leader_l1_store_success:$leader_l1_store_success,leader_l1_store_failed:$leader_l1_store_failed,
         follower_l1_ready:$follower_l1_ready,follower_l1_ready_but_miss:$follower_l1_ready_but_miss,
-        follower_expired:$follower_expired}'
+        follower_expired:$follower_expired,
+        l2_pending:$l2_pending,l2_ready:$l2_ready,l2_failed:$l2_failed,l2_delay:$l2_delay,
+        w_dropped:$w_dropped,w_full:$w_full,w_starve:$w_starve,w_bytes:$w_bytes}'
 }
 
 coalescing_delta() {
@@ -127,7 +155,15 @@ coalescing_delta() {
         leader_l1_store_failed: (($after.leader_l1_store_failed // 0) - ($before.leader_l1_store_failed // 0)),
         follower_l1_ready: (($after.follower_l1_ready // 0) - ($before.follower_l1_ready // 0)),
         follower_l1_ready_but_miss: (($after.follower_l1_ready_but_miss // 0) - ($before.follower_l1_ready_but_miss // 0)),
-        follower_expired: (($after.follower_expired // 0) - ($before.follower_expired // 0))
+        follower_expired: (($after.follower_expired // 0) - ($before.follower_expired // 0)),
+        l2_pending: (($after.l2_pending // 0) - ($before.l2_pending // 0)),
+        l2_ready: (($after.l2_ready // 0) - ($before.l2_ready // 0)),
+        l2_failed: (($after.l2_failed // 0) - ($before.l2_failed // 0)),
+        l2_delay: ($after.l2_delay // 0),
+        w_dropped: (($after.w_dropped // 0) - ($before.w_dropped // 0)),
+        w_full: (($after.w_full // 0) - ($before.w_full // 0)),
+        w_starve: (($after.w_starve // 0) - ($before.w_starve // 0)),
+        w_bytes: ($after.w_bytes // 0)
       }'
 }
 
@@ -155,11 +191,16 @@ run_burst_leg() {
     before_metrics=$(snapshot_coalescing_metrics)
     mock_api_reset_metrics "$MOCK_HOST"
 
-    echo "Sending $N concurrent GET requests to ${url} ..."
-    for i in $(seq 1 "$N"); do
-        curl -s -o /dev/null "$url" &
-    done
-    wait
+    python3 -c "
+import threading, urllib.request
+def req():
+    try: urllib.request.urlopen('${url}').read()
+    except Exception as e: pass
+
+threads = [threading.Thread(target=req) for _ in range($N)]
+for t in threads: t.start()
+for t in threads: t.join()
+"
 
     echo "Concurrent burst complete."
     after_metrics=$(snapshot_coalescing_metrics)

@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -27,3 +28,29 @@ jobs:
       - name: Build and Run Integration Tests
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-integration-test
+
+  benchmark:
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run coalescing burst benchmark
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-benchmark ./benchmarks/scenarios/coalescing_burst.sh
+
+      - name: Collect benchmark artifacts
+        run: benchmarks/collect_artifacts.sh
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ github.sha }}
+          path: |
+            benchmark-summary.json
+            benchmark-summary.md
+            mock-api-metrics.json
+            coalescing-summary.json
+          if-no-files-found: error
+          retention-days: 30

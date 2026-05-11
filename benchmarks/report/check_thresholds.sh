@@ -45,7 +45,9 @@ get_threshold() {
         in_scen && /^[^ ]/ { in_scen=0 }
         in_scen && $1 ~ k {
             sub(/^[^:]*:[[:space:]]*/, "", $0)
+            sub(/[[:space:]]*#.*/, "", $0)
             gsub(/^"|"$|^'\''|'\''$/, "", $0)
+            gsub(/[[:space:]]+$/, "", $0)
             print $0
             exit
         }
@@ -190,12 +192,24 @@ if [ "$scenario" = "coalescing_burst" ]; then
     max_unaccounted=$(get_threshold "$scenario" "max_follower_unaccounted_leg_a")
     max_missing=$(get_threshold "$scenario" "max_follower_missing_leg_a")
     min_fb_b=$(get_threshold "$scenario" "min_fallbacks_leg_b")
+    max_amp_a=$(get_threshold "$scenario" "max_upstream_amplification_ratio_leg_a")
+    warn_p99_ms=$(get_threshold "$scenario" "warn_p99_ms")
 
     for leg in "Leg A" "Leg B"; do
         coal_ratio=$(jq -r --arg l "$leg" '.coalescing[$l].coalescing_ratio // "n/a"' "$JSON_FILE")
         unaccounted=$(jq -r --arg l "$leg" '.coalescing[$l].follower_unaccounted // "n/a"' "$JSON_FILE")
         missing=$(jq -r --arg l "$leg" '.coalescing[$l].follower_missing // "n/a"' "$JSON_FILE")
         fallbacks=$(jq -r --arg l "$leg" '.coalescing[$l].fallbacks // "n/a"' "$JSON_FILE")
+
+        # Warning P99 Latency check
+        if [ -n "$warn_p99_ms" ] && [ "$warn_p99_ms" != "null" ]; then
+            p99=$(jq -r ".latency_ms.\"$leg\".latency_ms.p99" "$JSON_FILE" || echo "unavailable")
+            if [ "$p99" != "unavailable" ] && [ -n "$p99" ] && [ "$p99" != "null" ]; then
+                if is_greater "$p99" "$warn_p99_ms"; then
+                    echo "  [WARN] $leg P99 Latency: ${p99} ms (Warning threshold exceeded: max ${warn_p99_ms} ms)"
+                fi
+            fi
+        fi
 
         if [ "$leg" = "Leg A" ]; then
             # Min coalescing ratio
@@ -223,6 +237,16 @@ if [ "$scenario" = "coalescing_burst" ]; then
                     failed_checks=$((failed_checks + 1))
                 else
                     echo "  [PASS] $leg follower_missing: $missing (Threshold: max $max_missing)"
+                fi
+            fi
+            # Upstream amplification check
+            amp_ratio=$(jq -r --arg l "$leg" '.coalescing[$l].upstream_amplification_ratio // "n/a"' "$JSON_FILE")
+            if [ "$amp_ratio" != "n/a" ] && [ -n "$max_amp_a" ] && [ "$amp_ratio" != "null" ]; then
+                if is_greater "$amp_ratio" "$max_amp_a"; then
+                    echo "  [FAIL] $leg upstream_amplification_ratio: $amp_ratio (max $max_amp_a)" >&2
+                    failed_checks=$((failed_checks + 1))
+                else
+                    echo "  [PASS] $leg upstream_amplification_ratio: $amp_ratio (Threshold: max $max_amp_a)"
                 fi
             fi
         fi

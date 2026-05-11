@@ -81,3 +81,9 @@ graphify-out/
 AGENTS.md
 CLAUDE.md
 GEMINI.md
+
+# Generated benchmark artifacts
+benchmark-summary.json
+benchmark-summary.md
+mock-api-metrics.json
+coalescing-summary.json

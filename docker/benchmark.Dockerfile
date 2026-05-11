@@ -10,7 +10,8 @@ RUN apk add --no-cache \
     bash \
     curl \
     jq \
-    wrk
+    wrk \
+    python3
 
 WORKDIR /workspace
 
