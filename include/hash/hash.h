@@ -15,6 +15,7 @@ struct HashSeed {
 };
 
 void init_process_hash_seed();
+bool validate_hash_seed_hex(const char* value);
 void set_process_hash_seed_for_test(HashSeed seed);
 void reset_process_hash_seed_for_test();
 HashSeed process_hash_seed();

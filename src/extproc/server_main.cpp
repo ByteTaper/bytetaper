@@ -5,6 +5,7 @@
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
 #include "extproc/grpc_server.h"
+#include "extproc/startup_parse.h"
 #include "hash/hash.h"
 #include "metrics/metrics_http_server.h"
 #include "metrics/prometheus_registry.h"
@@ -26,22 +27,6 @@ std::atomic<bool> g_should_stop{ false };
 
 void on_signal(int) {
     g_should_stop.store(true);
-}
-
-static bool parse_env_size(const char* name, std::size_t* out, const char** err_msg) {
-    const char* val = std::getenv(name);
-    if (val == nullptr || val[0] == '\0') {
-        return true;
-    }
-    char* end = nullptr;
-    errno = 0;
-    const unsigned long parsed = std::strtoul(val, &end, 10);
-    if (*end != '\0' || errno != 0 || parsed == 0) {
-        *err_msg = name;
-        return false;
-    }
-    *out = static_cast<std::size_t>(parsed);
-    return true;
 }
 
 struct ServerArgs {
@@ -113,7 +98,11 @@ ServerArgs parse_args(int argc, char** argv) {
                 args.error = true;
                 return args;
             }
-            args.metrics_port = static_cast<std::uint16_t>(std::atoi(argv[i + 1]));
+            if (!bytetaper::extproc::startup::parse_u16_port("--metrics-port", argv[i + 1],
+                                                             &args.metrics_port)) {
+                args.error = true;
+                return args;
+            }
             i += 1;
             continue;
         }
@@ -138,6 +127,13 @@ int main(int argc, char** argv) {
     log_config.enabled = true;
     log_config.level = bytetaper::observability::LogLevel::Info;
     bytetaper::observability::logger_init(log_config);
+
+    const char* seed_env = std::getenv("BYTETAPER_HASH_SEED_HEX");
+    if (seed_env != nullptr && !bytetaper::hash::validate_hash_seed_hex(seed_env)) {
+        std::fprintf(stderr, "error: invalid value for env var BYTETAPER_HASH_SEED_HEX\n");
+        bytetaper::observability::logger_shutdown();
+        return 1;
+    }
 
     bytetaper::hash::init_process_hash_seed();
 
@@ -179,12 +175,21 @@ int main(int argc, char** argv) {
     bytetaper::cache::L2DiskCache* l2_cache = nullptr;
     if (args.l2_cache_path != nullptr) {
         bytetaper::cache::L2CacheOptions l2_opts{};
-        if (const char* v = std::getenv("BYTETAPER_L2_BLOCK_CACHE_MB"))
-            l2_opts.block_cache_mb = static_cast<std::size_t>(std::atoi(v));
-        if (const char* v = std::getenv("BYTETAPER_L2_WRITE_BUFFER_MB"))
-            l2_opts.write_buffer_mb = static_cast<std::size_t>(std::atoi(v));
-        if (const char* v = std::getenv("BYTETAPER_L2_MAX_BACKGROUND_JOBS"))
-            l2_opts.max_background_jobs = std::atoi(v);
+        const char* l2_parse_err = nullptr;
+        if (!bytetaper::extproc::startup::parse_env_size("BYTETAPER_L2_BLOCK_CACHE_MB",
+                                                         &l2_opts.block_cache_mb, &l2_parse_err) ||
+            !bytetaper::extproc::startup::parse_env_size("BYTETAPER_L2_WRITE_BUFFER_MB",
+                                                         &l2_opts.write_buffer_mb, &l2_parse_err) ||
+            !bytetaper::extproc::startup::parse_env_positive_int(
+                "BYTETAPER_L2_MAX_BACKGROUND_JOBS", &l2_opts.max_background_jobs, &l2_parse_err)) {
+            std::fprintf(stderr, "error: invalid value for env var %s\n", l2_parse_err);
+            bytetaper::observability::logger_shutdown();
+            return 1;
+        }
+
+        std::fprintf(stderr,
+                     "l2_cache: block_cache_mb=%zu write_buffer_mb=%zu max_background_jobs=%d\n",
+                     l2_opts.block_cache_mb, l2_opts.write_buffer_mb, l2_opts.max_background_jobs);
 
         l2_cache = bytetaper::cache::l2_open_with_options(args.l2_cache_path, l2_opts);
         if (l2_cache == nullptr) {
@@ -212,11 +217,15 @@ int main(int argc, char** argv) {
 
     bytetaper::runtime::WorkerQueueConfig wq_config{};
     const char* parse_err = nullptr;
-    if (!parse_env_size("BYTETAPER_WORKER_COUNT", &wq_config.worker_count, &parse_err) ||
-        !parse_env_size("BYTETAPER_LOOKUP_LANE_QUOTA", &wq_config.lookup_lane_quota, &parse_err) ||
-        !parse_env_size("BYTETAPER_STORE_LANE_QUOTA", &wq_config.store_lane_quota, &parse_err) ||
-        !parse_env_size("BYTETAPER_ASYNC_STORE_MAX_BODY_SIZE", &wq_config.async_store_max_body_size,
-                        &parse_err)) {
+    if (!bytetaper::extproc::startup::parse_env_size("BYTETAPER_WORKER_COUNT",
+                                                     &wq_config.worker_count, &parse_err) ||
+        !bytetaper::extproc::startup::parse_env_size("BYTETAPER_LOOKUP_LANE_QUOTA",
+                                                     &wq_config.lookup_lane_quota, &parse_err) ||
+        !bytetaper::extproc::startup::parse_env_size("BYTETAPER_STORE_LANE_QUOTA",
+                                                     &wq_config.store_lane_quota, &parse_err) ||
+        !bytetaper::extproc::startup::parse_env_size("BYTETAPER_ASYNC_STORE_MAX_BODY_SIZE",
+                                                     &wq_config.async_store_max_body_size,
+                                                     &parse_err)) {
         std::fprintf(stderr, "error: invalid value for env var %s\n", parse_err);
         if (l2_cache != nullptr) {
             bytetaper::cache::l2_close(&l2_cache);

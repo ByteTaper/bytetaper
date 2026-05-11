@@ -381,6 +381,18 @@ if(BUILD_TESTING)
     )
     add_test(NAME grpc_server_worker_lifecycle_test COMMAND grpc_server_worker_lifecycle_test)
 
+    add_executable(server_main_args_test
+      tests/server_main_args_test.cpp
+    )
+    target_link_libraries(server_main_args_test
+      PRIVATE
+        gtest_main
+        bytetaper_extproc_grpc_server
+        RocksDB::RocksDB
+        bytetaper_prometheus_registry
+    )
+    add_test(NAME server_main_args_test COMMAND server_main_args_test)
+
     add_executable(extproc_header_view_test
       tests/extproc_header_view_test.cpp
       src/extproc/header_view.cpp

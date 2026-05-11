@@ -122,6 +122,19 @@ void init_process_hash_seed() {
     g_initialized.store(true, std::memory_order_release);
 }
 
+bool validate_hash_seed_hex(const char* value) {
+    if (value == nullptr || std::strlen(value) != 32) {
+        return false;
+    }
+    for (int i = 0; i < 32; ++i) {
+        char c = value[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void set_process_hash_seed_for_test(HashSeed seed) {
     std::lock_guard<std::mutex> lock(g_init_mutex);
     g_process_seed = seed;

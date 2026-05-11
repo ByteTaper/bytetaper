@@ -18,6 +18,10 @@ struct L2DiskCache; // opaque; defined in l2_rocksdb_cache.cpp
 // include/coalescing/coalescing_completion_handoff.h.
 static constexpr std::size_t kL2MaxBodySize = 1 * 1024 * 1024;
 
+// L2CacheOptions — configurable via environment variables at startup:
+//   BYTETAPER_L2_BLOCK_CACHE_MB   >= 1 (default 64)
+//   BYTETAPER_L2_WRITE_BUFFER_MB  >= 1 (default 32)
+//   BYTETAPER_L2_MAX_BACKGROUND_JOBS >= 1 (default 2)
 struct L2CacheOptions {
     std::size_t block_cache_mb = 64;
     std::size_t write_buffer_mb = 32;
