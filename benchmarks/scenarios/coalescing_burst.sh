@@ -70,6 +70,14 @@ snapshot_coalescing_metrics() {
     local w_full
     local w_starve
     local w_bytes
+    local probe_total
+    local probe_hit
+    local probe_miss
+    local probe_body_too_large
+    local probe_l2ready
+    local probe_timeout_final
+    local probe_latency_avg
+    local probe_latency_max
 
     l2_pending=$(get_metric bytetaper_coalescing_leader_l2_handoff_pending_total)
     l2_ready=$(get_metric bytetaper_coalescing_leader_l2_handoff_ready_total)
@@ -79,6 +87,15 @@ snapshot_coalescing_metrics() {
     w_full=$(get_metric bytetaper_worker_store_body_pool_full_total)
     w_starve=$(get_metric bytetaper_worker_store_lane_starvation_total)
     w_bytes=$(get_metric bytetaper_worker_store_body_pool_bytes_in_use)
+
+    probe_total=$(get_metric bytetaper_coalescing_follower_sync_l2_probe_total)
+    probe_hit=$(get_metric bytetaper_coalescing_follower_sync_l2_probe_hit_total)
+    probe_miss=$(get_metric bytetaper_coalescing_follower_sync_l2_probe_miss_total)
+    probe_body_too_large=$(get_metric bytetaper_coalescing_follower_sync_l2_probe_body_too_large_total)
+    probe_l2ready=$(get_metric bytetaper_coalescing_follower_sync_l2_probe_l2ready_total)
+    probe_timeout_final=$(get_metric bytetaper_coalescing_follower_sync_l2_probe_timeout_final_total)
+    probe_latency_avg=$(get_metric bytetaper_coalescing_follower_sync_l2_probe_latency_ms_avg)
+    probe_latency_max=$(get_metric bytetaper_coalescing_follower_sync_l2_probe_latency_ms_max)
 
     jq -c -n \
       --argjson leader "$(get_metric bytetaper_coalescing_leader_total)" \
@@ -108,6 +125,14 @@ snapshot_coalescing_metrics() {
       --argjson w_full "$w_full" \
       --argjson w_starve "$w_starve" \
       --argjson w_bytes "$w_bytes" \
+      --argjson probe_total "$probe_total" \
+      --argjson probe_hit "$probe_hit" \
+      --argjson probe_miss "$probe_miss" \
+      --argjson probe_body_too_large "$probe_body_too_large" \
+      --argjson probe_l2ready "$probe_l2ready" \
+      --argjson probe_timeout_final "$probe_timeout_final" \
+      --argjson probe_latency_avg "$probe_latency_avg" \
+      --argjson probe_latency_max "$probe_latency_max" \
       '{leader:$leader,follower:$follower,cache_hit:$cache_hit,fallback:$fallback,bypass:$bypass,
         follower_shared_response:$follower_shared_response,follower_l1_hit:$follower_l1_hit,
         follower_timeout:$follower_timeout,follower_missing:$follower_missing,
@@ -118,7 +143,11 @@ snapshot_coalescing_metrics() {
         follower_l1_ready:$follower_l1_ready,follower_l1_ready_but_miss:$follower_l1_ready_but_miss,
         follower_expired:$follower_expired,
         l2_pending:$l2_pending,l2_ready:$l2_ready,l2_failed:$l2_failed,l2_delay:$l2_delay,
-        w_dropped:$w_dropped,w_full:$w_full,w_starve:$w_starve,w_bytes:$w_bytes}'
+        w_dropped:$w_dropped,w_full:$w_full,w_starve:$w_starve,w_bytes:$w_bytes,
+        probe_total:$probe_total,probe_hit:$probe_hit,probe_miss:$probe_miss,
+        probe_body_too_large:$probe_body_too_large,probe_l2ready:$probe_l2ready,
+        probe_timeout_final:$probe_timeout_final,probe_latency_avg:$probe_latency_avg,
+        probe_latency_max:$probe_latency_max}'
 }
 
 coalescing_delta() {
@@ -163,7 +192,15 @@ coalescing_delta() {
         w_dropped: (($after.w_dropped // 0) - ($before.w_dropped // 0)),
         w_full: (($after.w_full // 0) - ($before.w_full // 0)),
         w_starve: (($after.w_starve // 0) - ($before.w_starve // 0)),
-        w_bytes: ($after.w_bytes // 0)
+        w_bytes: ($after.w_bytes // 0),
+        probe_total: (($after.probe_total // 0) - ($before.probe_total // 0)),
+        probe_hit: (($after.probe_hit // 0) - ($before.probe_hit // 0)),
+        probe_miss: (($after.probe_miss // 0) - ($before.probe_miss // 0)),
+        probe_body_too_large: (($after.probe_body_too_large // 0) - ($before.probe_body_too_large // 0)),
+        probe_l2ready: (($after.probe_l2ready // 0) - ($before.probe_l2ready // 0)),
+        probe_timeout_final: (($after.probe_timeout_final // 0) - ($before.probe_timeout_final // 0)),
+        probe_latency_avg: ($after.probe_latency_avg // 0),
+        probe_latency_max: ($after.probe_latency_max // 0)
       }'
 }
 

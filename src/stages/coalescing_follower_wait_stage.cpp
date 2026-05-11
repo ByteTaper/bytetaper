@@ -14,6 +14,56 @@
 
 namespace bytetaper::stages {
 
+enum class SyncL2ProbePath { L2Ready, TimeoutFinal };
+
+static apg::StageOutput try_coalescing_follower_sync_l2_probe(apg::ApgTransformContext& context,
+                                                              SyncL2ProbePath path,
+                                                              metrics::CoalescingMetrics* metrics) {
+    if (context.coalescing_decision.action != coalescing::CoalescingAction::Follower ||
+        context.l2_cache == nullptr || !context.cache_key_ready) {
+        return { apg::StageResult::Continue, "preconditions-failed-no-probe" };
+    }
+
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = l2_cache_lookup_stage(context);
+    const auto elapsed_ms =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::steady_clock::now() - start)
+                                       .count());
+
+    if (metrics != nullptr) {
+        metrics->follower_sync_l2_probe_total.fetch_add(1, std::memory_order_relaxed);
+        metrics->follower_sync_l2_probe_latency_ms_total.fetch_add(elapsed_ms,
+                                                                   std::memory_order_relaxed);
+        metrics->follower_sync_l2_probe_latency_ms_count.fetch_add(1, std::memory_order_relaxed);
+        // CAS update for max
+        uint64_t cur =
+            metrics->follower_sync_l2_probe_latency_ms_max.load(std::memory_order_relaxed);
+        while (elapsed_ms > cur &&
+               !metrics->follower_sync_l2_probe_latency_ms_max.compare_exchange_weak(
+                   cur, elapsed_ms, std::memory_order_relaxed)) {
+        }
+        // Path split
+        if (path == SyncL2ProbePath::L2Ready) {
+            metrics->follower_sync_l2_probe_l2ready_total.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            metrics->follower_sync_l2_probe_timeout_final_total.fetch_add(
+                1, std::memory_order_relaxed);
+        }
+        // Outcome
+        if (result.result == apg::StageResult::SkipRemaining) {
+            metrics->follower_sync_l2_probe_hit_total.fetch_add(1, std::memory_order_relaxed);
+        } else if (result.note != nullptr &&
+                   std::strcmp(result.note, "l2-body-too-large-for-buffer") == 0) {
+            metrics->follower_sync_l2_probe_body_too_large_total.fetch_add(
+                1, std::memory_order_relaxed);
+        } else {
+            metrics->follower_sync_l2_probe_miss_total.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    return result;
+}
+
 static apg::StageOutput try_final_cache_probe(apg::ApgTransformContext& context) {
     apg::StageOutput l1 = l1_cache_lookup_stage(context);
     if (l1.result == apg::StageResult::SkipRemaining) {
@@ -28,22 +78,21 @@ static apg::StageOutput try_final_cache_probe(apg::ApgTransformContext& context)
         return l1;
     }
 
-    if (context.l2_cache != nullptr && context.cache_key_ready) {
-        apg::StageOutput l2 = l2_cache_lookup_stage(context);
-        if (l2.result == apg::StageResult::SkipRemaining) {
-            if (context.coalescing_registry != nullptr) {
-                coalescing::registry_remove_waiter(context.coalescing_registry,
-                                                   context.coalescing_decision.key);
-            }
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::FollowerL2Hit);
-            record_coalescing_event(context.coalescing_metrics,
-                                    metrics::CoalescingMetricEvent::FollowerCacheHit);
-            return l2;
+    apg::StageOutput l2 = try_coalescing_follower_sync_l2_probe(
+        context, SyncL2ProbePath::TimeoutFinal, context.coalescing_metrics);
+    if (l2.result == apg::StageResult::SkipRemaining) {
+        if (context.coalescing_registry != nullptr) {
+            coalescing::registry_remove_waiter(context.coalescing_registry,
+                                               context.coalescing_decision.key);
         }
-        if (l2.note != nullptr && std::strcmp(l2.note, "l2-body-too-large-for-buffer") == 0) {
-            return l2;
-        }
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerL2Hit);
+        record_coalescing_event(context.coalescing_metrics,
+                                metrics::CoalescingMetricEvent::FollowerCacheHit);
+        return l2;
+    }
+    if (l2.note != nullptr && std::strcmp(l2.note, "l2-body-too-large-for-buffer") == 0) {
+        return l2;
     }
 
     return { apg::StageResult::Continue, "final-cache-probe-miss" };
@@ -203,7 +252,8 @@ apg::StageOutput coalescing_follower_wait_stage(apg::ApgTransformContext& contex
                                             context.coalescing_decision);
         return { apg::StageResult::Continue, "l1-ready-but-miss-fallback" };
     } else if (wait_result == coalescing::RegistryWaitResult::L2Ready) {
-        apg::StageOutput l2 = l2_cache_lookup_stage(context);
+        apg::StageOutput l2 = try_coalescing_follower_sync_l2_probe(
+            context, SyncL2ProbePath::L2Ready, context.coalescing_metrics);
         if (l2.result == apg::StageResult::SkipRemaining) {
             if (context.coalescing_registry != nullptr) {
                 coalescing::registry_remove_waiter(context.coalescing_registry,

@@ -29,6 +29,33 @@ Runs synchronously on the gRPC request thread per request.
 - Unbounded computation or allocation
 - Blocking disk cleanup or warmup
 
+### Exception: Coalescing Follower Sync L2 Probe
+
+`coalescing_follower_wait_stage` internally performs one synchronous L2 lookup per
+follower request in two specific paths:
+
+- After `RegistryWaitResult::L2Ready` wakeup and L1 miss
+- After `RegistryWaitResult` timeout and L1 miss (final cache probe)
+
+**Required preconditions** (all must hold):
+- Request is acting as `CoalescingAction::Follower`
+- Leader has already published a result (or the follower has timed out)
+- L1 lookup has already missed
+- `context.l2_cache != nullptr`
+- `context.cache_key_ready == true`
+
+**Why this is acceptable:** The probe is bounded by the leader response time plus
+`handoff_buffer_ms`. The worker thread that performs the L2 store signals the follower
+only after the store completes; the follower's sync probe then reads from a key already
+written. The call is inside a single helper (`try_coalescing_follower_sync_l2_probe`)
+and is metric-visible.
+
+**Invariant preserved:** `l2_cache_lookup_stage` does not appear in `kLookupStages`.
+The exception is internal to the follower wait stage, not in the compiled route table.
+Enforced by `tests/default_pipeline_boundaries_test.cpp`.
+
+**Metrics:** `bytetaper_coalescing_follower_sync_l2_probe_*`
+
 ---
 
 ## Response-Header Pipeline (`kResponseStages`)

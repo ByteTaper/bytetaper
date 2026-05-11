@@ -138,6 +138,14 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         metrics.l2_handoff_publish_delay_count_total.load(std::memory_order_relaxed);
     const double delay_avg = delay_count > 0 ? static_cast<double>(delay_total) / delay_count : 0.0;
 
+    const std::uint64_t probe_latency_total =
+        metrics.follower_sync_l2_probe_latency_ms_total.load(std::memory_order_relaxed);
+    const std::uint64_t probe_latency_count =
+        metrics.follower_sync_l2_probe_latency_ms_count.load(std::memory_order_relaxed);
+    const double probe_latency_avg =
+        probe_latency_count > 0 ? static_cast<double>(probe_latency_total) / probe_latency_count
+                                : 0.0;
+
     int written = std::snprintf(
         buf, buf_size,
         "# HELP bytetaper_coalescing_leader_total Total number of requests that became coalescing "
@@ -287,7 +295,39 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
         "# HELP bytetaper_coalescing_l2_handoff_publish_delay_ms_avg Average delay in milliseconds "
         "to publish L2Ready handoff.\n"
         "# TYPE bytetaper_coalescing_l2_handoff_publish_delay_ms_avg gauge\n"
-        "bytetaper_coalescing_l2_handoff_publish_delay_ms_avg %.3f\n",
+        "bytetaper_coalescing_l2_handoff_publish_delay_ms_avg %.3f\n"
+        "# HELP bytetaper_coalescing_follower_sync_l2_probe_total Total number of synchronous L2 "
+        "probes performed by followers.\n"
+        "# TYPE bytetaper_coalescing_follower_sync_l2_probe_total counter\n"
+        "bytetaper_coalescing_follower_sync_l2_probe_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_sync_l2_probe_hit_total Total number of synchronous "
+        "L2 probes that hit cache.\n"
+        "# TYPE bytetaper_coalescing_follower_sync_l2_probe_hit_total counter\n"
+        "bytetaper_coalescing_follower_sync_l2_probe_hit_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_sync_l2_probe_miss_total Total number of synchronous "
+        "L2 probes that missed cache.\n"
+        "# TYPE bytetaper_coalescing_follower_sync_l2_probe_miss_total counter\n"
+        "bytetaper_coalescing_follower_sync_l2_probe_miss_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_sync_l2_probe_body_too_large_total Total number of "
+        "synchronous L2 probes where body was too large.\n"
+        "# TYPE bytetaper_coalescing_follower_sync_l2_probe_body_too_large_total counter\n"
+        "bytetaper_coalescing_follower_sync_l2_probe_body_too_large_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_sync_l2_probe_l2ready_total Total number of "
+        "synchronous L2 probes on L2Ready wakeup.\n"
+        "# TYPE bytetaper_coalescing_follower_sync_l2_probe_l2ready_total counter\n"
+        "bytetaper_coalescing_follower_sync_l2_probe_l2ready_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_sync_l2_probe_timeout_final_total Total number of "
+        "synchronous L2 probes on timeout final probe.\n"
+        "# TYPE bytetaper_coalescing_follower_sync_l2_probe_timeout_final_total counter\n"
+        "bytetaper_coalescing_follower_sync_l2_probe_timeout_final_total %llu\n"
+        "# HELP bytetaper_coalescing_follower_sync_l2_probe_latency_ms_avg Average latency in "
+        "milliseconds of synchronous L2 probes.\n"
+        "# TYPE bytetaper_coalescing_follower_sync_l2_probe_latency_ms_avg gauge\n"
+        "bytetaper_coalescing_follower_sync_l2_probe_latency_ms_avg %.3f\n"
+        "# HELP bytetaper_coalescing_follower_sync_l2_probe_latency_ms_max Maximum latency in "
+        "milliseconds of synchronous L2 probes.\n"
+        "# TYPE bytetaper_coalescing_follower_sync_l2_probe_latency_ms_max gauge\n"
+        "bytetaper_coalescing_follower_sync_l2_probe_latency_ms_max %llu\n",
         (unsigned long long) metrics.leader_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_total.load(std::memory_order_relaxed),
         (unsigned long long) metrics.follower_cache_hit_total.load(std::memory_order_relaxed),
@@ -335,7 +375,21 @@ std::size_t render_coalescing_metrics_prometheus(const CoalescingMetrics& metric
             std::memory_order_relaxed),
         (unsigned long long) metrics.follower_guardrail_shard_limit_total.load(
             std::memory_order_relaxed),
-        (unsigned int) metrics.active_follower_waiters.load(std::memory_order_relaxed), delay_avg);
+        (unsigned int) metrics.active_follower_waiters.load(std::memory_order_relaxed), delay_avg,
+        (unsigned long long) metrics.follower_sync_l2_probe_total.load(std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_sync_l2_probe_hit_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_sync_l2_probe_miss_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_sync_l2_probe_body_too_large_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_sync_l2_probe_l2ready_total.load(
+            std::memory_order_relaxed),
+        (unsigned long long) metrics.follower_sync_l2_probe_timeout_final_total.load(
+            std::memory_order_relaxed),
+        probe_latency_avg,
+        (unsigned long long) metrics.follower_sync_l2_probe_latency_ms_max.load(
+            std::memory_order_relaxed));
 
     if (written < 0 || static_cast<std::size_t>(written) >= buf_size) {
         return 0;

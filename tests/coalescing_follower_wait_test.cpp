@@ -186,16 +186,55 @@ TEST_F(CoalescingFollowerWaitTest, FollowerDirectWait_L2ReadyButMiss) {
                                                  ctx.request_epoch_ms, 50, 128);
     ctx.coalescing_decision.lifecycle_generation = reg_res.lifecycle_generation;
 
+    // Initialize temporary empty L2 cache
+    const char* db_path = "/tmp/bytetaper_follower_wait_l2_miss_test";
+    cache::l2_destroy(db_path);
+    auto* l2 = cache::l2_open(db_path);
+    ASSERT_NE(l2, nullptr);
+    ctx.l2_cache = l2;
+
     // Complete registry with L2Ready
     coalescing::registry_complete_state_if_generation(
         registry.get(), ctx.coalescing_decision.key, ctx.coalescing_decision.lifecycle_generation,
         coalescing::InFlightCompletionState::L2Ready, ctx.request_epoch_ms);
 
     cache_key_prepare_stage(ctx);
+    ctx.cache_key_ready = true;
     auto output = coalescing_follower_wait_stage(ctx);
 
     EXPECT_EQ(output.result, apg::StageResult::Continue);
     EXPECT_STREQ(output.note, "l2-ready-but-miss-fallback");
+
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_miss_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_l2ready_total.load(), 1u);
+
+    // Cleanup
+    cache::l2_close(&l2);
+    cache::l2_destroy(db_path);
+}
+
+TEST_F(CoalescingFollowerWaitTest, FollowerDirectWait_L2ReadyButNoL2Cache) {
+    auto reg_res = coalescing::registry_register(registry.get(), ctx.coalescing_decision.key,
+                                                 ctx.request_epoch_ms, 50, 128);
+    ctx.coalescing_decision.lifecycle_generation = reg_res.lifecycle_generation;
+
+    // Complete registry with L2Ready
+    coalescing::registry_complete_state_if_generation(
+        registry.get(), ctx.coalescing_decision.key, ctx.coalescing_decision.lifecycle_generation,
+        coalescing::InFlightCompletionState::L2Ready, ctx.request_epoch_ms);
+
+    cache_key_prepare_stage(ctx);
+    ctx.l2_cache = nullptr; // Explicitly ensure l2_cache is null to fail precondition check
+    ctx.cache_key_ready = true;
+    auto output = coalescing_follower_wait_stage(ctx);
+
+    EXPECT_EQ(output.result, apg::StageResult::Continue);
+    EXPECT_STREQ(output.note, "l2-ready-but-miss-fallback");
+
+    // Precondition check should prevent any probe metric increments
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_total.load(), 0u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_miss_total.load(), 0u);
 }
 
 TEST_F(CoalescingFollowerWaitTest, FollowerDirectWait_L2Ready) {
@@ -240,6 +279,11 @@ TEST_F(CoalescingFollowerWaitTest, FollowerDirectWait_L2Ready) {
     EXPECT_TRUE(ctx.cache_hit);
     EXPECT_STREQ(ctx.cache_layer, "L2");
 
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_hit_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_l2ready_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_latency_ms_count.load(), 1u);
+
     // Cleanup
     cache::l2_close(&l2);
     cache::l2_destroy(db_path);
@@ -281,6 +325,10 @@ TEST_F(CoalescingFollowerWaitTest, TimeoutFinalProbe_L2Hit) {
     EXPECT_GE(coalescing_metrics->follower_cache_hit_total.load(), 1u);
     EXPECT_GE(coalescing_metrics->follower_l2_hit_total.load(), 1u);
 
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_hit_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_timeout_final_total.load(), 1u);
+
     cache::l2_close(&l2);
     cache::l2_destroy(db_path);
 }
@@ -290,7 +338,15 @@ TEST_F(CoalescingFollowerWaitTest, TimeoutFinalProbe_BothMiss) {
                                                  ctx.request_epoch_ms, 50, 128);
     ctx.coalescing_decision.lifecycle_generation = reg_res.lifecycle_generation;
 
+    // Initialize temporary empty L2 cache
+    const char* db_path = "/tmp/bytetaper_timeout_final_miss_l2_test";
+    cache::l2_destroy(db_path);
+    auto* l2 = cache::l2_open(db_path);
+    ASSERT_NE(l2, nullptr);
+    ctx.l2_cache = l2;
+
     cache_key_prepare_stage(ctx);
+    ctx.cache_key_ready = true;
 
     policy.coalescing.backend_timeout_ms = 0;
     policy.coalescing.handoff_buffer_ms = 0;
@@ -304,6 +360,15 @@ TEST_F(CoalescingFollowerWaitTest, TimeoutFinalProbe_BothMiss) {
     EXPECT_GE(coalescing_metrics->fallback_total.load(), 1u);
     EXPECT_GE(coalescing_metrics->follower_timeout_total.load(), 1u);
     EXPECT_EQ(coalescing_metrics->follower_cache_hit_total.load(), 0u);
+
+    // Sync L2 probe metrics assertions
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_miss_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_timeout_final_total.load(), 1u);
+
+    // Cleanup
+    cache::l2_close(&l2);
+    cache::l2_destroy(db_path);
 }
 
 TEST_F(CoalescingFollowerWaitTest, TimeoutFinalProbe_L2Unavailable) {
@@ -387,6 +452,56 @@ TEST_F(CoalescingFollowerWaitTest, TimeoutFinalProbe_L2BodyTooLarge) {
     EXPECT_EQ(coalescing_metrics->follower_timeout_l2_body_too_large_total.load(), 1u);
     EXPECT_EQ(coalescing_metrics->fallback_total.load(), 1u);
 
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_body_too_large_total.load(), 1u);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_timeout_final_total.load(), 1u);
+
+    cache::l2_close(&l2);
+    cache::l2_destroy(db_path);
+}
+
+TEST_F(CoalescingFollowerWaitTest, ProbeMetrics_ProbeLatencyRecorded) {
+    auto reg_res = coalescing::registry_register(registry.get(), ctx.coalescing_decision.key,
+                                                 ctx.request_epoch_ms, 50, 128);
+    ctx.coalescing_decision.lifecycle_generation = reg_res.lifecycle_generation;
+
+    // Initialize temporary L2 cache
+    const char* db_path = "/tmp/bytetaper_follower_wait_l2_latency_test";
+    cache::l2_destroy(db_path);
+    auto* l2 = cache::l2_open(db_path);
+    ASSERT_NE(l2, nullptr);
+    ctx.l2_cache = l2;
+
+    // Populate L2 cache
+    cache::CacheEntry entry;
+    std::strcpy(entry.content_type, "application/json");
+    entry.body = "{\"data\": \"l2-direct-wait-cached\"}";
+    entry.body_len = std::strlen(entry.body);
+    entry.created_at_epoch_ms = ctx.request_epoch_ms;
+    entry.expires_at_epoch_ms = ctx.request_epoch_ms + 60000;
+
+    cache::CacheKeyInput ki{};
+    ki.method = ctx.request_method;
+    ki.route_id = policy.route_id;
+    ki.path = ctx.raw_path;
+    ki.policy_version = policy.route_id;
+
+    cache::build_cache_key(ki, entry.key, sizeof(entry.key));
+
+    ASSERT_TRUE(cache::l2_put(l2, entry));
+
+    // Complete registry with L2Ready
+    coalescing::registry_complete_state_if_generation(
+        registry.get(), ctx.coalescing_decision.key, ctx.coalescing_decision.lifecycle_generation,
+        coalescing::InFlightCompletionState::L2Ready, ctx.request_epoch_ms);
+
+    cache_key_prepare_stage(ctx);
+    auto output = coalescing_follower_wait_stage(ctx);
+
+    EXPECT_EQ(output.result, apg::StageResult::SkipRemaining);
+    EXPECT_EQ(coalescing_metrics->follower_sync_l2_probe_latency_ms_count.load(), 1u);
+
+    // Cleanup
     cache::l2_close(&l2);
     cache::l2_destroy(db_path);
 }

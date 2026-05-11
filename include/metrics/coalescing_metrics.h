@@ -88,6 +88,17 @@ struct CoalescingMetrics {
 
     std::atomic<std::uint64_t> l2_handoff_publish_delay_ms_total{ 0 };
     std::atomic<std::uint64_t> l2_handoff_publish_delay_count_total{ 0 };
+
+    // Sync L2 probe — bounded exception inside coalescing_follower_wait_stage
+    std::atomic<std::uint64_t> follower_sync_l2_probe_total{ 0 };
+    std::atomic<std::uint64_t> follower_sync_l2_probe_hit_total{ 0 };
+    std::atomic<std::uint64_t> follower_sync_l2_probe_miss_total{ 0 };
+    std::atomic<std::uint64_t> follower_sync_l2_probe_body_too_large_total{ 0 };
+    std::atomic<std::uint64_t> follower_sync_l2_probe_latency_ms_total{ 0 };    // sum for avg
+    std::atomic<std::uint64_t> follower_sync_l2_probe_latency_ms_count{ 0 };    // count for avg
+    std::atomic<std::uint64_t> follower_sync_l2_probe_latency_ms_max{ 0 };      // CAS-updated max
+    std::atomic<std::uint64_t> follower_sync_l2_probe_l2ready_total{ 0 };       // path split
+    std::atomic<std::uint64_t> follower_sync_l2_probe_timeout_final_total{ 0 }; // path split
 };
 
 void record_coalescing_event(CoalescingMetrics* metrics, CoalescingMetricEvent event);
