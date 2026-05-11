@@ -54,3 +54,25 @@ jobs:
             coalescing-summary.json
           if-no-files-found: error
           retention-days: 30
+
+  runtime-image:
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Build dev image
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+            docker compose build bytetaper-dev
+
+      - name: Compile release binary
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+            docker compose run --rm bytetaper-build-server
+
+      - name: Run production smoke validation suite
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+            docker compose --profile runtime-test run --rm bytetaper-runtime-smoke-validator

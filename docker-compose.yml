@@ -901,6 +901,63 @@ services:
       - bt-ccache:/home/bytetaper/.cache/ccache
     command: ["/bin/bash"]
 
+  bytetaper-runtime-image-build:
+    build:
+      context: .
+      dockerfile: docker/production.Dockerfile
+    image: bytetaper-runtime:latest
+    command: ["--help"]
+    profiles: ["runtime-test"]
+
+  bytetaper-runtime-smoke-test:
+    image: bytetaper-runtime:latest
+    depends_on:
+      bytetaper-runtime-image-build:
+        condition: service_completed_successfully
+    volumes:
+      - ./examples/policy/coalescing-benchmark-policy.yaml:/etc/bytetaper/policy.yaml:ro
+    command:
+      - "--listen-address"
+      - "0.0.0.0:18080"
+      - "--policy-file"
+      - "/etc/bytetaper/policy.yaml"
+      - "--l2-cache-path"
+      - "/tmp/bt-runtime-test"
+      - "--metrics-address"
+      - "0.0.0.0"
+      - "--metrics-port"
+      - "18081"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'printf \"\" > /dev/tcp/127.0.0.1/18080 && printf \"\" > /dev/tcp/127.0.0.1/18081'"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+    profiles: ["runtime-test"]
+
+  bytetaper-runtime-smoke-validator:
+    image: bytetaper-dev:latest
+    depends_on:
+      bytetaper-runtime-smoke-test:
+        condition: service_healthy
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        echo "Querying metrics from bytetaper-runtime-smoke-test..."
+        response=$$(curl -f -s http://bytetaper-runtime-smoke-test:18081/metrics)
+        echo "Metrics fetched successfully!"
+        echo "$$response" | grep -q "bytetaper_cache_l1_hit_total" || {
+          echo "ERROR: Metrics response missing expected 'bytetaper_cache_l1_hit_total'!"
+          exit 1;
+        }
+        echo "SUCCESS: Production runtime smoke test validator passed!"
+    profiles: ["runtime-test"]
+
 volumes:
   bt-l2-cache: {}
   bt-build: {}

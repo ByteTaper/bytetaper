@@ -95,6 +95,33 @@ Rootless note:
 LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-unit-test
 ```
 
+## Docker Images
+
+ByteTaper utilizes two primary Docker images tailored for distinct roles:
+
+### 1. Reusable Development Image (`bytetaper-dev:latest`)
+- **Purpose**: Compiling, building, formatting, and running tests.
+- **Contents**: Full compiler and build toolchain (C++ compiler, CMake, Ninja, ccache), dynamic library headers (gRPC, Protobuf, Yaml-CPP, RocksDB), and testing frameworks.
+- **Local build command**:
+  ```bash
+  docker compose build bytetaper-dev
+  ```
+
+### 2. Production Runtime Image (`bytetaper-runtime:latest`)
+- **Purpose**: Minimal, secure, high-performance production runner (~470 MB).
+- **Contents**: Release-compiled `bytetaper-extproc-server` binary, stripped shared libraries, policies, and license/attribution files. It excludes compilers or development dependencies and runs under a secure, non-root `bytetaper` user (`uid=1001`).
+- **Build and validation workflow**:
+  ```bash
+  # 1. Compile the release target binary inside the dev image:
+  LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-build-server
+
+  # 2. Build the optimized production runtime image:
+  docker compose --profile runtime-test build bytetaper-runtime-image-build
+
+  # 3. Run the automated production smoke validation suite:
+  LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose --profile runtime-test run --rm bytetaper-runtime-smoke-validator
+  ```
+
 ## Run ByteTaper with Docker Compose
 
 The default local stack uses:

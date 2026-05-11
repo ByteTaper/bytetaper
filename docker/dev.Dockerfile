@@ -1,5 +1,11 @@
+ARG ROCKSDB_VERSION=v11.1.1
+ARG ROCKSDB_COMMIT_SHA=6cdeb9d9d0630763327f512e6255cab33f6834e7
+
 # --- Stage 1: RocksDB Builder ---
 FROM ubuntu:24.04 AS rocksdb-builder
+
+ARG ROCKSDB_VERSION
+ARG ROCKSDB_COMMIT_SHA
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -16,7 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp/rocksdb-src
-RUN git clone --depth 1 --branch v11.1.1 https://github.com/facebook/rocksdb.git .
+RUN git clone --depth 1 --branch ${ROCKSDB_VERSION} https://github.com/facebook/rocksdb.git . \
+    && git checkout ${ROCKSDB_COMMIT_SHA} \
+    && ACTUAL=$(git rev-parse HEAD) \
+    && [ "$ACTUAL" = "${ROCKSDB_COMMIT_SHA}" ] \
+       || { echo "ERROR: RocksDB SHA mismatch: expected ${ROCKSDB_COMMIT_SHA}, got $ACTUAL"; exit 1; }
 
 # Build shared library with optimization and portability enabled
 RUN DEBUG_LEVEL=0 PORTABLE=1 make -j$(nproc) shared_lib
