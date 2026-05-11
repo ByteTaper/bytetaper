@@ -5,6 +5,7 @@
 
 #include "cache/cache_entry.h"
 #include "hash/hash.h"
+#include "metrics/cache_metrics.h"
 
 #include <cstring>
 
@@ -51,11 +52,18 @@ void l1_init(L1Cache* cache) {
     }
 }
 
-void l1_put(L1Cache* cache, const CacheEntry& entry) {
+void l1_put(L1Cache* cache, const CacheEntry& entry, bytetaper::metrics::CacheMetrics* metrics) {
     if (cache == nullptr || entry.key == nullptr) {
         return;
     }
-    if (!l1_can_store_entry(entry)) {
+    if (entry.body_len > kL1MaxBodySize) {
+        bytetaper::metrics::record_cache_event(
+            metrics, bytetaper::metrics::CacheMetricEvent::L1StoreRejectedBodyTooLarge);
+        return;
+    }
+    if (entry.body_len > 0 && entry.body == nullptr) {
+        bytetaper::metrics::record_cache_event(
+            metrics, bytetaper::metrics::CacheMetricEvent::L1StoreRejectedInvalidBody);
         return;
     }
 
@@ -65,20 +73,54 @@ void l1_put(L1Cache* cache, const CacheEntry& entry) {
 
     std::scoped_lock lock(shard.mutex);
 
-    // Sequential FIFO within the shard.
-    const std::size_t slot_idx = shard.write_cursor % kL1SlotsPerShard;
-    shard.slots[slot_idx] = entry;
-    copy_body_to_slot(&shard, slot_idx, entry);
-    shard.key_hashes[slot_idx] = h;
-    shard.generations[slot_idx] += 1;
-    shard.write_cursor += 1;
+    std::size_t target_slot = shard.write_cursor % kL1SlotsPerShard;
+    bool found = false;
+
+    // Scan for duplicate key
+    for (std::size_t i = 0; i < kL1SlotsPerShard; ++i) {
+        if (shard.generations[i] > 0 && shard.key_hashes[i] == h &&
+            std::strcmp(shard.slots[i].key, entry.key) == 0) {
+            target_slot = i;
+            found = true;
+            bytetaper::metrics::record_cache_event(
+                metrics, bytetaper::metrics::CacheMetricEvent::L1DuplicateOverwrite);
+            break;
+        }
+    }
+
+    if (!found) {
+        if (shard.generations[target_slot] > 0) {
+            bytetaper::metrics::record_cache_event(
+                metrics, bytetaper::metrics::CacheMetricEvent::L1EvictionRingOverwrite);
+        }
+    }
+
+    bytetaper::metrics::record_cache_event(metrics,
+                                           bytetaper::metrics::CacheMetricEvent::L1StoreAdmitted);
+
+    shard.slots[target_slot] = entry;
+    copy_body_to_slot(&shard, target_slot, entry);
+    shard.key_hashes[target_slot] = h;
+    shard.generations[target_slot] += 1;
+
+    if (!found) {
+        shard.write_cursor += 1;
+    }
 }
 
-bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry) {
+bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry,
+                     bytetaper::metrics::CacheMetrics* metrics) {
     if (cache == nullptr || entry.key == nullptr) {
         return false;
     }
-    if (!l1_can_store_entry(entry)) {
+    if (entry.body_len > kL1MaxBodySize) {
+        bytetaper::metrics::record_cache_event(
+            metrics, bytetaper::metrics::CacheMetricEvent::L1StoreRejectedBodyTooLarge);
+        return false;
+    }
+    if (entry.body_len > 0 && entry.body == nullptr) {
+        bytetaper::metrics::record_cache_event(
+            metrics, bytetaper::metrics::CacheMetricEvent::L1StoreRejectedInvalidBody);
         return false;
     }
 
@@ -100,12 +142,23 @@ bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry) {
                 return false; // Existing is newer, do not promote stale data.
             }
             // Existing is older or same age, we will overwrite this EXACT slot
-            // to avoid having multiple copies of the same key in the ring.
             target_slot = i;
             found = true;
+            bytetaper::metrics::record_cache_event(
+                metrics, bytetaper::metrics::CacheMetricEvent::L1DuplicateOverwrite);
             break;
         }
     }
+
+    if (!found) {
+        if (shard.generations[target_slot] > 0) {
+            bytetaper::metrics::record_cache_event(
+                metrics, bytetaper::metrics::CacheMetricEvent::L1EvictionRingOverwrite);
+        }
+    }
+
+    bytetaper::metrics::record_cache_event(metrics,
+                                           bytetaper::metrics::CacheMetricEvent::L1StoreAdmitted);
 
     // 2. Perform insertion
     shard.slots[target_slot] = entry;
@@ -114,7 +167,6 @@ bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry) {
     shard.generations[target_slot] += 1;
 
     // Only increment cursor if we didn't overwrite an existing slot.
-    // This keeps the ring buffer strictly FIFO for new keys.
     if (!found) {
         shard.write_cursor += 1;
     }
@@ -122,7 +174,8 @@ bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry) {
 }
 
 bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
-            char* body_out, std::size_t body_out_capacity) {
+            char* body_out, std::size_t body_out_capacity,
+            bytetaper::metrics::CacheMetrics* metrics) {
     if (cache == nullptr || key == nullptr || out == nullptr) {
         return false;
     }
@@ -138,6 +191,10 @@ bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEnt
         if (shard.generations[i] == 0) {
             continue;
         }
+
+        bytetaper::metrics::record_cache_event(
+            metrics, bytetaper::metrics::CacheMetricEvent::L1LookupSlotScanned);
+
         if (shard.key_hashes[i] != h) {
             continue;
         }
@@ -145,6 +202,8 @@ bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEnt
             continue;
         }
         if (now_ms > 0 && is_expired(shard.slots[i], now_ms)) {
+            bytetaper::metrics::record_cache_event(
+                metrics, bytetaper::metrics::CacheMetricEvent::L1ExpiredMiss);
             continue;
         }
 

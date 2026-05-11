@@ -132,7 +132,7 @@ add_library(bytetaper_cache STATIC
   src/cache/cache_safety.cpp
 )
 target_include_directories(bytetaper_cache PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(bytetaper_cache PUBLIC bytetaper_hash RocksDB::RocksDB)
+target_link_libraries(bytetaper_cache PUBLIC bytetaper_hash bytetaper_prometheus_registry RocksDB::RocksDB)
 
 add_library(bytetaper_coalescing STATIC
   src/coalescing/coalescing_key.cpp

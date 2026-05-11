@@ -67,7 +67,7 @@ apg::StageOutput l2_cache_lookup_stage(apg::ApgTransformContext& context) {
 
     // Hit - populate outputs
     if (context.l1_cache != nullptr) {
-        cache::l1_put(context.l1_cache, hit);
+        cache::l1_put(context.l1_cache, hit, context.cache_metrics);
     }
 
     context.cache_hit = true;

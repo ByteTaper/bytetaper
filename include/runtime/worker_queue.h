@@ -22,6 +22,7 @@ struct L1Cache;
 namespace bytetaper::metrics {
 struct RuntimeMetrics;
 struct CoalescingMetrics;
+struct CacheMetrics;
 } // namespace bytetaper::metrics
 
 namespace bytetaper::coalescing {
@@ -123,6 +124,7 @@ struct WorkerQueueResources {
     cache::L1Cache* l1_cache = nullptr;
     metrics::RuntimeMetrics* runtime_metrics = nullptr;
     metrics::CoalescingMetrics* coalescing_metrics = nullptr;
+    metrics::CacheMetrics* cache_metrics = nullptr;
 };
 
 // Represents a single sharded queue with its own lock and inline pending registry.

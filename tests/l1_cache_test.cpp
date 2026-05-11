@@ -4,6 +4,7 @@
 #include "cache/cache_entry.h"
 #include "cache/l1_cache.h"
 #include "hash/hash.h"
+#include "metrics/cache_metrics.h"
 
 #include <cstring>
 #include <gtest/gtest.h>
@@ -247,6 +248,219 @@ TEST_F(L1CacheTest, BoundaryExactlyMaxBodySizeAllowed) {
     EXPECT_STREQ(out.key, "boundary_key");
     EXPECT_EQ(out.body_len, kL1MaxBodySize);
     EXPECT_STREQ(body_buf, max_body.c_str());
+}
+
+TEST_F(L1CacheTest, EvictionRingOverwriteMetric) {
+    bytetaper::metrics::CacheMetrics metrics{};
+
+    // Fill the shard with 16 entries to targeted shard
+    std::size_t targeted_shard = expected_hash_key("key_0") % kL1ShardCount;
+    std::vector<std::string> keys;
+    int suffix = 0;
+    while (keys.size() < kL1SlotsPerShard + 1) {
+        std::string candidate = "key_" + std::to_string(suffix++);
+        if (expected_hash_key(candidate.c_str()) % kL1ShardCount == targeted_shard) {
+            keys.push_back(candidate);
+        }
+    }
+
+    for (std::size_t i = 0; i < kL1SlotsPerShard; ++i) {
+        CacheEntry e{};
+        ::strncpy(e.key, keys[i].c_str(), sizeof(e.key) - 1);
+        l1_put(cache.get(), e, &metrics);
+    }
+    EXPECT_EQ(metrics.l1_eviction_total.load(), 0);
+
+    // Overwrite the first entry (eviction)
+    CacheEntry e{};
+    ::strncpy(e.key, keys[kL1SlotsPerShard].c_str(), sizeof(e.key) - 1);
+    l1_put(cache.get(), e, &metrics);
+
+    EXPECT_EQ(metrics.l1_eviction_total.load(), 1);
+}
+
+TEST_F(L1CacheTest, DuplicateOverwriteMetric) {
+    bytetaper::metrics::CacheMetrics metrics{};
+
+    CacheEntry e{};
+    ::strncpy(e.key, "dup_key", sizeof(e.key) - 1);
+    e.created_at_epoch_ms = 1000;
+    l1_put(cache.get(), e, &metrics);
+
+    CacheEntry e2{};
+    ::strncpy(e2.key, "dup_key", sizeof(e2.key) - 1);
+    e2.created_at_epoch_ms = 2000;
+
+    EXPECT_TRUE(l1_put_if_newer(cache.get(), e2, &metrics));
+    EXPECT_EQ(metrics.l1_duplicate_overwrite_total.load(), 1);
+}
+
+TEST_F(L1CacheTest, ExpiredMissMetric) {
+    bytetaper::metrics::CacheMetrics metrics{};
+
+    CacheEntry e{};
+    ::strncpy(e.key, "exp_key", sizeof(e.key) - 1);
+    e.created_at_epoch_ms = 1000;
+    e.expires_at_epoch_ms = 1500;
+    l1_put(cache.get(), e, &metrics);
+
+    CacheEntry out{};
+    char body_buf[kL1MaxBodySize] = {};
+    EXPECT_FALSE(l1_get(cache.get(), "exp_key", 2000, &out, body_buf, sizeof(body_buf), &metrics));
+    EXPECT_EQ(metrics.l1_expired_miss_total.load(), 1);
+}
+
+TEST_F(L1CacheTest, LookupSlotScannedMetric) {
+    bytetaper::metrics::CacheMetrics metrics{};
+
+    // Add 3 entries to the same shard
+    std::size_t targeted_shard = expected_hash_key("scan_key0") % kL1ShardCount;
+    std::vector<std::string> keys;
+    int suffix = 0;
+    while (keys.size() < 3) {
+        std::string candidate = "scan_key" + std::to_string(suffix++);
+        if (expected_hash_key(candidate.c_str()) % kL1ShardCount == targeted_shard) {
+            keys.push_back(candidate);
+        }
+    }
+
+    for (const auto& k : keys) {
+        CacheEntry e{};
+        ::strncpy(e.key, k.c_str(), sizeof(e.key) - 1);
+        l1_put(cache.get(), e, &metrics);
+    }
+
+    CacheEntry out{};
+    char body_buf[kL1MaxBodySize] = {};
+    // Searching for a non-existing key in the same shard will scan all active (live) slots (which
+    // is 3)
+    std::string non_existent;
+    while (true) {
+        std::string candidate = "non_existent_" + std::to_string(suffix++);
+        if (expected_hash_key(candidate.c_str()) % kL1ShardCount == targeted_shard) {
+            non_existent = candidate;
+            break;
+        }
+    }
+
+    l1_get(cache.get(), non_existent.c_str(), 0, &out, body_buf, sizeof(body_buf), &metrics);
+    EXPECT_EQ(metrics.l1_lookup_slots_scanned_total.load(), 3);
+}
+
+TEST_F(L1CacheTest, SuccessfulPutIncrementsAdmittedMetric) {
+    bytetaper::metrics::CacheMetrics metrics{};
+    CacheEntry e{};
+    ::strncpy(e.key, "success_admit", sizeof(e.key) - 1);
+    e.body = "OK";
+    e.body_len = 2;
+
+    l1_put(cache.get(), e, &metrics);
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), 1);
+    EXPECT_EQ(metrics.l1_store_rejected_body_too_large_total.load(), 0);
+    EXPECT_EQ(metrics.l1_store_rejected_invalid_body_total.load(), 0);
+}
+
+TEST_F(L1CacheTest, OversizedPutAndPutIfNewerRejectMetrics) {
+    bytetaper::metrics::CacheMetrics metrics{};
+    CacheEntry e{};
+    ::strncpy(e.key, "oversized_admit", sizeof(e.key) - 1);
+    std::string large_body(kL1MaxBodySize + 1, 'A');
+    e.body = large_body.c_str();
+    e.body_len = large_body.size();
+
+    l1_put(cache.get(), e, &metrics);
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), 0);
+    EXPECT_EQ(metrics.l1_store_rejected_body_too_large_total.load(), 1);
+
+    EXPECT_FALSE(l1_put_if_newer(cache.get(), e, &metrics));
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), 0);
+    EXPECT_EQ(metrics.l1_store_rejected_body_too_large_total.load(), 2);
+}
+
+TEST_F(L1CacheTest, InvalidBodyNullRejectMetrics) {
+    bytetaper::metrics::CacheMetrics metrics{};
+    CacheEntry e{};
+    ::strncpy(e.key, "invalid_null_body", sizeof(e.key) - 1);
+    e.body = nullptr;
+    e.body_len = 5; // nonzero body_len with null body
+
+    l1_put(cache.get(), e, &metrics);
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), 0);
+    EXPECT_EQ(metrics.l1_store_rejected_invalid_body_total.load(), 1);
+
+    EXPECT_FALSE(l1_put_if_newer(cache.get(), e, &metrics));
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), 0);
+    EXPECT_EQ(metrics.l1_store_rejected_invalid_body_total.load(), 2);
+}
+
+TEST_F(L1CacheTest, PutIfNewerRecordsEvictionOnFullShard) {
+    bytetaper::metrics::CacheMetrics metrics{};
+
+    std::size_t targeted_shard = expected_hash_key("key_0") % kL1ShardCount;
+    std::vector<std::string> keys;
+    int suffix = 0;
+    while (keys.size() < kL1SlotsPerShard + 1) {
+        std::string candidate = "key_" + std::to_string(suffix++);
+        if (expected_hash_key(candidate.c_str()) % kL1ShardCount == targeted_shard) {
+            keys.push_back(candidate);
+        }
+    }
+
+    for (std::size_t i = 0; i < kL1SlotsPerShard; ++i) {
+        CacheEntry e{};
+        ::strncpy(e.key, keys[i].c_str(), sizeof(e.key) - 1);
+        e.created_at_epoch_ms = 1000;
+        EXPECT_TRUE(l1_put_if_newer(cache.get(), e, &metrics));
+    }
+    EXPECT_EQ(metrics.l1_eviction_total.load(), 0);
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), kL1SlotsPerShard);
+
+    // Overwrite the first entry (eviction)
+    CacheEntry e{};
+    ::strncpy(e.key, keys[kL1SlotsPerShard].c_str(), sizeof(e.key) - 1);
+    e.created_at_epoch_ms = 1000;
+    EXPECT_TRUE(l1_put_if_newer(cache.get(), e, &metrics));
+
+    EXPECT_EQ(metrics.l1_eviction_total.load(), 1);
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), kL1SlotsPerShard + 1);
+}
+
+TEST_F(L1CacheTest, PlainPutRecordsDuplicateOverwrite) {
+    bytetaper::metrics::CacheMetrics metrics{};
+
+    CacheEntry e{};
+    ::strncpy(e.key, "plain_dup_key", sizeof(e.key) - 1);
+    l1_put(cache.get(), e, &metrics);
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), 1);
+    EXPECT_EQ(metrics.l1_duplicate_overwrite_total.load(), 0);
+
+    CacheEntry e2{};
+    ::strncpy(e2.key, "plain_dup_key", sizeof(e2.key) - 1);
+    l1_put(cache.get(), e2, &metrics);
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), 2);
+    EXPECT_EQ(metrics.l1_duplicate_overwrite_total.load(), 1);
+}
+
+TEST_F(L1CacheTest, StalePutIfNewerRejectionDoesNotRecordAdmittedOrEvictionOrDuplicate) {
+    bytetaper::metrics::CacheMetrics metrics{};
+
+    CacheEntry e{};
+    ::strncpy(e.key, "stale_key", sizeof(e.key) - 1);
+    e.created_at_epoch_ms = 2000;
+    EXPECT_TRUE(l1_put_if_newer(cache.get(), e, &metrics));
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), 1);
+    EXPECT_EQ(metrics.l1_duplicate_overwrite_total.load(), 0);
+
+    // Now try to overwrite with an older entry
+    CacheEntry stale{};
+    ::strncpy(stale.key, "stale_key", sizeof(stale.key) - 1);
+    stale.created_at_epoch_ms = 1000; // stale!
+
+    EXPECT_FALSE(l1_put_if_newer(cache.get(), stale, &metrics));
+    // Verify no admittance, no duplicate overwrite, no eviction happened on rejection
+    EXPECT_EQ(metrics.l1_store_admitted_total.load(), 1);
+    EXPECT_EQ(metrics.l1_duplicate_overwrite_total.load(), 0);
+    EXPECT_EQ(metrics.l1_eviction_total.load(), 0);
 }
 
 } // namespace bytetaper::cache

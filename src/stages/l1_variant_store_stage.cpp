@@ -42,10 +42,6 @@ apg::StageOutput l1_variant_store_stage(apg::ApgTransformContext& context) {
         return { apg::StageResult::Continue, "no-l1-cache" };
     }
 
-    if (context.response_body_len > cache::kL1MaxBodySize) {
-        return { apg::StageResult::Continue, "body-too-large-for-l1" };
-    }
-
     if (!context.variant_cache_key_ready) {
         return { apg::StageResult::Continue, "key-not-ready" };
     }
@@ -63,6 +59,22 @@ apg::StageOutput l1_variant_store_stage(apg::ApgTransformContext& context) {
         return { apg::StageResult::Continue, "no-ttl" };
     }
 
+    if (context.response_body_len > cache::kL1MaxBodySize) {
+        cache::CacheEntry entry{};
+        std::strncpy(entry.key, key_buf, cache::kCacheKeyMaxLen - 1);
+        entry.status_code = context.response_status_code;
+        std::strncpy(entry.content_type, context.response_content_type,
+                     cache::kCacheContentTypeMaxLen - 1);
+        entry.body = context.response_body;
+        entry.body_len = context.response_body_len;
+        entry.created_at_epoch_ms = context.request_epoch_ms;
+        entry.expires_at_epoch_ms =
+            (context.request_epoch_ms > 0) ? context.request_epoch_ms + ttl_ms : 0;
+
+        cache::l1_put(context.l1_cache, entry, context.cache_metrics);
+        return { apg::StageResult::Continue, "body-too-large-for-l1" };
+    }
+
     // Build CacheEntry and store
     cache::CacheEntry entry{};
     std::strncpy(entry.key, key_buf, cache::kCacheKeyMaxLen - 1);
@@ -75,7 +87,7 @@ apg::StageOutput l1_variant_store_stage(apg::ApgTransformContext& context) {
     entry.expires_at_epoch_ms =
         (context.request_epoch_ms > 0) ? context.request_epoch_ms + ttl_ms : 0;
 
-    cache::l1_put(context.l1_cache, entry);
+    cache::l1_put(context.l1_cache, entry, context.cache_metrics);
     return { apg::StageResult::Continue, "stored" };
 }
 

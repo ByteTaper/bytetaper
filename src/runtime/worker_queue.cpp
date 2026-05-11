@@ -150,7 +150,7 @@ static void execute_lookup_job(WorkerQueue* q, RuntimeShard* shard, L2LookupJob&
                     ::bytetaper::metrics::record_runtime_event(
                         m, ::bytetaper::metrics::RuntimeMetricEvent::
                                L2ToL1PromotionSkippedBodyTooLarge);
-                } else if (cache::l1_put_if_newer(l1, hit)) {
+                } else if (cache::l1_put_if_newer(l1, hit, q->resources.cache_metrics)) {
                     ::bytetaper::metrics::record_runtime_event(
                         m, ::bytetaper::metrics::RuntimeMetricEvent::L2ToL1Promotion);
                 } else {

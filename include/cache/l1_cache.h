@@ -29,23 +29,34 @@ struct L1Cache {
     L1CacheShard shards[kL1ShardCount];
 };
 
+} // namespace bytetaper::cache
+
+namespace bytetaper::metrics {
+struct CacheMetrics;
+}
+
+namespace bytetaper::cache {
+
 void l1_init(L1Cache* cache);
 
 // Stores a copy of entry in the appropriate shard.
-void l1_put(L1Cache* cache, const CacheEntry& entry);
+void l1_put(L1Cache* cache, const CacheEntry& entry,
+            bytetaper::metrics::CacheMetrics* metrics = nullptr);
 
 // Promotes entry into L1 only if no newer entry for the same key already exists.
 // "Newer" means existing.created_at_epoch_ms > entry.created_at_epoch_ms.
 // If the key is not present in L1, promotes unconditionally.
 // Returns true if promoted, false if rejected due to staleness.
-bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry);
+bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry,
+                     bytetaper::metrics::CacheMetrics* metrics = nullptr);
 
 // Retrieves an entry by key from the appropriate shard.
 // Copies the matching entry into *out and copies the body into body_out.
 // Returns true on hit. Returns false on miss.
 // now_ms == 0 skips expiry check.
 bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
-            char* body_out, std::size_t body_out_capacity);
+            char* body_out, std::size_t body_out_capacity,
+            bytetaper::metrics::CacheMetrics* metrics = nullptr);
 
 // Returns true only if entry is safe to store in L1 (body present and within capacity).
 bool l1_can_store_entry(const CacheEntry& entry);
