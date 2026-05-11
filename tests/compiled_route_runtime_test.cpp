@@ -7,8 +7,11 @@
 #include "stages/coalescing_follower_wait_stage.h"
 #include "stages/coalescing_leader_completion_stage.h"
 #include "stages/compression_decision_stage.h"
+#include "stages/field_variant_admission_stage.h"
 #include "stages/l1_cache_lookup_stage.h"
 #include "stages/l1_cache_store_stage.h"
+#include "stages/l1_variant_lookup_stage.h"
+#include "stages/l1_variant_store_stage.h"
 #include "stages/l2_cache_async_lookup_enqueue_stage.h"
 #include "stages/l2_cache_async_store_enqueue_stage.h"
 #include "stages/pagination_request_mutation_stage.h"
@@ -153,6 +156,173 @@ TEST(CompiledRouteRuntimeTest, CompileTableAndLookup_FallbackBehavior) {
     unmatched_policy.route_id = "route-3";
     EXPECT_EQ(find_compiled_route_runtime(table, &unmatched_policy), nullptr);
     EXPECT_EQ(find_compiled_route_runtime(table, nullptr), nullptr);
+}
+
+TEST(CompiledRouteRuntimeTest, CacheOnly_HasExpectedStages) {
+    policy::RoutePolicy policy{};
+    policy.route_id = "test-route";
+    policy.cache.behavior = policy::CacheBehavior::Store;
+    policy.cache.field_variant.enabled = false;
+    policy.coalescing.enabled = false;
+    policy.pagination.enabled = false;
+
+    CompiledRouteRuntime runtime{};
+    compile_route_runtime(policy, &runtime);
+
+    ASSERT_EQ(runtime.lookup_count, 3);
+    EXPECT_EQ(runtime.lookup_stages[0], stages::cache_key_prepare_stage);
+    EXPECT_EQ(runtime.lookup_stages[1], stages::l1_cache_lookup_stage);
+    EXPECT_EQ(runtime.lookup_stages[2], stages::l2_cache_async_lookup_enqueue_stage);
+
+    ASSERT_EQ(runtime.store_count, 2);
+    EXPECT_EQ(runtime.store_stages[0], stages::l1_cache_store_stage);
+    EXPECT_EQ(runtime.store_stages[1], stages::l2_cache_async_store_enqueue_stage);
+
+    ASSERT_EQ(runtime.response_count, 1);
+    EXPECT_EQ(runtime.response_stages[0], stages::compression_decision_stage);
+}
+
+TEST(CompiledRouteRuntimeTest, CacheAndCoalescing_HasExpectedStages) {
+    policy::RoutePolicy policy{};
+    policy.route_id = "test-route";
+    policy.cache.behavior = policy::CacheBehavior::Store;
+    policy.cache.field_variant.enabled = false;
+    policy.coalescing.enabled = true;
+    policy.pagination.enabled = false;
+
+    CompiledRouteRuntime runtime{};
+    compile_route_runtime(policy, &runtime);
+
+    ASSERT_EQ(runtime.lookup_count, 5);
+    EXPECT_EQ(runtime.lookup_stages[0], stages::cache_key_prepare_stage);
+    EXPECT_EQ(runtime.lookup_stages[1], stages::l1_cache_lookup_stage);
+    EXPECT_EQ(runtime.lookup_stages[2], stages::coalescing_decision_stage);
+    EXPECT_EQ(runtime.lookup_stages[3], stages::coalescing_follower_wait_stage);
+    EXPECT_EQ(runtime.lookup_stages[4], stages::l2_cache_async_lookup_enqueue_stage);
+
+    ASSERT_EQ(runtime.store_count, 3);
+    EXPECT_EQ(runtime.store_stages[0], stages::l1_cache_store_stage);
+    EXPECT_EQ(runtime.store_stages[1], stages::l2_cache_async_store_enqueue_stage);
+    EXPECT_EQ(runtime.store_stages[2], stages::coalescing_leader_completion_stage);
+
+    ASSERT_EQ(runtime.response_count, 1);
+    EXPECT_EQ(runtime.response_stages[0], stages::compression_decision_stage);
+}
+
+TEST(CompiledRouteRuntimeTest, CacheAndFieldVariant_HasExpectedStages) {
+    policy::RoutePolicy policy{};
+    policy.route_id = "test-route";
+    policy.cache.behavior = policy::CacheBehavior::Store;
+    policy.cache.field_variant.enabled = true;
+    policy.coalescing.enabled = false;
+    policy.pagination.enabled = false;
+
+    CompiledRouteRuntime runtime{};
+    compile_route_runtime(policy, &runtime);
+
+    ASSERT_EQ(runtime.lookup_count, 5);
+    EXPECT_EQ(runtime.lookup_stages[0], stages::cache_key_prepare_stage);
+    EXPECT_EQ(runtime.lookup_stages[1], stages::field_variant_admission_stage);
+    EXPECT_EQ(runtime.lookup_stages[2], stages::l1_cache_lookup_stage);
+    EXPECT_EQ(runtime.lookup_stages[3], stages::l1_variant_lookup_stage);
+    EXPECT_EQ(runtime.lookup_stages[4], stages::l2_cache_async_lookup_enqueue_stage);
+
+    ASSERT_EQ(runtime.store_count, 3);
+    EXPECT_EQ(runtime.store_stages[0], stages::l1_cache_store_stage);
+    EXPECT_EQ(runtime.store_stages[1], stages::l1_variant_store_stage);
+    EXPECT_EQ(runtime.store_stages[2], stages::l2_cache_async_store_enqueue_stage);
+
+    ASSERT_EQ(runtime.response_count, 1);
+    EXPECT_EQ(runtime.response_stages[0], stages::compression_decision_stage);
+}
+
+TEST(CompiledRouteRuntimeTest, PaginationOnly_HasExpectedStages) {
+    policy::RoutePolicy policy{};
+    policy.route_id = "test-route";
+    policy.cache.behavior = policy::CacheBehavior::Bypass;
+    policy.coalescing.enabled = false;
+    policy.pagination.enabled = true;
+
+    CompiledRouteRuntime runtime{};
+    compile_route_runtime(policy, &runtime);
+
+    ASSERT_EQ(runtime.lookup_count, 1);
+    EXPECT_EQ(runtime.lookup_stages[0], stages::pagination_request_mutation_stage);
+
+    ASSERT_EQ(runtime.store_count, 0);
+
+    ASSERT_EQ(runtime.response_count, 1);
+    EXPECT_EQ(runtime.response_stages[0], stages::compression_decision_stage);
+}
+
+TEST(CompiledRouteRuntimeTest, NoFeatures_HasOnlyCompressionInResponse) {
+    policy::RoutePolicy policy{};
+    policy.route_id = "test-route";
+    policy.cache.behavior = policy::CacheBehavior::Bypass;
+    policy.cache.field_variant.enabled = false;
+    policy.coalescing.enabled = false;
+    policy.pagination.enabled = false;
+    policy.compression.enabled = false;
+
+    CompiledRouteRuntime runtime{};
+    compile_route_runtime(policy, &runtime);
+
+    ASSERT_EQ(runtime.lookup_count, 0);
+    ASSERT_EQ(runtime.store_count, 0);
+
+    ASSERT_EQ(runtime.response_count, 1);
+    EXPECT_EQ(runtime.response_stages[0], stages::compression_decision_stage);
+}
+
+TEST(CompiledRouteRuntimeTest, CompressionOnly_HasOnlyCompressionInResponse) {
+    policy::RoutePolicy policy{};
+    policy.route_id = "test-route";
+    policy.cache.behavior = policy::CacheBehavior::Bypass;
+    policy.cache.field_variant.enabled = false;
+    policy.coalescing.enabled = false;
+    policy.pagination.enabled = false;
+    policy.compression.enabled = true;
+
+    CompiledRouteRuntime runtime{};
+    compile_route_runtime(policy, &runtime);
+
+    ASSERT_EQ(runtime.lookup_count, 0);
+    ASSERT_EQ(runtime.store_count, 0);
+
+    ASSERT_EQ(runtime.response_count, 1);
+    EXPECT_EQ(runtime.response_stages[0], stages::compression_decision_stage);
+}
+
+TEST(CompiledRouteRuntimeTest, AllFeaturesWithFieldVariants_HasExpectedStages) {
+    policy::RoutePolicy policy{};
+    policy.route_id = "test-route";
+    policy.cache.behavior = policy::CacheBehavior::Store;
+    policy.cache.field_variant.enabled = true;
+    policy.coalescing.enabled = true;
+    policy.pagination.enabled = true;
+    policy.compression.enabled = true;
+
+    CompiledRouteRuntime runtime{};
+    compile_route_runtime(policy, &runtime);
+
+    ASSERT_EQ(runtime.lookup_count, 8);
+    EXPECT_EQ(runtime.lookup_stages[0], stages::cache_key_prepare_stage);
+    EXPECT_EQ(runtime.lookup_stages[1], stages::field_variant_admission_stage);
+    EXPECT_EQ(runtime.lookup_stages[2], stages::l1_cache_lookup_stage);
+    EXPECT_EQ(runtime.lookup_stages[3], stages::l1_variant_lookup_stage);
+    EXPECT_EQ(runtime.lookup_stages[4], stages::coalescing_decision_stage);
+    EXPECT_EQ(runtime.lookup_stages[5], stages::coalescing_follower_wait_stage);
+    EXPECT_EQ(runtime.lookup_stages[6], stages::l2_cache_async_lookup_enqueue_stage);
+    EXPECT_EQ(runtime.lookup_stages[7], stages::pagination_request_mutation_stage);
+
+    ASSERT_EQ(runtime.store_count, 4);
+    EXPECT_EQ(runtime.store_stages[0], stages::l1_cache_store_stage);
+    EXPECT_EQ(runtime.store_stages[1], stages::l1_variant_store_stage);
+    EXPECT_EQ(runtime.store_stages[2], stages::l2_cache_async_store_enqueue_stage);
+    EXPECT_EQ(runtime.store_stages[3], stages::coalescing_leader_completion_stage);
+
+    ASSERT_EQ(runtime.response_count, 1);
+    EXPECT_EQ(runtime.response_stages[0], stages::compression_decision_stage);
 }
 
 } // namespace bytetaper::extproc
