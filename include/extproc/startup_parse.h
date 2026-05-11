@@ -4,6 +4,8 @@
 #ifndef BYTETAPER_EXTPROC_STARTUP_PARSE_H
 #define BYTETAPER_EXTPROC_STARTUP_PARSE_H
 
+// Parsing helpers for startup env vars. See docs/runtime/CONFIGURATION.md.
+
 #include <charconv>
 #include <climits>
 #include <cstdint>

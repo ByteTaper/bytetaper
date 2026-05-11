@@ -176,6 +176,7 @@ int main(int argc, char** argv) {
     if (args.l2_cache_path != nullptr) {
         bytetaper::cache::L2CacheOptions l2_opts{};
         const char* l2_parse_err = nullptr;
+        // See docs/runtime/CONFIGURATION.md for all supported env vars and valid ranges.
         if (!bytetaper::extproc::startup::parse_env_size("BYTETAPER_L2_BLOCK_CACHE_MB",
                                                          &l2_opts.block_cache_mb, &l2_parse_err) ||
             !bytetaper::extproc::startup::parse_env_size("BYTETAPER_L2_WRITE_BUFFER_MB",

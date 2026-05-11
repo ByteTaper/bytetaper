@@ -197,6 +197,7 @@ Exit codes:
 - [Runtime Execution Boundaries](docs/runtime/RUNTIME_BOUNDARIES.md)
 - [Compiled Route Runtime](docs/runtime/COMPILED_ROUTE_RUNTIME.md)
 - [Body Size Contract](docs/runtime/BODY_SIZE_CONTRACT.md)
+- [Runtime Configuration Reference](docs/runtime/CONFIGURATION.md)
 
 ## Contributing
 
