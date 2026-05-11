@@ -18,6 +18,9 @@ routes:
       handoff_buffer_ms: 50
       result_ready_retention_ms: 25
       max_waiters_per_key: 128
+      max_follower_wait_budget_ms: 0     # disabled; set to limit in production
+      max_active_follower_waiters: 0     # disabled; set to limit in production
+      max_active_follower_waiters_per_shard: 0 # disabled
 
   - id: "api-v1-proxy"
     match:

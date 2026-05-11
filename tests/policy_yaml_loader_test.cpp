@@ -292,4 +292,44 @@ TEST(YamlLoaderTest, ExamplePoliciesAreValidWithNoWarnings) {
     }
 }
 
+TEST(YamlLoaderTest, GuardrailFieldsLoaded) {
+    const char* yaml = R"(
+routes:
+  - id: "r1"
+    match: { kind: "prefix", prefix: "/" }
+    coalescing:
+      enabled: true
+      backend_timeout_ms: 500
+      handoff_buffer_ms: 250
+      result_ready_retention_ms: 50
+      max_follower_wait_budget_ms: 1000
+      max_active_follower_waiters: 2048
+      max_active_follower_waiters_per_shard: 64
+)";
+    PolicyFileResult result{};
+    EXPECT_TRUE(load_policy_from_string(yaml, &result));
+    EXPECT_TRUE(result.ok);
+    EXPECT_EQ(result.policies[0].coalescing.max_follower_wait_budget_ms, 1000u);
+    EXPECT_EQ(result.policies[0].coalescing.max_active_follower_waiters, 2048u);
+    EXPECT_EQ(result.policies[0].coalescing.max_active_follower_waiters_per_shard, 64u);
+}
+
+TEST(YamlLoaderTest, GuardrailFieldsDefaultToZero) {
+    const char* yaml = R"(
+routes:
+  - id: "r1"
+    match: { kind: "prefix", prefix: "/" }
+    coalescing:
+      enabled: true
+      backend_timeout_ms: 100
+      handoff_buffer_ms: 50
+)";
+    PolicyFileResult result{};
+    EXPECT_TRUE(load_policy_from_string(yaml, &result));
+    EXPECT_TRUE(result.ok);
+    EXPECT_EQ(result.policies[0].coalescing.max_follower_wait_budget_ms, 0u);
+    EXPECT_EQ(result.policies[0].coalescing.max_active_follower_waiters, 0u);
+    EXPECT_EQ(result.policies[0].coalescing.max_active_follower_waiters_per_shard, 0u);
+}
+
 } // namespace bytetaper::policy

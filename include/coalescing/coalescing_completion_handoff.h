@@ -12,11 +12,14 @@ namespace bytetaper::coalescing {
 // Tier │ Condition                                              │ Behavior
 // ─────┼────────────────────────────────────────────────────────┼────────────────────────────────────
 //  0   │ body_len == 0                                          │ Not cacheable
-//  1   │ body_len <= cache::kL1MaxBodySize (3 KiB)             │ L1 inline; followers receive shared snapshot
-//  2   │ body_len <= apg::ApgTransformContext::kL2BodyBufSize  │ L2 completion; publish L2Ready handoff after store
+//  1   │ body_len <= cache::kL1MaxBodySize (3 KiB)             │ L1 inline; followers receive
+//  shared snapshot 2   │ body_len <= apg::ApgTransformContext::kL2BodyBufSize  │ L2 completion;
+//  publish L2Ready handoff after store
 //      │   (64 KiB)                                             │
-//  3   │ body_len <= cache::kL2MaxBodySize (1 MiB)             │ Store to L2 for future probes; no follower handoff
-//      │                                                        │ (body exceeds follower synchronous read buffer)
+//  3   │ body_len <= cache::kL2MaxBodySize (1 MiB)             │ Store to L2 for future probes; no
+//  follower handoff
+//      │                                                        │ (body exceeds follower
+//      synchronous read buffer)
 //  4   │ body_len > cache::kL2MaxBodySize                      │ Too large for L2; not stored
 //
 // Followers that time out while waiting for a tier-3 response may probe L2 on timeout

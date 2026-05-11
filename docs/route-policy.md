@@ -39,3 +39,7 @@ routes:
 
 > [!TIP]
 > **Priority**: Route matching is performed in the order defined in the YAML file. The first route that matches the incoming request will be applied.
+
+## Coalescing
+
+Request coalescing reduces upstream fan-out by queuing followers behind a single leader request. See [docs/coalescing-policy.md](coalescing-policy.md) for the full field reference, budget model, and guardrail configuration.

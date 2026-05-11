@@ -14,6 +14,9 @@ routes:
       backend_timeout_ms: 50
       handoff_buffer_ms: 25
       result_ready_retention_ms: 12
+      max_follower_wait_budget_ms: 0
+      max_active_follower_waiters: 0
+      max_active_follower_waiters_per_shard: 0
     cache:
       enabled: true
       behavior: store
