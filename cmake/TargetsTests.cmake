@@ -2408,4 +2408,18 @@ if(BUILD_TESTING)
   target_include_directories(tq_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(tq_compiler_test PRIVATE gtest_main bytetaper_taperquery)
   add_test(NAME tq_compiler_test COMMAND tq_compiler_test)
+
+  add_executable(tq_plan_test
+    tests/tq_plan_test.cpp
+  )
+  target_include_directories(tq_plan_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(tq_plan_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME tq_plan_test COMMAND tq_plan_test)
+
+  add_executable(tq_dry_run_reporter_test
+    tests/tq_dry_run_reporter_test.cpp
+  )
+  target_include_directories(tq_dry_run_reporter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(tq_dry_run_reporter_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME tq_dry_run_reporter_test COMMAND tq_dry_run_reporter_test)
 endif()

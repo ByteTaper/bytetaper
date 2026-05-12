@@ -12,6 +12,8 @@ add_library(bytetaper_taperquery STATIC
   src/taperquery/tq_parser.cpp
   src/taperquery/tq_compiler.cpp
   src/taperquery/tq_diagnostic.cpp
+  src/taperquery/tq_plan.cpp
+  src/taperquery/tq_dry_run_reporter.cpp
 )
 
 target_include_directories(bytetaper_taperquery PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
