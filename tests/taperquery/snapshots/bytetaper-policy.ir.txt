@@ -81,7 +81,7 @@ route:
       capacity_entries: 8
     private_cache:
       enabled: true
-      auth_scope_header: x-auth-scope
+      auth_scope_header:
 route:
   route_id: api-v1-e2e-cache
   match_prefix: /api/v1/e2e/

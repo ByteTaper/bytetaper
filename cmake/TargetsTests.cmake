@@ -1317,6 +1317,24 @@ if(BUILD_TESTING)
       COMMAND policy_yaml_loader_cache_test
     )
 
+    add_executable(policy_yaml_loader_cache_layers_test
+      tests/policy_yaml_loader_cache_layers_test.cpp
+    )
+    target_include_directories(policy_yaml_loader_cache_layers_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(policy_yaml_loader_cache_layers_test
+      PRIVATE
+        policy_yaml_loader
+        gtest_main
+    )
+
+    add_test(
+      NAME policy_yaml_loader_cache_layers_test
+      COMMAND policy_yaml_loader_cache_layers_test
+    )
+
     add_executable(policy_validate_command_test
       tests/policy_validate_command_test.cpp
     )

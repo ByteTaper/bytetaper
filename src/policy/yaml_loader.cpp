@@ -59,6 +59,13 @@ static void compute_route_policy_identity(const RoutePolicy& p, char* out, std::
     feed_u8(static_cast<uint8_t>(p.cache.behavior));
     feed_u32(p.cache.ttl_seconds);
     feed_u8(p.cache.enabled ? 1 : 0);
+    // cache layer and private cache fields (added for TQ-003)
+    feed_u8(p.cache.l1.enabled ? 1 : 0);
+    feed_u32(p.cache.l1.capacity_entries);
+    feed_u8(p.cache.l2.enabled ? 1 : 0);
+    feed_str(p.cache.l2.path);
+    feed_u8(p.cache.private_cache ? 1 : 0);
+    feed_str(p.cache.auth_scope_header);
     feed_u8(p.cache.field_variant.enabled ? 1 : 0);
     feed_u32(p.cache.field_variant.max_variants_per_route);
     feed_u32(p.cache.field_variant.min_field_count);
@@ -115,6 +122,79 @@ static void compute_route_policy_identity(const RoutePolicy& p, char* out, std::
         h >>= 4;
     }
     *out = '\0';
+}
+
+static bool parse_cache_layers(const YAML::Node& cache_node, RoutePolicy& policy,
+                               PolicyFileResult* result) {
+    if (!cache_node["layers"]) {
+        return true; // absent is fine (no change)
+    }
+    const YAML::Node& layers_node = cache_node["layers"];
+    if (!layers_node.IsMap()) {
+        result->error = "cache.layers must be a map";
+        return false;
+    }
+
+    if (layers_node["l1"]) {
+        const YAML::Node& l1_node = layers_node["l1"];
+        if (!l1_node.IsMap()) {
+            result->error = "cache.layers.l1 must be a map";
+            return false;
+        }
+        if (l1_node["enabled"]) {
+            if (!l1_node["enabled"].IsScalar()) {
+                result->error = "cache.layers.l1.enabled must be a scalar boolean";
+                return false;
+            }
+            policy.cache.l1.enabled = l1_node["enabled"].as<bool>();
+        }
+        if (l1_node["capacity_entries"]) {
+            if (!l1_node["capacity_entries"].IsScalar()) {
+                result->error = "cache.layers.l1.capacity_entries must be a scalar integer";
+                return false;
+            }
+            try {
+                policy.cache.l1.capacity_entries = l1_node["capacity_entries"].as<std::uint32_t>();
+            } catch (...) {
+                result->error = "cache.layers.l1.capacity_entries must be a valid positive integer";
+                return false;
+            }
+        }
+    }
+
+    if (layers_node["l2"]) {
+        const YAML::Node& l2_node = layers_node["l2"];
+        if (!l2_node.IsMap()) {
+            result->error = "cache.layers.l2 must be a map";
+            return false;
+        }
+        if (l2_node["enabled"]) {
+            if (!l2_node["enabled"].IsScalar()) {
+                result->error = "cache.layers.l2.enabled must be a scalar boolean";
+                return false;
+            }
+            policy.cache.l2.enabled = l2_node["enabled"].as<bool>();
+        }
+        if (l2_node["path"]) {
+            if (!l2_node["path"].IsScalar()) {
+                result->error = "cache.layers.l2.path must be a scalar string";
+                return false;
+            }
+            const std::string path = l2_node["path"].as<std::string>();
+            if (path.empty()) {
+                result->error = "cache.layers.l2.path must not be empty";
+                return false;
+            }
+            if (path.size() >= kMaxCachePathLen) {
+                result->error = "cache.layers.l2.path exceeds max length";
+                return false;
+            }
+            std::strncpy(policy.cache.l2.path, path.c_str(), sizeof(policy.cache.l2.path) - 1);
+            policy.cache.l2.path[sizeof(policy.cache.l2.path) - 1] = '\0';
+        }
+    }
+
+    return true;
 }
 
 // Parse a single route node into a PolicyFileResult slot. Returns false on error.
@@ -293,6 +373,41 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
 
         if (cache_node["enabled"]) {
             policy.cache.enabled = cache_node["enabled"].as<bool>();
+        }
+
+        if (!parse_cache_layers(cache_node, policy, result)) {
+            return false;
+        }
+
+        if (cache_node["private_cache"]) {
+            if (!cache_node["private_cache"].IsScalar()) {
+                result->error = "cache.private_cache must be a scalar boolean";
+                return false;
+            }
+            policy.cache.private_cache = cache_node["private_cache"].as<bool>();
+        }
+
+        if (cache_node["auth_scope_header"]) {
+            if (!cache_node["auth_scope_header"].IsScalar()) {
+                result->error = "cache.auth_scope_header must be a scalar string";
+                return false;
+            }
+            const std::string hdr = cache_node["auth_scope_header"].as<std::string>();
+            if (hdr.empty()) {
+                result->error = "cache.auth_scope_header must not be empty";
+                return false;
+            }
+            if (hdr.size() >= sizeof(policy.cache.auth_scope_header)) {
+                result->error = "cache.auth_scope_header exceeds max length";
+                return false;
+            }
+            // lowercase: consistent with cache vary_header normalization already in this file
+            std::string lc = hdr;
+            for (char& c : lc)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            std::strncpy(policy.cache.auth_scope_header, lc.c_str(),
+                         sizeof(policy.cache.auth_scope_header) - 1);
+            policy.cache.auth_scope_header[sizeof(policy.cache.auth_scope_header) - 1] = '\0';
         }
 
         if (cache_node["field_variant"]) {

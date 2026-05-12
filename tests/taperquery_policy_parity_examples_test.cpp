@@ -74,6 +74,11 @@ TqPolicyDocument parse_snapshot_to_policy_ir(const std::string& content) {
     };
 
     while (std::getline(ss, line)) {
+        std::size_t indent = 0;
+        while (indent < line.size() && line[indent] == ' ') {
+            indent++;
+        }
+
         std::string trimmed = trim(line);
         if (trimmed.empty()) {
             continue;
@@ -96,6 +101,10 @@ TqPolicyDocument parse_snapshot_to_policy_ir(const std::string& content) {
         if (colon != std::string::npos) {
             std::string key = trim(trimmed.substr(0, colon));
             std::string val = trim(trimmed.substr(colon + 1));
+
+            if (in_cache && indent <= 4) {
+                in_l1 = in_l2 = in_private_cache = in_field_variant = in_vary_headers = false;
+            }
 
             if (key == "schema_version") {
                 doc.schema_version = val;

@@ -100,8 +100,11 @@ std::string print_canonical_policy_ir(const TqPolicyDocument& policy) {
                 out += "    private_cache:\n";
                 out += "      enabled: " +
                        std::string(route.cache.private_cache.enabled ? "true" : "false") + "\n";
-                out += "      auth_scope_header: " + route.cache.private_cache.auth_scope_header +
-                       "\n";
+                out += "      auth_scope_header:";
+                if (!route.cache.private_cache.auth_scope_header.empty()) {
+                    out += " " + route.cache.private_cache.auth_scope_header;
+                }
+                out += "\n";
             }
             if (route.cache.field_variant.enabled) {
                 out += "    field_variant:\n";

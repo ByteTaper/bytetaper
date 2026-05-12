@@ -6,6 +6,9 @@ route:
     enabled: true
     behavior: store
     ttl_ms: 300000
+    l1:
+      enabled: true
+      capacity_entries: 8
   coalescing:
     enabled: true
     mode: cache_assisted
