@@ -1,6 +1,6 @@
 # Compiled Route Runtime
 
-At startup, ByteTaper compiles a fixed stage array for each route defined in the configuration. Per-request execution is a direct, zero-branching array traversal over these pre-assembled arrays.
+At startup, ByteTaper compiles a fixed stage array for each route defined in the configuration. Per-request execution is a direct, branch-light traversal over these pre-composed stage arrays — per-feature flags are resolved once at startup, not re-evaluated on every request.
 
 This design avoids testing feature flags on every single request, keeping the hot path stage-linear, minimizing cache misses, and ensuring pipeline composition is completely deterministic and auditable.
 
@@ -9,9 +9,11 @@ This design avoids testing feature flags on every single request, keeping the ho
 ## Why Routes Are Compiled
 
 By pre-calculating the pipeline array during initialization, we avoid the overhead of checking feature flags (`policy.cache.behavior`, `policy.coalescing.enabled`, etc.) on every request:
-- **Zero-Branching**: Request-header, response-header, and response-body stages are stored as sequential pointer arrays inside `CompiledRouteRuntime`.
+- **Branch-light hot path**: Request-header, response-header, and response-body stages are stored as pre-composed sequential pointer arrays inside `CompiledRouteRuntime`. The remaining on-path branches are route matching, request-kind dispatch, and per-stage early-exit (`SkipRemaining`). Per-feature flag checks (`policy.cache.behavior`, `policy.coalescing.enabled`, etc.) are eliminated from the hot path entirely.
 - **Fast Traversal**: The execution engine iterates over these contiguous arrays linearly.
 - **Auditable Safety**: Route pipelines are constructed deterministically by a single function (`compile_route_runtime()`), making it easy to audit which capabilities are active.
+
+> **Branches that remain on the hot path:** compiled route matching, protocol request-kind dispatch (request-headers vs response-body vs response-headers), and the `SkipRemaining` early-exit signal within stage traversal. These are unavoidable protocol and safety branches. Per-feature configuration checks are the eliminated class.
 
 ---
 
