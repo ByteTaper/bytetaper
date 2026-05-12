@@ -36,13 +36,13 @@ jobs:
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-healthz-readyz-test
 
-  sanitizer:
+  sanitizer-fast:
     runs-on: ubuntu-24.04
     needs: test
     strategy:
       fail-fast: false
       matrix:
-        sanitizer: [tsan, asan, ubsan]
+        sanitizer: [asan, ubsan]
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -51,6 +51,19 @@ jobs:
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
             docker compose run --rm bytetaper-${{ matrix.sanitizer }}-test
+
+  sanitizer-tsan:
+    runs-on: ubuntu-24.04
+    needs: test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run TSAN concurrency tests
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+            docker compose run --rm bytetaper-tsan-test
 
   benchmark:
     runs-on: ubuntu-24.04

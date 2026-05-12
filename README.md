@@ -76,18 +76,13 @@ docker compose run --rm bytetaper-integration-test
 
 Run sanitizer verification tests:
 
-- **ThreadSanitizer (TSAN)** covers dynamic data race validation across all concurrency test targets:
-  ```bash
-  docker compose run --rm bytetaper-tsan-test
-  ```
-- **AddressSanitizer (ASAN)** tracks memory violations, leaks, and bounds checks:
-  ```bash
-  docker compose run --rm bytetaper-asan-test
-  ```
-- **UndefinedBehaviorSanitizer (UBSAN)** validates clean numerical behaviors and null references:
-  ```bash
-  docker compose run --rm bytetaper-ubsan-test
-  ```
+| Sanitizer | Purpose | Test Scope | CI Cadence | Command |
+|---|---|---|---|---|
+| **ASAN** | Memory errors & bounds checks | All tests | PR + main push | `docker compose run --rm bytetaper-asan-test` |
+| **UBSAN** | Undefined behavior detection | All tests | PR + main push | `docker compose run --rm bytetaper-ubsan-test` |
+| **TSAN** | Data races & lock ordering | Concurrency tests | Main push + dispatch | `docker compose run --rm bytetaper-tsan-test` |
+
+See [docs/runtime/TESTING.md](docs/runtime/TESTING.md) for full details.
 
 Open a development shell:
 
