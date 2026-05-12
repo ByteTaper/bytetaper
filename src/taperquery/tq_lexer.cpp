@@ -99,6 +99,7 @@ static constexpr KeywordEntry kKeywords[] = {
     { "gzip", TqTokenKind::KeywordGzip },
     { "brotli", TqTokenKind::KeywordBrotli },
     { "zstd", TqTokenKind::KeywordZstd },
+    { "observe", TqTokenKind::KeywordObserve },
 };
 
 static constexpr std::size_t kKeywordCount = sizeof(kKeywords) / sizeof(kKeywords[0]);

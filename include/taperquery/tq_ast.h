@@ -88,6 +88,7 @@ struct TqAstFieldVariantClause {
     std::uint32_t max_field_count = 0;
     std::uint32_t admission_threshold = 0;
     std::uint32_t ttl_max_ms = 0;
+    bool ttl_max_specified = false;
     TqSourceSpan span{};
 };
 
@@ -95,10 +96,12 @@ struct TqAstCacheStmt {
     bool enabled = false;
     std::string behavior{}; // "store", "bypass"
     std::uint32_t ttl_ms = 0;
+    bool ttl_specified = false;
     TqAstCacheL1Clause l1{};
     TqAstCacheL2Clause l2{};
     TqAstPrivateCacheClause private_cache{};
     TqAstVaryHeadersClause vary_headers{};
+    bool vary_specified = false;
     TqAstFieldVariantClause field_variant{};
     TqSourceSpan span{};
 };
@@ -126,7 +129,8 @@ struct TqAstCompressStmt {
     std::uint32_t min_size_bytes = 0;
     std::vector<std::string> eligible_content_types{};
     std::vector<std::string> preferred_algorithms{}; // "gzip", "brotli", "zstd"
-    std::string already_encoded_behavior{};          // "skip", "passthrough"
+    bool prefer_specified = false;
+    std::string already_encoded_behavior{}; // "skip", "passthrough"
     TqSourceSpan span{};
 };
 
@@ -151,6 +155,10 @@ struct TqAstCoalesceStmt {
     TqSourceSpan span{};
 };
 
+struct TqAstObserveStmt {
+    TqSourceSpan span{};
+};
+
 enum class TqAstStatementKind : std::uint8_t {
     Mutate,
     Failure,
@@ -160,6 +168,7 @@ enum class TqAstStatementKind : std::uint8_t {
     Paginate,
     Compress,
     Coalesce,
+    Observe,
 };
 
 struct TqAstStatement {
@@ -174,6 +183,7 @@ struct TqAstStatement {
     TqAstPaginateStmt paginate{};
     TqAstCompressStmt compress{};
     TqAstCoalesceStmt coalesce{};
+    TqAstObserveStmt observe{};
 };
 
 struct TqAstRouteDecl {

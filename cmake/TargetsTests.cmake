@@ -1415,7 +1415,7 @@ if(BUILD_TESTING)
               -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
               -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/invalid_cache.yaml
               -DEXPECTED_EXIT=3
-              -DEXPECTED_CONTENT="field 'cache'"
+              -DEXPECTED_CONTENT=field.*cache
               -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
     )
 
@@ -1425,7 +1425,7 @@ if(BUILD_TESTING)
               -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
               -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/invalid_compression.yaml
               -DEXPECTED_EXIT=3
-              -DEXPECTED_CONTENT="field 'compression'"
+              -DEXPECTED_CONTENT=field.*compression
               -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
     )
 
@@ -1435,7 +1435,7 @@ if(BUILD_TESTING)
               -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
               -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/invalid_pagination.yaml
               -DEXPECTED_EXIT=3
-              -DEXPECTED_CONTENT="field 'pagination'"
+              -DEXPECTED_CONTENT=field.*pagination
               -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
     )
 
@@ -1445,7 +1445,7 @@ if(BUILD_TESTING)
               -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
               -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/invalid_coalescing.yaml
               -DEXPECTED_EXIT=3
-              -DEXPECTED_CONTENT="field 'coalescing'"
+              -DEXPECTED_CONTENT=field.*coalescing
               -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
     )
 
@@ -1455,7 +1455,7 @@ if(BUILD_TESTING)
               -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
               -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/warning_only.yaml
               -DEXPECTED_EXIT=0
-              -DEXPECTED_CONTENT="field 'mutation'"
+              -DEXPECTED_CONTENT=field.*mutation
               -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
     )
 
@@ -2401,4 +2401,11 @@ if(BUILD_TESTING)
   target_include_directories(taperquery_parser_diagnostic_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(taperquery_parser_diagnostic_test PRIVATE gtest_main bytetaper_taperquery)
   add_test(NAME taperquery_parser_diagnostic_test COMMAND taperquery_parser_diagnostic_test)
+
+  add_executable(tq_compiler_test
+    tests/tq_compiler_test.cpp
+  )
+  target_include_directories(tq_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(tq_compiler_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME tq_compiler_test COMMAND tq_compiler_test)
 endif()

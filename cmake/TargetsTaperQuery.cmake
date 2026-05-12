@@ -10,6 +10,7 @@ add_library(bytetaper_taperquery STATIC
   src/taperquery/tq_lexer.cpp
   src/taperquery/tq_ast.cpp
   src/taperquery/tq_parser.cpp
+  src/taperquery/tq_compiler.cpp
   src/taperquery/tq_diagnostic.cpp
 )
 

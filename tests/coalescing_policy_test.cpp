@@ -82,6 +82,8 @@ TEST(RoutePolicyIntegrationTest, CoalescingRequiresCache) {
     EXPECT_STREQ(reason, "coalescing requires cache to be enabled");
 
     rp.cache.enabled = true;
+    rp.cache.ttl_seconds = 60;
+    rp.cache.l1.enabled = true;
     EXPECT_TRUE(validate_route_policy(rp, &reason));
 }
 

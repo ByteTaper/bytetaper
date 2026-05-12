@@ -116,6 +116,7 @@ enum class TqTokenKind : std::uint8_t {
     KeywordGzip,
     KeywordBrotli,
     KeywordZstd,
+    KeywordObserve,
 };
 
 struct TqToken {

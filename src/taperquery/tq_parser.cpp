@@ -59,6 +59,7 @@ struct RouteBlockSeen {
     bool paginate = false;
     bool compress = false;
     bool coalesce = false;
+    bool observe = false;
 };
 
 struct CacheBlockSeen {
@@ -337,6 +338,14 @@ private:
                     }
                     seen.coalesce = true;
                     kind = TqAstStatementKind::Coalesce;
+                } else if (curr_.kind == TqTokenKind::KeywordObserve) {
+                    if (seen.observe) {
+                        report_error(TqDiagnosticCode::DuplicateClause, curr_.span,
+                                     "Duplicate observe statement in route block");
+                        result_.ok = false;
+                    }
+                    seen.observe = true;
+                    kind = TqAstStatementKind::Observe;
                 } else if (curr_.kind == TqTokenKind::Semicolon) {
                     consume();
                     continue;
@@ -540,6 +549,7 @@ private:
                 consume(); // ttl
                 if (curr_.kind == TqTokenKind::DurationLiteral) {
                     stmt.cache.ttl_ms = curr_.duration_ms;
+                    stmt.cache.ttl_specified = true;
                     consume();
                 } else {
                     report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
@@ -630,10 +640,13 @@ private:
                             result_.ok = false;
                         }
                         seen.vary_headers = true;
+                        TqSourceSpan vary_start = curr_.span;
                         consume(); // vary
                         if (expect(TqTokenKind::KeywordBy, "by") &&
                             expect(TqTokenKind::KeywordHeaders, "headers")) {
                             stmt.cache.vary_headers.headers = parse_string_list();
+                            stmt.cache.vary_headers.span = vary_start;
+                            stmt.cache.vary_specified = true;
                         }
                     } else if (curr_.kind == TqTokenKind::KeywordFieldVariant) {
                         if (seen.field_variant) {
@@ -695,6 +708,7 @@ private:
                                     consume();
                                     if (curr_.kind == TqTokenKind::DurationLiteral) {
                                         stmt.cache.field_variant.ttl_max_ms = curr_.duration_ms;
+                                        stmt.cache.field_variant.ttl_max_specified = true;
                                         consume();
                                     } else {
                                         report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
@@ -846,6 +860,7 @@ private:
                     } else if (curr_.kind == TqTokenKind::KeywordPrefer) {
                         consume();
                         stmt.compress.preferred_algorithms = parse_algorithm_list();
+                        stmt.compress.prefer_specified = true;
                     } else if (curr_.kind == TqTokenKind::KeywordAlreadyEncoded) {
                         consume();
                         if (curr_.kind == TqTokenKind::KeywordSkip) {
@@ -1002,6 +1017,8 @@ private:
                 expect(TqTokenKind::RightBrace, "}");
             }
             stmt.coalesce.span = { stmt.span.start, curr_.span.end };
+        } else if (kind == TqAstStatementKind::Observe) {
+            stmt.observe.span = { stmt.span.start, curr_.span.end };
         }
 
         return stmt;
