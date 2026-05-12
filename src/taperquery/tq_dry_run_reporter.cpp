@@ -65,11 +65,11 @@ std::string render_taperquery_dry_run_text(const TqPolicyChangePlan& plan) {
         out += "  No route changes\n";
     } else {
         for (const auto& rc : plan.route_changes) {
-            if (rc.kind == TqRouteChangeKind::Added) {
+            if (rc.kind == TqLegacyRouteChangeKind::Added) {
                 out += "  + " + rc.route_id + " [" + risk_to_string(rc.risk) + "]\n";
-            } else if (rc.kind == TqRouteChangeKind::Removed) {
+            } else if (rc.kind == TqLegacyRouteChangeKind::Removed) {
                 out += "  - " + rc.route_id + " [" + risk_to_string(rc.risk) + "]\n";
-            } else if (rc.kind == TqRouteChangeKind::Updated) {
+            } else if (rc.kind == TqLegacyRouteChangeKind::Updated) {
                 out += "  ~ " + rc.route_id + " [" + risk_to_string(rc.risk) + "]\n";
                 if (rc.order_changed) {
                     out += "      route order changed\n";
@@ -78,7 +78,7 @@ std::string render_taperquery_dry_run_text(const TqPolicyChangePlan& plan) {
                     out +=
                         "      " + fd.field_path + ": " + fd.expected + " -> " + fd.actual + "\n";
                 }
-            } else if (rc.kind == TqRouteChangeKind::Reordered) {
+            } else if (rc.kind == TqLegacyRouteChangeKind::Reordered) {
                 out += "  ! " + rc.route_id + " [" + risk_to_string(rc.risk) + "]\n";
             }
         }

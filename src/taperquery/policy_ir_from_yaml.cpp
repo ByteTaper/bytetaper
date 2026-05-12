@@ -4,6 +4,7 @@
 #include "taperquery/policy_ir_from_yaml.h"
 
 #include "policy/yaml_loader.h"
+#include "taperquery/policy_ir_version.h"
 
 namespace bytetaper::taperquery {
 
@@ -108,6 +109,11 @@ PolicyIrLoadResult load_policy_ir_from_yaml_file(const char* path) {
     }
 
     res.ok = true;
+    res.policy.source_name = path;
+    res.policy.version.source_schema_version = "yaml/v1";
+    res.policy.schema_version = "yaml/v1";
+    res.policy.version.policy_ir_version = kCurrentPolicyIrVersion;
+    res.policy.version.identity_version = kCurrentPolicyIdentityVersion;
     res.policy.routes.clear();
     for (std::size_t i = 0; i < file_res.count; ++i) {
         res.policy.routes.push_back(from_runtime_route_policy(file_res.policies[i]));

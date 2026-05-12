@@ -3,6 +3,8 @@
 
 #include "taperquery/tq_compiler.h"
 
+#include "taperquery/policy_ir_version.h"
+
 #include <algorithm>
 #include <set>
 #include <string>
@@ -512,10 +514,13 @@ bool compile_taperquery_ast_to_policy_ir(const TqAstDocument& ast, const TqCompi
         const auto& pol = ast.policies[0];
         out->document_id = pol.name;
         if (pol.schema.empty()) {
-            out->schema_version = "tq/v1";
+            out->version.source_schema_version = "tq/v1";
         } else {
-            out->schema_version = pol.schema;
+            out->version.source_schema_version = pol.schema;
         }
+        out->schema_version = out->version.source_schema_version;
+        out->version.policy_ir_version = kCurrentPolicyIrVersion;
+        out->version.identity_version = kCurrentPolicyIdentityVersion;
         out->expected_base_sha = pol.sha256;
 
         std::set<std::string> seen_route_ids;
@@ -536,7 +541,10 @@ bool compile_taperquery_ast_to_policy_ir(const TqAstDocument& ast, const TqCompi
         }
     } else {
         // partial document or top-level routes
+        out->version.source_schema_version = "tq/v1";
         out->schema_version = "tq/v1";
+        out->version.policy_ir_version = kCurrentPolicyIrVersion;
+        out->version.identity_version = kCurrentPolicyIdentityVersion;
         std::set<std::string> seen_route_ids;
         for (const auto& ast_route : ast.top_level_routes) {
             if (!seen_route_ids.insert(ast_route.name).second) {

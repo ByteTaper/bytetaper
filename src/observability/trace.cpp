@@ -526,13 +526,13 @@ void trace_flush(TraceRingBuffer* ring, const TraceConfig& config, const char* s
     char md_path[512];
     std::snprintf(md_path, sizeof(md_path), "%s/%s_%s.summary.md", out_dir.c_str(), scen, time_str);
 
-    char buf_open[512];
+    char buf_open[1024];
     std::snprintf(buf_open, sizeof(buf_open), "trace_flush: opening file '%s' for writing",
                   jsonl_path);
     bytetaper::observability::log_debug(buf_open);
     std::FILE* jsonl_file = std::fopen(jsonl_path, "w");
     if (jsonl_file == nullptr) {
-        char buf_fail[512];
+        char buf_fail[1024];
         std::snprintf(buf_fail, sizeof(buf_fail),
                       "trace_flush: failed to open file '%s' for writing!", jsonl_path);
         bytetaper::observability::log_error(buf_fail);

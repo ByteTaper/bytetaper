@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
-#include "taperquery/policy_ir_hash.h"
+#include "taperquery/policy_ir_identity.h"
 
 #include <gtest/gtest.h>
 
@@ -114,11 +114,11 @@ TEST(TaperQueryPolicyIrHashTest, CoalescingSensitivity) {
 
 TEST(TaperQueryPolicyIrHashTest, DocumentIdentityComposition) {
     TqPolicyDocument doc1;
-    doc1.schema_version = "v1";
+    doc1.version.source_schema_version = "v1";
     doc1.document_id = "docA";
 
     TqPolicyDocument doc2;
-    doc2.schema_version = "v1";
+    doc2.version.source_schema_version = "v1";
     doc2.document_id = "docB";
 
     EXPECT_NE(compute_policy_document_identity(doc1), compute_policy_document_identity(doc2));
@@ -130,7 +130,9 @@ TEST(TaperQueryPolicyIrHashTest, DocumentBaseShaSensitivity) {
     TqPolicyDocument doc2;
     doc2.expected_base_sha = "sha2";
 
-    EXPECT_NE(compute_policy_document_identity(doc1), compute_policy_document_identity(doc2));
+    EXPECT_EQ(compute_policy_document_identity(doc1), compute_policy_document_identity(doc2));
+    EXPECT_NE(compute_policy_apply_request_identity(doc1),
+              compute_policy_apply_request_identity(doc2));
 }
 
 TEST(TaperQueryPolicyIrHashTest, DocumentRouteOrderSensitivity) {
@@ -159,5 +161,5 @@ TEST(TaperQueryPolicyIrHashTest, KnownEmptyHashCheck) {
     TqPolicyDocument empty_doc;
     std::string doc_hash = compute_policy_document_identity(empty_doc);
     // Placeholder to be updated on build-run
-    EXPECT_EQ(doc_hash, "e4f6b7c61e48645d");
+    EXPECT_EQ(doc_hash, "d4e71d17c5cb4e10");
 }

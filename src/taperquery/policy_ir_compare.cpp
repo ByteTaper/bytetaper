@@ -145,9 +145,34 @@ void add_diff(PolicyIrDiff& diff, const std::string& route_id, const std::string
 PolicyIrDiff compare_policy_ir(const TqPolicyDocument& expected, const TqPolicyDocument& actual) {
     PolicyIrDiff diff;
 
+    if (expected.version.source_schema_version != actual.version.source_schema_version) {
+        add_diff(diff, "<document>", "version.source_schema_version",
+                 expected.version.source_schema_version, actual.version.source_schema_version);
+    }
     if (expected.schema_version != actual.schema_version) {
         add_diff(diff, "<document>", "schema_version", expected.schema_version,
                  actual.schema_version);
+    }
+    if (expected.version.policy_ir_version != actual.version.policy_ir_version) {
+        add_diff(diff, "<document>", "version.policy_ir_version",
+                 expected.version.policy_ir_version, actual.version.policy_ir_version);
+    }
+    if (expected.version.identity_version != actual.version.identity_version) {
+        add_diff(diff, "<document>", "version.identity_version", expected.version.identity_version,
+                 actual.version.identity_version);
+    }
+    if (expected.version.emitter_version != actual.version.emitter_version) {
+        add_diff(diff, "<document>", "version.emitter_version", expected.version.emitter_version,
+                 actual.version.emitter_version);
+    }
+    if (expected.version.runtime_min_version != actual.version.runtime_min_version) {
+        add_diff(diff, "<document>", "version.runtime_min_version",
+                 expected.version.runtime_min_version, actual.version.runtime_min_version);
+    }
+    if (expected.version.runtime_capability_profile != actual.version.runtime_capability_profile) {
+        add_diff(diff, "<document>", "version.runtime_capability_profile",
+                 expected.version.runtime_capability_profile,
+                 actual.version.runtime_capability_profile);
     }
     if (expected.document_id != actual.document_id) {
         add_diff(diff, "<document>", "document_id", expected.document_id, actual.document_id);

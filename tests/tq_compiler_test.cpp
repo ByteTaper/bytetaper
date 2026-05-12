@@ -3,7 +3,7 @@
 
 #include "policy/policy_semantic_validator.h"
 #include "policy/route_policy.h"
-#include "taperquery/policy_ir_hash.h"
+#include "taperquery/policy_ir_identity.h"
 #include "taperquery/policy_ir_normalize.h"
 #include "taperquery/policy_ir_printer.h"
 #include "taperquery/tq_compiler.h"
@@ -125,7 +125,7 @@ TEST(TqCompilerTest, CompilesPolicyDocumentMetadata) {
     TqCompileOptions opts{};
     ASSERT_TRUE(compile_taperquery_ast_to_policy_ir(parse_res.document, opts, &doc, &diags));
     EXPECT_EQ(doc.document_id, "my_id");
-    EXPECT_EQ(doc.schema_version, "v3");
+    EXPECT_EQ(doc.version.source_schema_version, "v3");
     EXPECT_EQ(doc.expected_base_sha, "hash123");
 }
 
@@ -138,7 +138,7 @@ TEST(TqCompilerTest, DefaultsSchemaVersionWhenMissing) {
     TqDiagnosticBag diags{};
     TqCompileOptions opts{};
     ASSERT_TRUE(compile_taperquery_ast_to_policy_ir(parse_res.document, opts, &doc, &diags));
-    EXPECT_EQ(doc.schema_version, "tq/v1");
+    EXPECT_EQ(doc.version.source_schema_version, "tq/v1");
 }
 
 TEST(TqCompilerTest, RejectsMissingPolicyDeclarationInStrictMode) {

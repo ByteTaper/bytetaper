@@ -13,6 +13,87 @@
 
 namespace bytetaper::taperquery {
 
+// ============================================================================
+// GA-spec TqApplyPlan API & definitions (Partial-GA Compliance)
+// ============================================================================
+
+enum class TqPlanSeverity : std::uint8_t {
+    Info,
+    Warning,
+    Blocker,
+};
+
+enum class TqRouteChangeKind : std::uint8_t {
+    Added,
+    Removed,
+    Modified,
+    Unchanged,
+};
+
+enum class TqSemanticImpact : std::uint8_t {
+    None,
+    MatchBehavior,
+    MutationBehavior,
+    CacheBehavior,
+    CacheKeyBehavior,
+    CacheStorageBehavior,
+    FieldFilteringBehavior,
+    PaginationBehavior,
+    CompressionBehavior,
+    CoalescingBehavior,
+    FailureBehavior,
+    RuntimeCompatibility,
+};
+
+struct TqApplyPlanFieldChange {
+    std::string field_path;
+    std::string before;
+    std::string after;
+    TqSemanticImpact impact = TqSemanticImpact::None;
+};
+
+struct TqApplyPlanRouteChange {
+    std::string route_id;
+    TqRouteChangeKind kind = TqRouteChangeKind::Unchanged;
+    std::string before_identity;
+    std::string after_identity;
+    std::vector<TqApplyPlanFieldChange> field_changes;
+};
+
+struct TqApplyPlanIssue {
+    TqPlanSeverity severity = TqPlanSeverity::Info;
+    std::string code;
+    std::string route_id;
+    std::string reason;
+    std::string hint;
+};
+
+struct TqApplyPlan {
+    bool ok = true;
+    std::string before_policy_identity;
+    std::string after_policy_identity;
+    std::string expected_base_identity;
+    std::vector<TqApplyPlanRouteChange> route_changes;
+    std::vector<TqApplyPlanIssue> issues;
+};
+
+struct TqApplyPlanOptions {
+    bool include_unchanged_routes = false;
+    bool include_field_level_changes = true;
+    bool strict_production = true;
+};
+
+TqApplyPlan build_taperquery_apply_plan(const TqPolicyDocument& before,
+                                        const TqPolicyDocument& after,
+                                        const TqApplyPlanOptions& options = {});
+
+std::string render_taperquery_apply_plan_markdown(const TqApplyPlan& plan);
+std::string render_taperquery_apply_plan_text(const TqApplyPlan& plan);
+
+// ============================================================================
+// Legacy compatibility shim definitions & APIs
+// ============================================================================
+
 enum class TqPlanStatus : std::uint8_t {
     Ready = 0,
     BlockedByValidation = 1,
@@ -27,7 +108,7 @@ enum class TqCasStatus : std::uint8_t {
     MissingExpectedBase = 3,
 };
 
-enum class TqRouteChangeKind : std::uint8_t {
+enum class TqLegacyRouteChangeKind : std::uint8_t {
     Unchanged = 0,
     Added = 1,
     Removed = 2,
@@ -44,7 +125,7 @@ enum class TqRiskLevel : std::uint8_t {
 };
 
 struct TqRouteChange {
-    TqRouteChangeKind kind = TqRouteChangeKind::Unchanged;
+    TqLegacyRouteChangeKind kind = TqLegacyRouteChangeKind::Unchanged;
     std::string route_id;
     std::size_t before_index = 0;
     std::size_t after_index = 0;

@@ -1,3 +1,7 @@
+source_schema_version: yaml/v1
+policy_ir_version: tq-ir/v1
+identity_version: policy-identity/v2
+source_name: ../examples/policy/coalescing-benchmark-policy.yaml
 route:
   route_id: products-coalescing-tier-l1
   match_prefix: /products/tier-l1/

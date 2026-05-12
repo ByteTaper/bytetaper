@@ -106,7 +106,15 @@ TqPolicyDocument parse_snapshot_to_policy_ir(const std::string& content) {
                 in_l1 = in_l2 = in_private_cache = in_field_variant = in_vary_headers = false;
             }
 
-            if (key == "schema_version") {
+            if (key == "source_schema_version") {
+                doc.version.source_schema_version = val;
+                doc.schema_version = val;
+            } else if (key == "policy_ir_version") {
+                doc.version.policy_ir_version = val;
+            } else if (key == "identity_version") {
+                doc.version.identity_version = val;
+            } else if (key == "schema_version") { // compatibility / fallback
+                doc.version.source_schema_version = val;
                 doc.schema_version = val;
             } else if (key == "document_id") {
                 doc.document_id = val;

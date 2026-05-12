@@ -61,7 +61,7 @@ TEST(TaperQueryPolicyIrNormalizeTest, PreserveFieldFiltersAndAlgorithms) {
 
 TEST(TaperQueryPolicyIrNormalizeTest, NormalizePolicyDocument) {
     TqPolicyDocument doc;
-    doc.schema_version = "v1";
+    doc.version.source_schema_version = "v1";
     doc.document_id = "doc123";
     doc.source_name = "git";
 
@@ -76,7 +76,9 @@ TEST(TaperQueryPolicyIrNormalizeTest, NormalizePolicyDocument) {
     doc.routes = { r1, r2 };
 
     TqPolicyDocument normalized = normalize_policy_ir(doc);
-    EXPECT_EQ(normalized.schema_version, "v1");
+    EXPECT_EQ(normalized.version.source_schema_version, "v1");
+    EXPECT_EQ(normalized.version.policy_ir_version, "tq-ir/v1");
+    EXPECT_EQ(normalized.version.identity_version, "policy-identity/v2");
     EXPECT_EQ(normalized.document_id, "doc123");
     EXPECT_EQ(normalized.source_name, "git");
     ASSERT_EQ(normalized.routes.size(), 2u);

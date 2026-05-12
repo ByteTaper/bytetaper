@@ -3,6 +3,8 @@
 
 #include "taperquery/policy_ir_normalize.h"
 
+#include "taperquery/policy_ir_version.h"
+
 #include <algorithm>
 #include <cctype>
 
@@ -42,6 +44,28 @@ TqRoutePolicy normalize_route_policy_ir(const TqRoutePolicy& input) {
 
 TqPolicyDocument normalize_policy_ir(const TqPolicyDocument& input) {
     TqPolicyDocument result = input;
+
+    if (result.version.policy_ir_version.empty()) {
+        result.version.policy_ir_version = kCurrentPolicyIrVersion;
+    }
+    if (result.version.identity_version.empty()) {
+        result.version.identity_version = kCurrentPolicyIdentityVersion;
+    }
+
+    std::string resolved_schema;
+    if (!result.version.source_schema_version.empty()) {
+        resolved_schema = result.version.source_schema_version;
+    } else if (!result.schema_version.empty()) {
+        resolved_schema = result.schema_version;
+    } else if (result.source_name.rfind(".yaml") != std::string::npos ||
+               result.source_name.rfind(".yml") != std::string::npos) {
+        resolved_schema = "yaml/v1";
+    } else {
+        resolved_schema = "tq/v1";
+    }
+    result.version.source_schema_version = resolved_schema;
+    result.schema_version = resolved_schema;
+
     result.routes.clear();
     for (const auto& route : input.routes) {
         result.routes.push_back(normalize_route_policy_ir(route));

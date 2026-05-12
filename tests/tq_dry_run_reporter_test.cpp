@@ -26,21 +26,21 @@ TqPolicyChangePlan create_dummy_plan() {
 
     // Added route
     TqRouteChange r1;
-    r1.kind = TqRouteChangeKind::Added;
+    r1.kind = TqLegacyRouteChangeKind::Added;
     r1.route_id = "new_route";
     r1.risk = TqRiskLevel::Medium;
     plan.route_changes.push_back(r1);
 
     // Removed route
     TqRouteChange r2;
-    r2.kind = TqRouteChangeKind::Removed;
+    r2.kind = TqLegacyRouteChangeKind::Removed;
     r2.route_id = "old_route";
     r2.risk = TqRiskLevel::High;
     plan.route_changes.push_back(r2);
 
     // Updated route
     TqRouteChange r3;
-    r3.kind = TqRouteChangeKind::Updated;
+    r3.kind = TqLegacyRouteChangeKind::Updated;
     r3.route_id = "existing_route";
     r3.risk = TqRiskLevel::Low;
     r3.order_changed = false;
@@ -54,7 +54,7 @@ TqPolicyChangePlan create_dummy_plan() {
 
     // Reordered route
     TqRouteChange r4;
-    r4.kind = TqRouteChangeKind::Reordered;
+    r4.kind = TqLegacyRouteChangeKind::Reordered;
     r4.route_id = "reordered_route";
     r4.risk = TqRiskLevel::High;
     plan.route_changes.push_back(r4);

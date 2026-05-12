@@ -121,18 +121,27 @@ TEST(TaperQueryPolicyIrTest, RoutePolicyDefaultsAndAssignment) {
 
 TEST(TaperQueryPolicyIrTest, PolicyDocumentConstruction) {
     TqPolicyDocument doc;
-    EXPECT_TRUE(doc.schema_version.empty());
+    EXPECT_TRUE(doc.version.source_schema_version.empty());
+    EXPECT_TRUE(doc.version.policy_ir_version.empty());
+    EXPECT_TRUE(doc.version.identity_version.empty());
+    EXPECT_TRUE(doc.version.emitter_version.empty());
+    EXPECT_TRUE(doc.version.runtime_min_version.empty());
+    EXPECT_TRUE(doc.version.runtime_capability_profile.empty());
     EXPECT_TRUE(doc.document_id.empty());
     EXPECT_TRUE(doc.source_name.empty());
     EXPECT_TRUE(doc.expected_base_sha.empty());
     EXPECT_TRUE(doc.routes.empty());
 
-    doc.schema_version = "v1";
+    doc.version.source_schema_version = "v1";
+    doc.version.policy_ir_version = "tq-ir/v1";
+    doc.version.identity_version = "policy-identity/v2";
     doc.document_id = "doc-1";
     doc.source_name = "git";
     doc.expected_base_sha = "abcdef0123456789";
 
-    EXPECT_EQ(doc.schema_version, "v1");
+    EXPECT_EQ(doc.version.source_schema_version, "v1");
+    EXPECT_EQ(doc.version.policy_ir_version, "tq-ir/v1");
+    EXPECT_EQ(doc.version.identity_version, "policy-identity/v2");
     EXPECT_EQ(doc.document_id, "doc-1");
     EXPECT_EQ(doc.source_name, "git");
     EXPECT_EQ(doc.expected_base_sha, "abcdef0123456789");

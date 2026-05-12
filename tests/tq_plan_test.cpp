@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
-#include "taperquery/policy_ir_hash.h"
+#include "taperquery/policy_ir_identity.h"
+#include "taperquery/policy_ir_validator.h"
+#include "taperquery/policy_ir_version.h"
 #include "taperquery/tq_plan.h"
 
 #include <gtest/gtest.h>
@@ -12,7 +14,9 @@ namespace {
 
 TqPolicyDocument create_base_policy() {
     TqPolicyDocument doc;
-    doc.schema_version = "v1";
+    doc.version.source_schema_version = "tq/v1";
+    doc.version.policy_ir_version = kCurrentPolicyIrVersion;
+    doc.version.identity_version = kCurrentPolicyIdentityVersion;
     doc.document_id = "doc_1";
     doc.source_name = "test.yaml";
     doc.expected_base_sha = "";
@@ -25,6 +29,7 @@ TqPolicyDocument create_base_policy() {
     r1.cache.enabled = true;
     r1.cache.ttl_ms = 60000;
     r1.cache.l1.enabled = true;
+    r1.cache.l1.capacity_entries = 1000;
     doc.routes.push_back(r1);
 
     return doc;
@@ -142,6 +147,7 @@ TEST(TqPlanTest, ClassifiesAddedRoute) {
     r2.cache.enabled = true;
     r2.cache.ttl_ms = 30000;
     r2.cache.l1.enabled = true;
+    r2.cache.l1.capacity_entries = 1000;
     candidate.routes.push_back(r2);
 
     TqPlanOptions opts;
@@ -150,7 +156,7 @@ TEST(TqPlanTest, ClassifiesAddedRoute) {
     TqPolicyChangePlan plan;
     ASSERT_TRUE(build_taperquery_change_plan(current, candidate, opts, &plan));
     ASSERT_EQ(plan.route_changes.size(), 1u);
-    EXPECT_EQ(plan.route_changes[0].kind, TqRouteChangeKind::Added);
+    EXPECT_EQ(plan.route_changes[0].kind, TqLegacyRouteChangeKind::Added);
     EXPECT_EQ(plan.route_changes[0].route_id, "r2");
     EXPECT_EQ(plan.risk_summary.added_routes, 1u);
 }
@@ -166,7 +172,7 @@ TEST(TqPlanTest, ClassifiesRemovedRoute) {
     TqPolicyChangePlan plan;
     ASSERT_TRUE(build_taperquery_change_plan(current, candidate, opts, &plan));
     ASSERT_EQ(plan.route_changes.size(), 1u);
-    EXPECT_EQ(plan.route_changes[0].kind, TqRouteChangeKind::Removed);
+    EXPECT_EQ(plan.route_changes[0].kind, TqLegacyRouteChangeKind::Removed);
     EXPECT_EQ(plan.route_changes[0].route_id, "r1");
     EXPECT_EQ(plan.risk_summary.removed_routes, 1u);
 }
@@ -182,7 +188,7 @@ TEST(TqPlanTest, ClassifiesUpdatedRoute) {
     TqPolicyChangePlan plan;
     ASSERT_TRUE(build_taperquery_change_plan(current, candidate, opts, &plan));
     ASSERT_EQ(plan.route_changes.size(), 1u);
-    EXPECT_EQ(plan.route_changes[0].kind, TqRouteChangeKind::Updated);
+    EXPECT_EQ(plan.route_changes[0].kind, TqLegacyRouteChangeKind::Updated);
     EXPECT_EQ(plan.route_changes[0].route_id, "r1");
     EXPECT_EQ(plan.risk_summary.updated_routes, 1u);
 }
@@ -195,6 +201,7 @@ TEST(TqPlanTest, ClassifiesReorderedRoute) {
     r2.cache.enabled = true;
     r2.cache.ttl_ms = 30000;
     r2.cache.l1.enabled = true;
+    r2.cache.l1.capacity_entries = 1000;
     current.routes.push_back(r2);
 
     TqPolicyDocument candidate = current;
@@ -222,7 +229,7 @@ TEST(TqPlanTest, ClassifiesUnchangedRoute) {
     TqPolicyChangePlan plan;
     ASSERT_TRUE(build_taperquery_change_plan(current, candidate, opts, &plan));
     ASSERT_EQ(plan.route_changes.size(), 1u);
-    EXPECT_EQ(plan.route_changes[0].kind, TqRouteChangeKind::Unchanged);
+    EXPECT_EQ(plan.route_changes[0].kind, TqLegacyRouteChangeKind::Unchanged);
 }
 
 TEST(TqPlanTest, UpdatedRouteCanAlsoMarkOrderChanged) {
@@ -233,6 +240,7 @@ TEST(TqPlanTest, UpdatedRouteCanAlsoMarkOrderChanged) {
     r2.cache.enabled = true;
     r2.cache.ttl_ms = 30000;
     r2.cache.l1.enabled = true;
+    r2.cache.l1.capacity_entries = 1000;
     current.routes.push_back(r2);
 
     TqPolicyDocument candidate = current;
@@ -250,7 +258,7 @@ TEST(TqPlanTest, UpdatedRouteCanAlsoMarkOrderChanged) {
     bool r2_found = false;
     for (const auto& rc : plan.route_changes) {
         if (rc.route_id == "r2") {
-            EXPECT_EQ(rc.kind, TqRouteChangeKind::Updated);
+            EXPECT_EQ(rc.kind, TqLegacyRouteChangeKind::Updated);
             EXPECT_TRUE(rc.order_changed);
             r2_found = true;
         }
@@ -287,7 +295,7 @@ TEST(TqPlanTest, AttachesFieldDiffsToUpdatedRoute) {
     TqPolicyChangePlan plan;
     ASSERT_TRUE(build_taperquery_change_plan(current, candidate, opts, &plan));
     ASSERT_EQ(plan.route_changes.size(), 1u);
-    EXPECT_EQ(plan.route_changes[0].kind, TqRouteChangeKind::Updated);
+    EXPECT_EQ(plan.route_changes[0].kind, TqLegacyRouteChangeKind::Updated);
     ASSERT_FALSE(plan.route_changes[0].field_diffs.empty());
     EXPECT_EQ(plan.route_changes[0].field_diffs[0].field_path, "match_prefix");
 }
@@ -337,6 +345,7 @@ TEST(TqPlanTest, ReportsCoalescingBudgetChange) {
     TqPolicyDocument current = create_base_policy();
     TqPolicyDocument candidate = current;
     candidate.routes[0].coalescing.enabled = true;
+    candidate.routes[0].coalescing.mode = TqCoalescingMode::CacheAssisted;
     candidate.routes[0].coalescing.max_follower_wait_budget_ms = 1000;
 
     TqPlanOptions opts;
@@ -377,7 +386,7 @@ TEST(TqPlanTest, ReportsMatchPrefixChange) {
 TEST(TqPlanTest, ReportsDocumentMetadataChange) {
     TqPolicyDocument current = create_base_policy();
     TqPolicyDocument candidate = current;
-    candidate.schema_version = "v2"; // Metadata change
+    candidate.version.source_schema_version = "v2"; // Metadata change
 
     TqPlanOptions opts;
     opts.require_cas = false;
@@ -385,7 +394,7 @@ TEST(TqPlanTest, ReportsDocumentMetadataChange) {
     TqPolicyChangePlan plan;
     ASSERT_TRUE(build_taperquery_change_plan(current, candidate, opts, &plan));
     EXPECT_FALSE(plan.document_field_diffs.empty());
-    EXPECT_EQ(plan.document_field_diffs[0].field_path, "schema_version");
+    EXPECT_EQ(plan.document_field_diffs[0].field_path, "version.source_schema_version");
 }
 
 // ==========================================
@@ -401,6 +410,7 @@ TEST(TqPlanTest, AddedRouteIsMediumRisk) {
     r2.cache.enabled = true;
     r2.cache.ttl_ms = 30000;
     r2.cache.l1.enabled = true;
+    r2.cache.l1.capacity_entries = 1000;
     candidate.routes.push_back(r2);
 
     TqPlanOptions opts;
@@ -469,6 +479,7 @@ TEST(TqPlanTest, CoalescingAllowAuthenticatedChangeIsHighRisk) {
     TqPolicyDocument current = create_base_policy();
     TqPolicyDocument candidate = current;
     candidate.routes[0].coalescing.enabled = true;
+    candidate.routes[0].coalescing.mode = TqCoalescingMode::CacheAssisted;
     candidate.routes[0].coalescing.allow_authenticated = true;
     // Ensure auth scope header is set to avoid validation errors
     candidate.routes[0].cache.private_cache.enabled = true;
@@ -557,6 +568,335 @@ TEST(TqPlanTest, ApplyDecisionDeniedOnNoChanges) {
     TqPolicyChangePlan plan;
     ASSERT_TRUE(build_taperquery_change_plan(current, candidate, opts, &plan));
     EXPECT_EQ(evaluate_apply_decision(plan), TqApplyDecision::DeniedNoChanges);
+}
+
+// ==========================================
+// 6. GA-spec TqApplyPlan Model Tests
+// ==========================================
+
+TEST(TqPlanTest, BuildTaperQueryApplyPlanSuccess) {
+    TqPolicyDocument before = create_base_policy();
+    TqPolicyDocument after = create_base_policy();
+
+    after.routes[0].match_prefix = "/api/v2";
+    after.expected_base_sha = compute_policy_document_identity(before);
+
+    TqApplyPlanOptions opts;
+    opts.strict_production = true;
+
+    auto plan = build_taperquery_apply_plan(before, after, opts);
+    EXPECT_TRUE(plan.ok);
+    EXPECT_TRUE(plan.issues.empty());
+
+    ASSERT_EQ(plan.route_changes.size(), 1u);
+    EXPECT_EQ(plan.route_changes[0].route_id, "r1");
+    EXPECT_EQ(plan.route_changes[0].kind, TqRouteChangeKind::Modified);
+    EXPECT_FALSE(plan.route_changes[0].field_changes.empty());
+    EXPECT_EQ(plan.route_changes[0].field_changes[0].field_path, "match_prefix");
+    EXPECT_EQ(plan.route_changes[0].field_changes[0].impact, TqSemanticImpact::MatchBehavior);
+}
+
+TEST(TqPlanTest, BuildTaperQueryApplyPlanStrictProductionCasFail) {
+    TqPolicyDocument before = create_base_policy();
+    TqPolicyDocument after = create_base_policy();
+    after.expected_base_sha = "invalid_cas_sha";
+
+    TqApplyPlanOptions opts;
+    opts.strict_production = true;
+
+    auto plan = build_taperquery_apply_plan(before, after, opts);
+    EXPECT_FALSE(plan.ok);
+
+    bool found_cas_mismatch = false;
+    for (const auto& issue : plan.issues) {
+        if (issue.code == "CAS_SHA_MISMATCH") {
+            found_cas_mismatch = true;
+            EXPECT_EQ(issue.severity, TqPlanSeverity::Blocker);
+        }
+    }
+    EXPECT_TRUE(found_cas_mismatch);
+}
+
+TEST(TqPlanTest, RenderApplyPlanSuccess) {
+    TqPolicyDocument before = create_base_policy();
+    TqPolicyDocument after = create_base_policy();
+    after.routes[0].match_prefix = "/api/v2";
+    after.expected_base_sha = compute_policy_document_identity(before);
+
+    auto plan = build_taperquery_apply_plan(before, after);
+    std::string markdown = render_taperquery_apply_plan_markdown(plan);
+    EXPECT_NE(markdown.find("APPROVED"), std::string::npos);
+    EXPECT_NE(markdown.find("Modified"), std::string::npos);
+
+    std::string text = render_taperquery_apply_plan_text(plan);
+    EXPECT_NE(text.find("APPROVED"), std::string::npos);
+    EXPECT_NE(text.find("Modified"), std::string::npos);
+}
+
+TEST(TqPlanTest, ApplyPlanGATests) {
+    TqPolicyDocument before = create_base_policy();
+
+    // Test 1: Route added
+    {
+        TqPolicyDocument after = before;
+        TqRoutePolicy added;
+        added.route_id = "added_route";
+        added.match_prefix = "/api/added";
+        after.routes.push_back(added);
+        after.expected_base_sha = compute_policy_document_identity(before);
+
+        auto plan = build_taperquery_apply_plan(before, after);
+        EXPECT_TRUE(plan.ok);
+        bool found_added = false;
+        for (const auto& rc : plan.route_changes) {
+            if (rc.route_id == "added_route" && rc.kind == TqRouteChangeKind::Added) {
+                found_added = true;
+            }
+        }
+        EXPECT_TRUE(found_added);
+    }
+
+    // Test 2: Route removed
+    {
+        TqPolicyDocument local_before = before;
+        TqRoutePolicy r2;
+        r2.route_id = "r2";
+        r2.match_prefix = "/api/v2";
+        // Set mandatory valid cache params so it passes semantic validation
+        r2.cache.enabled = true;
+        r2.cache.ttl_ms = 60000;
+        r2.cache.l1.enabled = true;
+        r2.cache.l1.capacity_entries = 1000;
+        local_before.routes.push_back(r2);
+
+        TqPolicyDocument after = local_before;
+        after.routes.pop_back(); // remove r2
+        after.expected_base_sha = compute_policy_document_identity(local_before);
+
+        auto plan = build_taperquery_apply_plan(local_before, after);
+        EXPECT_TRUE(plan.ok);
+        bool found_removed = false;
+        for (const auto& rc : plan.route_changes) {
+            if (rc.route_id == "r2" && rc.kind == TqRouteChangeKind::Removed) {
+                found_removed = true;
+            }
+        }
+        EXPECT_TRUE(found_removed);
+    }
+
+    // Test 3: Unchanged routes
+    {
+        TqPolicyDocument after = before;
+        after.expected_base_sha = compute_policy_document_identity(before);
+
+        TqApplyPlanOptions opts;
+        opts.include_unchanged_routes = true;
+        auto plan = build_taperquery_apply_plan(before, after, opts);
+        EXPECT_TRUE(plan.ok);
+        bool found_unchanged = false;
+        for (const auto& rc : plan.route_changes) {
+            if (rc.route_id == "r1" && rc.kind == TqRouteChangeKind::Unchanged) {
+                found_unchanged = true;
+            }
+        }
+        EXPECT_TRUE(found_unchanged);
+    }
+
+    // Test 4: Validation warnings propagation
+    {
+        TqPolicyDocument after = before;
+        // Introduce a warning (e.g. observe mode warning by having a feature block with
+        // mutation=disabled)
+        after.routes[0].mutation = TqMutationMode::Disabled;
+        after.routes[0].field_filter.mode = TqFieldFilterMode::Allowlist;
+        after.routes[0].field_filter.fields = { "id" };
+        after.expected_base_sha = compute_policy_document_identity(before);
+
+        auto plan = build_taperquery_apply_plan(before, after);
+        EXPECT_TRUE(plan.ok); // Warning doesn't block the plan!
+        bool found_warning = false;
+        for (const auto& issue : plan.issues) {
+            if (issue.severity == TqPlanSeverity::Warning && issue.code == "OBSERVE_MODE_WARNING") {
+                found_warning = true;
+            }
+        }
+        EXPECT_TRUE(found_warning);
+    }
+
+    // Test 5: Semantic impact mappings for modified fields
+    {
+        TqPolicyDocument after = before;
+        after.routes[0].cache.enabled = true;
+        after.routes[0].cache.ttl_ms = 45000;
+        after.routes[0].cache.l1.enabled = true;
+        after.routes[0].cache.l1.capacity_entries = 500;
+        after.routes[0].cache.field_variant.enabled = true;
+        after.routes[0].cache.field_variant.max_variants_per_route = 12;
+        after.routes[0].cache.field_variant.ttl_max_ms = 60000;
+        after.routes[0].cache.vary_headers.names = { "X-Test" };
+        after.routes[0].field_filter.mode = TqFieldFilterMode::Denylist;
+        after.routes[0].field_filter.fields = { "secret" };
+        after.routes[0].coalescing.enabled = true;
+        after.routes[0].coalescing.backend_timeout_ms = 1200;
+        after.routes[0].failure_mode = TqFailureMode::FailClosed;
+        after.expected_base_sha = compute_policy_document_identity(before);
+
+        TqApplyPlanOptions opts;
+        opts.include_field_level_changes = true;
+        auto plan = build_taperquery_apply_plan(before, after, opts);
+        EXPECT_TRUE(plan.ok);
+
+        bool found_cache_behavior = false;
+        bool found_cache_key = false;
+        bool found_cache_storage = false;
+        bool found_field_filter = false;
+        bool found_coalescing = false;
+        bool found_failure = false;
+
+        ASSERT_EQ(plan.route_changes.size(), 1u);
+        for (const auto& fc : plan.route_changes[0].field_changes) {
+            if (fc.impact == TqSemanticImpact::CacheBehavior)
+                found_cache_behavior = true;
+            if (fc.impact == TqSemanticImpact::CacheKeyBehavior)
+                found_cache_key = true;
+            if (fc.impact == TqSemanticImpact::CacheStorageBehavior)
+                found_cache_storage = true;
+            if (fc.impact == TqSemanticImpact::FieldFilteringBehavior)
+                found_field_filter = true;
+            if (fc.impact == TqSemanticImpact::CoalescingBehavior)
+                found_coalescing = true;
+            if (fc.impact == TqSemanticImpact::FailureBehavior)
+                found_failure = true;
+        }
+
+        EXPECT_TRUE(found_cache_behavior);
+        EXPECT_TRUE(found_cache_key);
+        EXPECT_TRUE(found_cache_storage);
+        EXPECT_TRUE(found_field_filter);
+        EXPECT_TRUE(found_coalescing);
+        EXPECT_TRUE(found_failure);
+    }
+}
+
+TEST(TqPlanTest, ApplyPlanGATestsPart2) {
+    TqPolicyDocument before = create_base_policy();
+
+    // 1. Semantic impacts for L2 Path, Mutation and Private Cache
+    {
+        TqPolicyDocument after = before;
+        after.routes[0].cache.l2.enabled = true;
+        after.routes[0].cache.l2.path = "/var/lib/rocksdb";
+        after.routes[0].mutation = TqMutationMode::HeadersOnly;
+        after.routes[0].cache.private_cache.enabled = true;
+        after.routes[0].cache.private_cache.auth_scope_header = "X-User-ID";
+        after.expected_base_sha = compute_policy_document_identity(before);
+
+        TqApplyPlanOptions opts;
+        opts.include_field_level_changes = true;
+        auto plan = build_taperquery_apply_plan(before, after, opts);
+        EXPECT_TRUE(plan.ok);
+
+        bool found_l2_storage = false;
+        bool found_mutation = false;
+        bool found_private_cache_key = false;
+
+        ASSERT_EQ(plan.route_changes.size(), 1u);
+        for (const auto& fc : plan.route_changes[0].field_changes) {
+            if (fc.field_path == "cache.l2.path" &&
+                fc.impact == TqSemanticImpact::CacheStorageBehavior) {
+                found_l2_storage = true;
+            }
+            if (fc.field_path == "mutation" && fc.impact == TqSemanticImpact::MutationBehavior) {
+                found_mutation = true;
+            }
+            if (fc.field_path == "cache.private_cache.auth_scope_header" &&
+                fc.impact == TqSemanticImpact::CacheKeyBehavior) {
+                found_private_cache_key = true;
+            }
+        }
+        EXPECT_TRUE(found_l2_storage);
+        EXPECT_TRUE(found_mutation);
+        EXPECT_TRUE(found_private_cache_key);
+    }
+
+    // 2. Route Shadowing Warnings Propagation
+    {
+        TqPolicyDocument after = before;
+        TqRoutePolicy r2;
+        r2.route_id = "r2";
+        r2.match_prefix = "/api/v1/subpath"; // Shadowed by r1's prefix "/api/v1"
+        r2.match_kind = TqRouteMatchKind::Prefix;
+        r2.cache.enabled = true;
+        r2.cache.ttl_ms = 60000;
+        r2.cache.l1.enabled = true;
+        r2.cache.l1.capacity_entries = 1000;
+        after.routes.push_back(r2);
+        after.expected_base_sha = compute_policy_document_identity(before);
+
+        auto plan = build_taperquery_apply_plan(before, after);
+        EXPECT_TRUE(plan.ok); // Warning only, plan should still be approved!
+
+        bool found_shadow_warning = false;
+        for (const auto& issue : plan.issues) {
+            if (issue.severity == TqPlanSeverity::Warning &&
+                issue.code == "ROUTE_ANALYSIS_PREFIX_SHADOWS_PREFIX") {
+                found_shadow_warning = true;
+            }
+        }
+        EXPECT_TRUE(found_shadow_warning);
+    }
+
+    // 3. Validation-Error Blocker
+    {
+        TqPolicyDocument after = before;
+        TqRoutePolicy invalid_route;
+        invalid_route.route_id = ""; // Empty route_id triggers an Error!
+        after.routes.push_back(invalid_route);
+        after.expected_base_sha = compute_policy_document_identity(before);
+
+        auto plan = build_taperquery_apply_plan(before, after);
+        EXPECT_FALSE(plan.ok); // Error triggers a blocker!
+
+        bool found_blocker = false;
+        for (const auto& issue : plan.issues) {
+            if (issue.severity == TqPlanSeverity::Blocker && issue.code == "EMPTY_ROUTE_ID") {
+                found_blocker = true;
+            }
+        }
+        EXPECT_TRUE(found_blocker);
+    }
+
+    // 4. Validator Check for Private Cache Header Characters and Compression Algorithm Range
+    {
+        TqPolicyDocument doc = before;
+        doc.routes[0].cache.private_cache.enabled = true;
+        doc.routes[0].cache.private_cache.auth_scope_header =
+            "Invalid Header!"; // Spaces/symbols are invalid!
+
+        doc.routes[0].compression.enabled = true;
+        doc.routes[0].compression.min_size_bytes = 100;
+        doc.routes[0].compression.eligible_content_types = { "application/json" };
+        doc.routes[0].compression.preferred_algorithms = { static_cast<TqCompressionAlgorithm>(
+            99) }; // Out of range!
+
+        TqPolicyValidationOptions val_opts;
+        val_opts.collect_all = true;
+        auto val_res = validate_taperquery_policy_ir(doc, val_opts);
+        EXPECT_FALSE(val_res.ok);
+
+        bool found_header_char_error = false;
+        bool found_algo_invalid_error = false;
+        for (const auto& issue : val_res.issues) {
+            if (issue.code == "PRIVATE_CACHE_INVALID_AUTH_HEADER_CHARACTERS") {
+                found_header_char_error = true;
+            }
+            if (issue.code == "COMPRESSION_ALGORITHM_INVALID") {
+                found_algo_invalid_error = true;
+            }
+        }
+        EXPECT_TRUE(found_header_char_error);
+        EXPECT_TRUE(found_algo_invalid_error);
+    }
 }
 
 } // namespace bytetaper::taperquery

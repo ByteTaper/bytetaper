@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
-#include "taperquery/policy_ir_hash.h"
+#include "taperquery/policy_ir_identity.h"
 
 #include "hash/hash.h"
+#include "taperquery/policy_ir_normalize.h"
 
 #include <cstdio>
 
@@ -62,9 +63,7 @@ std::string format_hex(std::uint64_t hash_val) {
 
 const hash::HashSeed kTqIrHashSeed = { 0x54510001ULL, 0x49520001ULL };
 
-} // namespace
-
-std::string compute_route_policy_identity(const TqRoutePolicy& route) {
+std::string compute_route_policy_identity_impl(const TqRoutePolicy& route) {
     std::string canonical;
 
     feed_string(canonical, "route_id", route.route_id);
@@ -151,20 +150,40 @@ std::string compute_route_policy_identity(const TqRoutePolicy& route) {
     return format_hex(hash_val);
 }
 
-std::string compute_policy_document_identity(const TqPolicyDocument& policy) {
+std::string compute_policy_document_identity_impl(const TqPolicyDocument& policy) {
     std::string canonical;
 
-    feed_string(canonical, "schema_version", policy.schema_version);
+    feed_string(canonical, "policy_ir_version", policy.version.policy_ir_version);
+    feed_string(canonical, "identity_version", policy.version.identity_version);
     feed_string(canonical, "document_id", policy.document_id);
-    feed_string(canonical, "source_name", policy.source_name);
-    feed_string(canonical, "expected_base_sha", policy.expected_base_sha);
 
     feed_uint32(canonical, "routes.count", static_cast<std::uint32_t>(policy.routes.size()));
     for (std::size_t i = 0; i < policy.routes.size(); ++i) {
         feed_string(canonical, ("route." + std::to_string(i)).c_str(),
-                    compute_route_policy_identity(policy.routes[i]));
+                    compute_route_policy_identity_impl(policy.routes[i]));
     }
 
+    std::uint64_t hash_val =
+        hash::siphash24_bytes(canonical.data(), canonical.size(), kTqIrHashSeed);
+    return format_hex(hash_val);
+}
+
+} // namespace
+
+std::string compute_route_policy_identity(const TqRoutePolicy& route) {
+    TqRoutePolicy normalized = normalize_route_policy_ir(route);
+    return compute_route_policy_identity_impl(normalized);
+}
+
+std::string compute_policy_document_identity(const TqPolicyDocument& policy) {
+    TqPolicyDocument normalized = normalize_policy_ir(policy);
+    return compute_policy_document_identity_impl(normalized);
+}
+
+std::string compute_policy_apply_request_identity(const TqPolicyDocument& policy) {
+    TqPolicyDocument normalized = normalize_policy_ir(policy);
+    std::string canonical = compute_policy_document_identity_impl(normalized);
+    feed_string(canonical, "expected_base_sha", normalized.expected_base_sha);
     std::uint64_t hash_val =
         hash::siphash24_bytes(canonical.data(), canonical.size(), kTqIrHashSeed);
     return format_hex(hash_val);

@@ -3,14 +3,15 @@
 
 #include "taperquery/tq_plan.h"
 
-#include "policy/policy_semantic_validator.h"
 #include "policy/route_policy.h"
-#include "taperquery/policy_ir_hash.h"
+#include "taperquery/policy_ir_identity.h"
+#include "taperquery/policy_ir_validator.h"
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -19,109 +20,84 @@ namespace bytetaper::taperquery {
 
 namespace {
 
-policy::RoutePolicy to_runtime_route_policy(const TqRoutePolicy& ir) {
-    policy::RoutePolicy res{};
-    res.route_id = ir.route_id.c_str();
-    res.match_prefix = ir.match_prefix.c_str();
-    res.match_kind = static_cast<policy::RouteMatchKind>(ir.match_kind);
-    res.mutation = static_cast<policy::MutationMode>(ir.mutation);
-    res.allowed_method = static_cast<policy::HttpMethod>(ir.allowed_method);
-
-    res.field_filter.mode = static_cast<policy::FieldFilterMode>(ir.field_filter.mode);
-    res.field_filter.field_count = std::min(ir.field_filter.fields.size(), policy::kMaxFields);
-    for (std::size_t i = 0; i < res.field_filter.field_count; ++i) {
-        std::strncpy(res.field_filter.fields[i], ir.field_filter.fields[i].c_str(),
-                     policy::kMaxFieldNameLen - 1);
+TqSemanticImpact map_field_path_to_semantic_impact(const std::string& path) {
+    if (path == "match_prefix" || path == "match_kind" || path == "allowed_method") {
+        return TqSemanticImpact::MatchBehavior;
     }
-
-    res.max_response_bytes = ir.max_response_bytes;
-
-    res.cache.enabled = ir.cache.enabled;
-    res.cache.behavior = static_cast<policy::CacheBehavior>(ir.cache.behavior);
-    res.cache.ttl_seconds = ir.cache.ttl_ms / 1000u;
-    res.cache.l1.enabled = ir.cache.l1.enabled;
-    res.cache.l1.capacity_entries = ir.cache.l1.capacity_entries;
-    res.cache.l2.enabled = ir.cache.l2.enabled;
-    std::strncpy(res.cache.l2.path, ir.cache.l2.path.c_str(), policy::kMaxCachePathLen - 1);
-    res.cache.private_cache = ir.cache.private_cache.enabled;
-    std::strncpy(res.cache.auth_scope_header, ir.cache.private_cache.auth_scope_header.c_str(),
-                 sizeof(res.cache.auth_scope_header) - 1);
-
-    res.cache.field_variant.enabled = ir.cache.field_variant.enabled;
-    res.cache.field_variant.max_variants_per_route = ir.cache.field_variant.max_variants_per_route;
-    res.cache.field_variant.min_field_count = ir.cache.field_variant.min_field_count;
-    res.cache.field_variant.max_field_count = ir.cache.field_variant.max_field_count;
-    res.cache.field_variant.admission_threshold = ir.cache.field_variant.admission_threshold;
-    res.cache.field_variant.ttl_max_ms = ir.cache.field_variant.ttl_max_ms;
-
-    res.cache.vary_headers.count =
-        std::min(ir.cache.vary_headers.names.size(), policy::kMaxCacheVaryHeaders);
-    for (std::size_t i = 0; i < res.cache.vary_headers.count; ++i) {
-        std::strncpy(res.cache.vary_headers.names[i], ir.cache.vary_headers.names[i].c_str(),
-                     policy::kMaxCacheVaryHeaderNameLen - 1);
+    if (path == "mutation") {
+        return TqSemanticImpact::MutationBehavior;
     }
-
-    res.failure_mode = static_cast<policy::FailureMode>(ir.failure_mode);
-
-    res.pagination.enabled = ir.pagination.enabled;
-    res.pagination.mode = static_cast<policy::PaginationMode>(ir.pagination.mode);
-    std::strncpy(res.pagination.limit_param, ir.pagination.limit_param.c_str(),
-                 sizeof(res.pagination.limit_param) - 1);
-    std::strncpy(res.pagination.offset_param, ir.pagination.offset_param.c_str(),
-                 sizeof(res.pagination.offset_param) - 1);
-    res.pagination.default_limit = ir.pagination.default_limit;
-    res.pagination.max_limit = ir.pagination.max_limit;
-    res.pagination.upstream_supports_pagination = ir.pagination.upstream_supports_pagination;
-    res.pagination.max_response_bytes_warning = ir.pagination.max_response_bytes_warning;
-
-    res.compression.enabled = ir.compression.enabled;
-    res.compression.min_size_bytes = ir.compression.min_size_bytes;
-    res.compression.eligible_content_type_count =
-        std::min(ir.compression.eligible_content_types.size(), policy::kMaxEligibleContentTypes);
-    for (std::size_t i = 0; i < res.compression.eligible_content_type_count; ++i) {
-        std::strncpy(res.compression.eligible_content_types[i],
-                     ir.compression.eligible_content_types[i].c_str(),
-                     policy::kMaxContentTypeLen - 1);
+    if (path.rfind("cache.l1.", 0) == 0 || path.rfind("cache.l2.", 0) == 0) {
+        return TqSemanticImpact::CacheStorageBehavior;
     }
-    res.compression.preferred_algorithm_count =
-        std::min(ir.compression.preferred_algorithms.size(), policy::kMaxCompressionAlgorithms);
-    for (std::size_t i = 0; i < res.compression.preferred_algorithm_count; ++i) {
-        res.compression.preferred_algorithms[i] =
-            static_cast<policy::CompressionAlgorithm>(ir.compression.preferred_algorithms[i]);
+    if (path.rfind("cache.field_variant.", 0) == 0 || path == "cache.vary_headers.names" ||
+        path == "cache.vary_headers" || path.rfind("cache.private_cache.", 0) == 0) {
+        return TqSemanticImpact::CacheKeyBehavior;
     }
-    res.compression.already_encoded_behavior =
-        static_cast<policy::AlreadyEncodedBehavior>(ir.compression.already_encoded_behavior);
-
-    res.coalescing.enabled = ir.coalescing.enabled;
-    res.coalescing.mode = static_cast<policy::CoalescingMode>(ir.coalescing.mode);
-    res.coalescing.backend_timeout_ms = ir.coalescing.backend_timeout_ms;
-    res.coalescing.handoff_buffer_ms = ir.coalescing.handoff_buffer_ms;
-    res.coalescing.result_ready_retention_ms = ir.coalescing.result_ready_retention_ms;
-    res.coalescing.max_waiters_per_key = ir.coalescing.max_waiters_per_key;
-    res.coalescing.require_cache_enabled = ir.coalescing.require_cache_enabled;
-    res.coalescing.allow_authenticated = ir.coalescing.allow_authenticated;
-    res.coalescing.max_follower_wait_budget_ms = ir.coalescing.max_follower_wait_budget_ms;
-    res.coalescing.max_active_follower_waiters = ir.coalescing.max_active_follower_waiters;
-    res.coalescing.max_active_follower_waiters_per_shard =
-        ir.coalescing.max_active_follower_waiters_per_shard;
-
-    return res;
+    if (path.rfind("cache.", 0) == 0) {
+        return TqSemanticImpact::CacheBehavior;
+    }
+    if (path.rfind("field_filter.", 0) == 0) {
+        return TqSemanticImpact::FieldFilteringBehavior;
+    }
+    if (path.rfind("pagination.", 0) == 0) {
+        return TqSemanticImpact::PaginationBehavior;
+    }
+    if (path.rfind("compression.", 0) == 0) {
+        return TqSemanticImpact::CompressionBehavior;
+    }
+    if (path.rfind("coalescing.", 0) == 0) {
+        return TqSemanticImpact::CoalescingBehavior;
+    }
+    if (path == "failure_mode") {
+        return TqSemanticImpact::FailureBehavior;
+    }
+    if (path.rfind("version.", 0) == 0) {
+        return TqSemanticImpact::RuntimeCompatibility;
+    }
+    return TqSemanticImpact::None;
 }
 
-bool detect_duplicates(const TqPolicyDocument& doc, std::string& err_msg) {
-    std::unordered_map<std::string, int> counts;
-    for (const auto& r : doc.routes) {
-        if (r.route_id.empty()) {
-            err_msg = "Route ID cannot be empty";
-            return true;
-        }
-        counts[r.route_id]++;
-        if (counts[r.route_id] > 1) {
-            err_msg = "Duplicate route ID found: " + r.route_id;
-            return true;
-        }
+std::string semantic_impact_to_string(TqSemanticImpact impact) {
+    switch (impact) {
+    case TqSemanticImpact::MatchBehavior:
+        return "MatchBehavior";
+    case TqSemanticImpact::MutationBehavior:
+        return "MutationBehavior";
+    case TqSemanticImpact::CacheBehavior:
+        return "CacheBehavior";
+    case TqSemanticImpact::CacheKeyBehavior:
+        return "CacheKeyBehavior";
+    case TqSemanticImpact::CacheStorageBehavior:
+        return "CacheStorageBehavior";
+    case TqSemanticImpact::FieldFilteringBehavior:
+        return "FieldFilteringBehavior";
+    case TqSemanticImpact::PaginationBehavior:
+        return "PaginationBehavior";
+    case TqSemanticImpact::CompressionBehavior:
+        return "CompressionBehavior";
+    case TqSemanticImpact::CoalescingBehavior:
+        return "CoalescingBehavior";
+    case TqSemanticImpact::FailureBehavior:
+        return "FailureBehavior";
+    case TqSemanticImpact::RuntimeCompatibility:
+        return "RuntimeCompatibility";
+    default:
+        return "None";
     }
-    return false;
+}
+
+std::string route_change_kind_to_string(TqRouteChangeKind kind) {
+    switch (kind) {
+    case TqRouteChangeKind::Added:
+        return "Added";
+    case TqRouteChangeKind::Removed:
+        return "Removed";
+    case TqRouteChangeKind::Modified:
+        return "Modified";
+    default:
+        return "Unchanged";
+    }
 }
 
 unsigned long long safe_stoull(const std::string& s, unsigned long long default_val = 0) {
@@ -197,16 +173,16 @@ void update_risk_summary(TqRiskSummary* summary, const TqRouteChange& change) {
         summary->highest_risk = change.risk;
     }
     switch (change.kind) {
-    case TqRouteChangeKind::Added:
+    case TqLegacyRouteChangeKind::Added:
         summary->added_routes++;
         break;
-    case TqRouteChangeKind::Removed:
+    case TqLegacyRouteChangeKind::Removed:
         summary->removed_routes++;
         break;
-    case TqRouteChangeKind::Updated:
+    case TqLegacyRouteChangeKind::Updated:
         summary->updated_routes++;
         break;
-    case TqRouteChangeKind::Reordered:
+    case TqLegacyRouteChangeKind::Reordered:
         summary->reordered_routes++;
         break;
     default:
@@ -228,7 +204,306 @@ void update_risk_summary(TqRiskSummary* summary, const TqRouteChange& change) {
     }
 }
 
+bool detect_duplicates(const TqPolicyDocument& doc, std::string& err_msg) {
+    std::unordered_map<std::string, int> counts;
+    for (const auto& r : doc.routes) {
+        if (r.route_id.empty()) {
+            err_msg = "Route ID cannot be empty";
+            return true;
+        }
+        counts[r.route_id]++;
+        if (counts[r.route_id] > 1) {
+            err_msg = "Duplicate route ID found: " + r.route_id;
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
+
+// ============================================================================
+// GA-spec TqApplyPlan Model Implementation
+// ============================================================================
+
+TqApplyPlan build_taperquery_apply_plan(const TqPolicyDocument& before,
+                                        const TqPolicyDocument& after,
+                                        const TqApplyPlanOptions& options) {
+    TqApplyPlan plan;
+
+    // 1. Compute Identities
+    plan.before_policy_identity = compute_policy_document_identity(before);
+    plan.after_policy_identity = compute_policy_document_identity(after);
+    plan.expected_base_identity = after.expected_base_sha;
+
+    // 2. CAS precondition checks (strict CAS is checked against before content identity)
+    if (options.strict_production) {
+        if (plan.expected_base_identity.empty()) {
+            TqApplyPlanIssue issue;
+            issue.severity = TqPlanSeverity::Blocker;
+            issue.code = "CAS_MISSING_BASE_SHA";
+            issue.reason = "Expected base SHA is empty inside the candidate policy";
+            issue.hint = "Provide the current active policy's SHA in the 'expected_base_sha' field "
+                         "of the apply payload.";
+            plan.issues.push_back(issue);
+            plan.ok = false;
+        } else if (plan.expected_base_identity != plan.before_policy_identity) {
+            TqApplyPlanIssue issue;
+            issue.severity = TqPlanSeverity::Blocker;
+            issue.code = "CAS_SHA_MISMATCH";
+            issue.reason = "Optimistic locking concurrency check failed. Expected base SHA '" +
+                           plan.expected_base_identity + "' does not match active policy SHA '" +
+                           plan.before_policy_identity + "'.";
+            issue.hint =
+                "Pull the latest active policy, apply your changes on top of it, and try again.";
+            plan.issues.push_back(issue);
+            plan.ok = false;
+        }
+    }
+
+    // 3. Semantic Validation of the Candidate Policy
+    TqPolicyValidationOptions val_opts;
+    val_opts.collect_all = true;
+    val_opts.include_warnings = true;
+    val_opts.strict_production = options.strict_production;
+
+    auto val_res = validate_taperquery_policy_ir(after, val_opts);
+    if (!val_res.ok) {
+        plan.ok = false;
+    }
+
+    for (const auto& native_issue : val_res.issues) {
+        TqApplyPlanIssue issue;
+        issue.severity = (native_issue.severity == TqPolicyValidationSeverity::Error)
+                             ? TqPlanSeverity::Blocker
+                             : TqPlanSeverity::Warning;
+        issue.code = native_issue.code;
+        issue.route_id = native_issue.route_id;
+        issue.reason = native_issue.reason;
+        issue.hint = native_issue.hint;
+        plan.issues.push_back(issue);
+    }
+
+    // 4. Map Route Changes (Added, Removed, Modified, Unchanged)
+    std::unordered_map<std::string, const TqRoutePolicy*> before_routes;
+    for (const auto& r : before.routes) {
+        before_routes[r.route_id] = &r;
+    }
+
+    std::unordered_map<std::string, const TqRoutePolicy*> after_routes;
+    for (const auto& r : after.routes) {
+        after_routes[r.route_id] = &r;
+    }
+
+    // Identify Added & Modified/Unchanged routes
+    for (const auto& after_route : after.routes) {
+        std::string r_id = after_route.route_id;
+        if (before_routes.find(r_id) == before_routes.end()) {
+            // Added route
+            TqApplyPlanRouteChange route_change;
+            route_change.route_id = r_id;
+            route_change.kind = TqRouteChangeKind::Added;
+            route_change.after_identity = compute_route_policy_identity(after_route);
+            plan.route_changes.push_back(route_change);
+        } else {
+            // Match found -> Compute differences
+            const auto* before_route = before_routes[r_id];
+            std::string before_ident = compute_route_policy_identity(*before_route);
+            std::string after_ident = compute_route_policy_identity(after_route);
+
+            if (before_ident != after_ident) {
+                // Modified route
+                TqApplyPlanRouteChange route_change;
+                route_change.route_id = r_id;
+                route_change.kind = TqRouteChangeKind::Modified;
+                route_change.before_identity = before_ident;
+                route_change.after_identity = after_ident;
+
+                if (options.include_field_level_changes) {
+                    TqPolicyDocument exp_doc;
+                    exp_doc.routes.push_back(*before_route);
+                    TqPolicyDocument act_doc;
+                    act_doc.routes.push_back(after_route);
+
+                    auto route_diff = compare_policy_ir(exp_doc, act_doc);
+                    for (const auto& fd : route_diff.field_diffs) {
+                        TqApplyPlanFieldChange fc;
+                        fc.field_path = fd.field_path;
+                        fc.before = fd.expected;
+                        fc.after = fd.actual;
+                        fc.impact = map_field_path_to_semantic_impact(fd.field_path);
+                        route_change.field_changes.push_back(fc);
+                    }
+                }
+                plan.route_changes.push_back(route_change);
+            } else if (options.include_unchanged_routes) {
+                // Unchanged route
+                TqApplyPlanRouteChange route_change;
+                route_change.route_id = r_id;
+                route_change.kind = TqRouteChangeKind::Unchanged;
+                route_change.before_identity = before_ident;
+                route_change.after_identity = after_ident;
+                plan.route_changes.push_back(route_change);
+            }
+        }
+    }
+
+    // Identify Removed routes
+    for (const auto& before_route : before.routes) {
+        std::string r_id = before_route.route_id;
+        if (after_routes.find(r_id) == after_routes.end()) {
+            TqApplyPlanRouteChange route_change;
+            route_change.route_id = r_id;
+            route_change.kind = TqRouteChangeKind::Removed;
+            route_change.before_identity = compute_route_policy_identity(before_route);
+            plan.route_changes.push_back(route_change);
+        }
+    }
+
+    return plan;
+}
+
+std::string render_taperquery_apply_plan_markdown(const TqApplyPlan& plan) {
+    std::stringstream ss;
+    ss << "# 📋 TaperQuery Apply Dry-Run Report\n\n";
+
+    ss << "## 🔍 Execution Summary\n";
+    ss << "| Attribute | Value |\n";
+    ss << "| --- | --- |\n";
+    ss << "| **Status** | " << (plan.ok ? "🟢 APPROVED" : "🔴 BLOCKED") << " |\n";
+    ss << "| **Active Content Hash** | `" << plan.before_policy_identity << "` |\n";
+    ss << "| **Proposed Content Hash** | `" << plan.after_policy_identity << "` |\n";
+    ss << "| **Expected Base Hash (CAS)** | `"
+       << (plan.expected_base_identity.empty() ? "(none)" : plan.expected_base_identity)
+       << "` |\n\n";
+
+    // Route Changes
+    ss << "## 🛣️ Route Actions & Declarations\n";
+    if (plan.route_changes.empty()) {
+        ss << "*No route differences detected between active and proposed policy.*\n\n";
+    } else {
+        ss << "| Route ID | Action | Before Identity | After Identity | Changes Count |\n";
+        ss << "| --- | --- | --- | --- | --- |\n";
+        for (const auto& rc : plan.route_changes) {
+            std::string action_emoji = "🔹";
+            if (rc.kind == TqRouteChangeKind::Added)
+                action_emoji = "🟢 Added";
+            else if (rc.kind == TqRouteChangeKind::Removed)
+                action_emoji = "🔴 Removed";
+            else if (rc.kind == TqRouteChangeKind::Modified)
+                action_emoji = "🟡 Modified";
+            else
+                action_emoji = "⚪ Unchanged";
+
+            ss << "| `" << rc.route_id << "` | " << action_emoji << " | "
+               << (rc.before_identity.empty() ? "-" : "`" + rc.before_identity + "`") << " | "
+               << (rc.after_identity.empty() ? "-" : "`" + rc.after_identity + "`") << " | "
+               << rc.field_changes.size() << " |\n";
+        }
+        ss << "\n";
+
+        // Field Level details
+        bool has_field_details = false;
+        for (const auto& rc : plan.route_changes) {
+            if (!rc.field_changes.empty()) {
+                has_field_details = true;
+                break;
+            }
+        }
+
+        if (has_field_details) {
+            ss << "### 📐 Field-Level Semantic Diff Details\n";
+            for (const auto& rc : plan.route_changes) {
+                if (rc.field_changes.empty())
+                    continue;
+                ss << "#### 🛠️ Route: `" << rc.route_id << "`\n";
+                ss << "| Field Path | Before | After | Semantic Impact |\n";
+                ss << "| --- | --- | --- | --- |\n";
+                for (const auto& fc : rc.field_changes) {
+                    ss << "| `" << fc.field_path << "` | `" << fc.before << "` | `" << fc.after
+                       << "` | **" << semantic_impact_to_string(fc.impact) << "** |\n";
+                }
+                ss << "\n";
+            }
+        }
+    }
+
+    // Issues section
+    if (!plan.issues.empty()) {
+        ss << "## ⚠️ Issue Diagnostics & Preconditions\n";
+        for (const auto& issue : plan.issues) {
+            std::string sev_emoji = "ℹ️ [INFO]";
+            if (issue.severity == TqPlanSeverity::Blocker)
+                sev_emoji = "❌ [BLOCKER]";
+            else if (issue.severity == TqPlanSeverity::Warning)
+                sev_emoji = "⚠️ [WARNING]";
+
+            ss << "### " << sev_emoji << " Code: `" << issue.code << "`\n";
+            if (!issue.route_id.empty()) {
+                ss << "* **Target Route**: `" << issue.route_id << "`\n";
+            }
+            ss << "* **Reason**: " << issue.reason << "\n";
+            ss << "* **Resolution Hint**: *" << issue.hint << "*\n\n";
+        }
+    }
+
+    return ss.str();
+}
+
+std::string render_taperquery_apply_plan_text(const TqApplyPlan& plan) {
+    std::stringstream ss;
+    ss << "=== TAPERQUERY APPLY DRY-RUN REPORT ===\n\n";
+    ss << "Status: " << (plan.ok ? "APPROVED" : "BLOCKED") << "\n";
+    ss << "Active Content Hash: " << plan.before_policy_identity << "\n";
+    ss << "Proposed Content Hash: " << plan.after_policy_identity << "\n";
+    ss << "Expected Base Hash: "
+       << (plan.expected_base_identity.empty() ? "(none)" : plan.expected_base_identity) << "\n\n";
+
+    ss << "ROUTE CHANGES:\n";
+    if (plan.route_changes.empty()) {
+        ss << "  No route changes detected.\n";
+    } else {
+        for (const auto& rc : plan.route_changes) {
+            ss << "  - Route ID: " << rc.route_id << " [" << route_change_kind_to_string(rc.kind)
+               << "]\n";
+            if (!rc.before_identity.empty())
+                ss << "    Before Identity: " << rc.before_identity << "\n";
+            if (!rc.after_identity.empty())
+                ss << "    After Identity: " << rc.after_identity << "\n";
+            if (!rc.field_changes.empty()) {
+                ss << "    Field Diffs:\n";
+                for (const auto& fc : rc.field_changes) {
+                    ss << "      * " << fc.field_path << ": '" << fc.before << "' -> '" << fc.after
+                       << "' (Semantic Impact: " << semantic_impact_to_string(fc.impact) << ")\n";
+                }
+            }
+        }
+    }
+    ss << "\n";
+
+    if (!plan.issues.empty()) {
+        ss << "DIAGNOSTICS & ISSUES:\n";
+        for (const auto& issue : plan.issues) {
+            std::string sev_str = "INFO";
+            if (issue.severity == TqPlanSeverity::Blocker)
+                sev_str = "BLOCKER";
+            else if (issue.severity == TqPlanSeverity::Warning)
+                sev_str = "WARNING";
+
+            ss << "  [" << sev_str << "] Code: " << issue.code << "\n";
+            if (!issue.route_id.empty())
+                ss << "    Route: " << issue.route_id << "\n";
+            ss << "    Reason: " << issue.reason << "\n";
+            ss << "    Hint: " << issue.hint << "\n\n";
+        }
+    }
+
+    return ss.str();
+}
+
+// ============================================================================
+// Legacy compatibility shim implementations
+// ============================================================================
 
 bool build_taperquery_change_plan(const TqPolicyDocument& current_policy,
                                   const TqPolicyDocument& candidate_policy,
@@ -277,32 +552,16 @@ bool build_taperquery_change_plan(const TqPolicyDocument& current_policy,
     }
 
     // Validate candidate
-    policy::PolicyFileResult runtime_file{};
-    runtime_file.ok = true;
-    runtime_file.count = std::min(candidate_policy.routes.size(), policy::kMaxRoutes);
-    for (std::size_t i = 0; i < runtime_file.count; ++i) {
-        const auto& tq_route = candidate_policy.routes[i];
-        std::strncpy(runtime_file.route_id_storage[i], tq_route.route_id.c_str(),
-                     policy::kMaxRouteIdLen - 1);
-        std::strncpy(runtime_file.match_prefix_storage[i], tq_route.match_prefix.c_str(),
-                     policy::kMaxPrefixLen - 1);
-
-        runtime_file.policies[i] = to_runtime_route_policy(tq_route);
-        runtime_file.policies[i].route_id = runtime_file.route_id_storage[i];
-        runtime_file.policies[i].match_prefix = runtime_file.match_prefix_storage[i];
-    }
-
-    policy::PolicyValidationResult val_res{};
-    policy::PolicyValidationOptions val_opts{};
+    TqPolicyValidationOptions val_opts{};
     val_opts.collect_all = true;
     val_opts.include_warnings = true;
+    val_opts.strict_production = false;
 
-    bool val_ok = policy::validate_policy_file_semantic(runtime_file, &val_res, val_opts);
-    out->semantic_validation_ok = val_ok;
+    auto val_res = validate_taperquery_policy_ir(candidate_policy, val_opts);
+    out->semantic_validation_ok = val_res.ok;
 
-    for (std::size_t i = 0; i < val_res.issue_count; ++i) {
-        const auto& issue = val_res.issues[i];
-        if (issue.severity == policy::PolicyValidationSeverity::Error) {
+    for (const auto& issue : val_res.issues) {
+        if (issue.severity == TqPolicyValidationSeverity::Error) {
             out->risk_summary.validation_errors++;
         } else {
             out->risk_summary.validation_warnings++;
@@ -334,7 +593,7 @@ bool build_taperquery_change_plan(const TqPolicyDocument& current_policy,
 
         if (current_routes.find(r_id) == current_routes.end()) {
             TqRouteChange change{};
-            change.kind = TqRouteChangeKind::Added;
+            change.kind = TqLegacyRouteChangeKind::Added;
             change.route_id = r_id;
             change.after_index = after_idx;
             change.after_identity = candidate_routes[r_id].identity;
@@ -355,7 +614,7 @@ bool build_taperquery_change_plan(const TqPolicyDocument& current_policy,
             change.order_changed = order_chg;
 
             if (ident_changed) {
-                change.kind = TqRouteChangeKind::Updated;
+                change.kind = TqLegacyRouteChangeKind::Updated;
 
                 TqPolicyDocument exp_doc{};
                 exp_doc.routes.push_back(*curr_info.ptr);
@@ -383,13 +642,13 @@ bool build_taperquery_change_plan(const TqPolicyDocument& current_policy,
                 change.summary = "route updated";
                 out->route_changes.push_back(change);
             } else if (order_chg) {
-                change.kind = TqRouteChangeKind::Reordered;
+                change.kind = TqLegacyRouteChangeKind::Reordered;
                 change.risk = TqRiskLevel::High;
                 change.summary = "route reordered";
                 out->route_changes.push_back(change);
             } else {
                 if (options.include_unchanged_routes) {
-                    change.kind = TqRouteChangeKind::Unchanged;
+                    change.kind = TqLegacyRouteChangeKind::Unchanged;
                     change.risk = TqRiskLevel::None;
                     change.summary = "route unchanged";
                     out->route_changes.push_back(change);
@@ -405,7 +664,7 @@ bool build_taperquery_change_plan(const TqPolicyDocument& current_policy,
 
         if (candidate_routes.find(r_id) == candidate_routes.end()) {
             TqRouteChange change{};
-            change.kind = TqRouteChangeKind::Removed;
+            change.kind = TqLegacyRouteChangeKind::Removed;
             change.route_id = r_id;
             change.before_index = before_idx;
             change.before_identity = current_routes[r_id].identity;
@@ -440,10 +699,24 @@ bool build_taperquery_change_plan(const TqPolicyDocument& current_policy,
                (options.fail_on_validation_warning && out->risk_summary.validation_warnings > 0)) {
         out->status = TqPlanStatus::BlockedByValidation;
         if (out->risk_summary.validation_errors > 0) {
-            out->message = std::string("Validation failed: ") + val_res.issues[0].reason;
+            std::string first_err;
+            for (const auto& issue : val_res.issues) {
+                if (issue.severity == TqPolicyValidationSeverity::Error) {
+                    first_err = issue.reason;
+                    break;
+                }
+            }
+            out->message = std::string("Validation failed: ") + first_err;
         } else {
-            out->message = std::string("Validation warning (fail_on_validation_warning=true): ") +
-                           val_res.issues[0].reason;
+            std::string first_warn;
+            for (const auto& issue : val_res.issues) {
+                if (issue.severity == TqPolicyValidationSeverity::Warning) {
+                    first_warn = issue.reason;
+                    break;
+                }
+            }
+            out->message =
+                std::string("Validation warning (fail_on_validation_warning=true): ") + first_warn;
         }
     } else {
         out->status = TqPlanStatus::Ready;

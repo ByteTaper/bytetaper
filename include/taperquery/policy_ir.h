@@ -183,8 +183,18 @@ struct TqRoutePolicy {
     TqCoalescingPolicy coalescing{};
 };
 
+struct TqPolicyVersionInfo {
+    std::string source_schema_version;
+    std::string policy_ir_version;
+    std::string identity_version;
+    std::string emitter_version;
+    std::string runtime_min_version;
+    std::string runtime_capability_profile;
+};
+
 struct TqPolicyDocument {
-    std::string schema_version;
+    TqPolicyVersionInfo version;
+    std::string schema_version; // Legacy mirror of version.source_schema_version
     std::string document_id;
     std::string source_name;
     std::string expected_base_sha;

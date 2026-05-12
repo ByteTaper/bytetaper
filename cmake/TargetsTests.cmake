@@ -2367,6 +2367,13 @@ if(BUILD_TESTING)
   target_link_libraries(taperquery_policy_ir_normalize_test PRIVATE gtest_main bytetaper_taperquery)
   add_test(NAME taperquery_policy_ir_normalize_test COMMAND taperquery_policy_ir_normalize_test)
 
+  add_executable(taperquery_policy_ir_version_test
+    tests/taperquery_policy_ir_version_test.cpp
+  )
+  target_include_directories(taperquery_policy_ir_version_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_policy_ir_version_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_policy_ir_version_test COMMAND taperquery_policy_ir_version_test)
+
   add_executable(taperquery_policy_ir_hash_test
     tests/taperquery_policy_ir_hash_test.cpp
   )
@@ -2422,4 +2429,25 @@ if(BUILD_TESTING)
   target_include_directories(tq_dry_run_reporter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(tq_dry_run_reporter_test PRIVATE gtest_main bytetaper_taperquery)
   add_test(NAME tq_dry_run_reporter_test COMMAND tq_dry_run_reporter_test)
+
+  add_executable(taperquery_policy_ir_validator_test
+    tests/taperquery_policy_ir_validator_test.cpp
+  )
+  target_include_directories(taperquery_policy_ir_validator_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_policy_ir_validator_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_policy_ir_validator_test COMMAND taperquery_policy_ir_validator_test)
+
+  add_executable(taperquery_policy_ir_identity_test
+    tests/taperquery_policy_ir_identity_test.cpp
+  )
+  target_include_directories(taperquery_policy_ir_identity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_policy_ir_identity_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_policy_ir_identity_test COMMAND taperquery_policy_ir_identity_test)
+
+  add_executable(taperquery_route_analysis_test
+    tests/taperquery_route_analysis_test.cpp
+  )
+  target_include_directories(taperquery_route_analysis_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_route_analysis_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_route_analysis_test COMMAND taperquery_route_analysis_test)
 endif()

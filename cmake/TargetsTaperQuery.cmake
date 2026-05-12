@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
 add_library(bytetaper_taperquery STATIC
-  src/taperquery/policy_ir.cpp
+  src/taperquery/policy_ir_version.cpp
   src/taperquery/policy_ir_normalize.cpp
-  src/taperquery/policy_ir_hash.cpp
+  src/taperquery/policy_ir_identity.cpp
   src/taperquery/policy_ir_printer.cpp
   src/taperquery/policy_ir_compare.cpp
+  src/taperquery/route_analysis.cpp
+  src/taperquery/policy_ir_validator.cpp
   src/taperquery/tq_lexer.cpp
-  src/taperquery/tq_ast.cpp
   src/taperquery/tq_parser.cpp
   src/taperquery/tq_compiler.cpp
   src/taperquery/tq_diagnostic.cpp
