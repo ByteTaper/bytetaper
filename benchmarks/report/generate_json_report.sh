@@ -95,11 +95,17 @@ pay_data=$(cat "$PAYLOAD_JSON_MAP")
 coal_data=$(cat "$COALESCING_JSON_MAP")
 mock_api_data=$(cat "$MOCK_API_JSON_MAP")
 
+config_raw=$(grep -E "^Config Gauges JSON:[[:space:]]*" "$TXT_FILE" | head -n 1 | sed 's/^Config Gauges JSON:[[:space:]]*//' || echo "{}")
+if [ -z "$config_raw" ]; then
+    config_raw="{}"
+fi
+
 # Compile consolidated JSON
 jq -n \
     --arg bv "1.0.0" \
     --arg sc "$scenario" \
     --arg ts "$time_str" \
+    --argjson cfg "$config_raw" \
     --argjson lat "$lat_data" \
     --argjson tp "$tp_data" \
     --argjson res "$res_data" \
@@ -114,6 +120,7 @@ jq -n \
         benchmark_version: $bv,
         scenario: $sc,
         timestamp: $ts,
+        config: $cfg,
         latency_ms: $lat,
         throughput: $tp,
         resources: $res,

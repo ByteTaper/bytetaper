@@ -39,6 +39,7 @@ jq -n \
   '{
     scenario: $bj.scenario,
     timestamp: $bj.timestamp,
+    config: $bj.config,
     total_requests: (if $bj.throughput == null then 0 else ([$bj.throughput[].total_requests // 0] | add) end),
     non_2xx_count: (if $bj.throughput == null then 0 else ([$bj.throughput[].failed_requests // 0] | add) end),
     requests_per_sec: (if $bj.throughput == null then 0 else ([$bj.throughput[].throughput.requests_per_second // 0] | add) end),

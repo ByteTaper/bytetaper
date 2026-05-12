@@ -653,6 +653,8 @@ const char* worker_queue_start(WorkerQueue* q, const WorkerQueueResources& res) 
             q->effective_lookup_lane_quota, std::memory_order_relaxed);
         res.runtime_metrics->worker_store_lane_quota_effective.store(q->effective_store_lane_quota,
                                                                      std::memory_order_relaxed);
+        res.runtime_metrics->worker_async_store_max_body_size_effective.store(
+            q->effective_async_store_max_body_size, std::memory_order_relaxed);
     }
     for (std::size_t i = 0; i < q->worker_count; ++i) {
         q->workers[i] = std::thread(worker_loop, q, i);

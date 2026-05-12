@@ -40,6 +40,8 @@ fi
 
 echo "Target is UP. Starting wrk..."
 
+echo "Config Gauges JSON: {}" >> "$REPORT_FILE"
+
 # Run wrk and capture raw output to a temporary file
 WRK_OUT=$(mktemp)
 wrk -t2 -c10 -d10s -s benchmarks/lib/latency_reporter.lua --latency "$TARGET_URL" | tee "$WRK_OUT"

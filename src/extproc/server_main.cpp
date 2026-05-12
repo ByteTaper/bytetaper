@@ -221,6 +221,13 @@ int main(int argc, char** argv) {
             bytetaper::observability::logger_shutdown();
             return 4;
         }
+
+        metrics_registry.runtime_metrics.l2_block_cache_mb_effective.store(
+            l2_opts.block_cache_mb, std::memory_order_relaxed);
+        metrics_registry.runtime_metrics.l2_write_buffer_mb_effective.store(
+            l2_opts.write_buffer_mb, std::memory_order_relaxed);
+        metrics_registry.runtime_metrics.l2_max_background_jobs_effective.store(
+            static_cast<std::uint64_t>(l2_opts.max_background_jobs), std::memory_order_relaxed);
     }
 
     auto coalescing_registry = std::make_unique<bytetaper::coalescing::InFlightRegistry>();

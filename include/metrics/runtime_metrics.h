@@ -64,6 +64,10 @@ struct RuntimeMetrics {
     std::atomic<std::uint64_t> worker_count_effective{ 0 };
     std::atomic<std::uint64_t> worker_lookup_lane_quota_effective{ 0 };
     std::atomic<std::uint64_t> worker_store_lane_quota_effective{ 0 };
+    std::atomic<std::uint64_t> worker_async_store_max_body_size_effective{ 0 };
+    std::atomic<std::uint64_t> l2_block_cache_mb_effective{ 0 };
+    std::atomic<std::uint64_t> l2_write_buffer_mb_effective{ 0 };
+    std::atomic<std::uint64_t> l2_max_background_jobs_effective{ 0 };
 
     // Async L2 lookup
     std::atomic<std::uint64_t> l2_async_lookup_total{ 0 };

@@ -180,6 +180,22 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         "# HELP bytetaper_worker_store_lane_quota_effective Effective store lane quota.\n"
         "# TYPE bytetaper_worker_store_lane_quota_effective gauge\n"
         "bytetaper_worker_store_lane_quota_effective %lu\n"
+        "# HELP bytetaper_worker_async_store_max_body_size_effective Effective async store max "
+        "body size in bytes (0 = unset/not started).\n"
+        "# TYPE bytetaper_worker_async_store_max_body_size_effective gauge\n"
+        "bytetaper_worker_async_store_max_body_size_effective %lu\n"
+        "# HELP bytetaper_l2_block_cache_mb_effective Effective L2 RocksDB block cache size in MiB "
+        "(0 = L2 not configured).\n"
+        "# TYPE bytetaper_l2_block_cache_mb_effective gauge\n"
+        "bytetaper_l2_block_cache_mb_effective %lu\n"
+        "# HELP bytetaper_l2_write_buffer_mb_effective Effective L2 RocksDB write buffer size in "
+        "MiB (0 = L2 not configured).\n"
+        "# TYPE bytetaper_l2_write_buffer_mb_effective gauge\n"
+        "bytetaper_l2_write_buffer_mb_effective %lu\n"
+        "# HELP bytetaper_l2_max_background_jobs_effective Effective L2 RocksDB max background "
+        "compaction jobs (0 = L2 not configured).\n"
+        "# TYPE bytetaper_l2_max_background_jobs_effective gauge\n"
+        "bytetaper_l2_max_background_jobs_effective %lu\n"
         "# HELP bytetaper_runtime_l2_async_lookup_total Total number of asynchronous L2 lookups "
         "attempted.\n"
         "# TYPE bytetaper_runtime_l2_async_lookup_total counter\n"
@@ -302,6 +318,10 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         metrics.worker_count_effective.load(std::memory_order_relaxed),
         metrics.worker_lookup_lane_quota_effective.load(std::memory_order_relaxed),
         metrics.worker_store_lane_quota_effective.load(std::memory_order_relaxed),
+        metrics.worker_async_store_max_body_size_effective.load(std::memory_order_relaxed),
+        metrics.l2_block_cache_mb_effective.load(std::memory_order_relaxed),
+        metrics.l2_write_buffer_mb_effective.load(std::memory_order_relaxed),
+        metrics.l2_max_background_jobs_effective.load(std::memory_order_relaxed),
         metrics.l2_async_lookup_total.load(std::memory_order_relaxed),
         metrics.l2_async_lookup_hit_total.load(std::memory_order_relaxed),
         metrics.l2_async_lookup_miss_total.load(std::memory_order_relaxed),

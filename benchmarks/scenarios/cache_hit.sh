@@ -252,12 +252,24 @@ else
     l2_size=$(curl -s -o /dev/null -w "%{size_download}" "${TARGET_HOST}/products/${L2_KEY}" || echo "0")
     l2_savings_json=$(./benchmarks/lib/payload_savings_parser.sh "$l2_size" "$l2_size")
 
+    echo "Capturing startup configuration gauges..."
+    METRICS_URL="${METRICS_CACHE_URL:-http://bytetaper-extproc-cache-a:18081}"
+    metrics_raw=$(curl -s "${METRICS_URL}/metrics" || echo "")
+    worker_count=$(echo "$metrics_raw" | grep "bytetaper_worker_count_effective" | grep -v "#" | awk '{print $2}' || echo "0")
+    lookup_quota=$(echo "$metrics_raw" | grep "bytetaper_worker_lookup_lane_quota_effective" | grep -v "#" | awk '{print $2}' || echo "0")
+    store_quota=$(echo "$metrics_raw" | grep "bytetaper_worker_store_lane_quota_effective" | grep -v "#" | awk '{print $2}' || echo "0")
+    async_store_max_body=$(echo "$metrics_raw" | grep "bytetaper_worker_async_store_max_body_size_effective" | grep -v "#" | awk '{print $2}' || echo "0")
+    l2_block_cache_mb=$(echo "$metrics_raw" | grep "bytetaper_l2_block_cache_mb_effective" | grep -v "#" | awk '{print $2}' || echo "0")
+    l2_write_buffer_mb=$(echo "$metrics_raw" | grep "bytetaper_l2_write_buffer_mb_effective" | grep -v "#" | awk '{print $2}' || echo "0")
+    l2_max_background_jobs=$(echo "$metrics_raw" | grep "bytetaper_l2_max_background_jobs_effective" | grep -v "#" | awk '{print $2}' || echo "0")
+
     {
         echo "=== ByteTaper Benchmark Execution ==="
         echo "Scenario: $SCENARIO"
         echo "Time: $(date)"
         echo "Target Host: $TARGET_HOST"
         echo "Mock API Host: $MOCK_API"
+        echo "Config Gauges JSON: {\"worker_count\": ${worker_count:-0}, \"lookup_quota\": ${lookup_quota:-0}, \"store_quota\": ${store_quota:-0}, \"async_store_max_body\": ${async_store_max_body:-0}, \"l2_block_cache_mb\": ${l2_block_cache_mb:-0}, \"l2_write_buffer_mb\": ${l2_write_buffer_mb:-0}, \"l2_max_background_jobs\": ${l2_max_background_jobs:-0}}"
         echo ""
         echo "=== System Information ==="
         echo "OS: $(uname -snrmo)"

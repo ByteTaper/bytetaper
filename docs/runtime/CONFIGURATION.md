@@ -124,3 +124,25 @@ BYTETAPER_L2_WRITE_BUFFER_MB=8
 BYTETAPER_WORKER_COUNT=1
 BYTETAPER_ASYNC_STORE_MAX_BODY_SIZE=32768
 ```
+
+---
+
+## Config Metrics
+
+The effective startup configuration values are exposed as Prometheus gauges through the `/metrics` endpoint. This allows operators, benchmarks, and CI suites to scrape and verify the actual configuration applied at runtime.
+
+The following gauge metrics are available:
+
+| Metric Name | Type | Description |
+|---|---|---|
+| `bytetaper_worker_count_effective` | Gauge | Effective number of background worker threads. |
+| `bytetaper_worker_lookup_lane_quota_effective` | Gauge | Effective lookup lane quota. |
+| `bytetaper_worker_store_lane_quota_effective` | Gauge | Effective store lane quota. |
+| `bytetaper_worker_async_store_max_body_size_effective` | Gauge | Effective async store max body size in bytes (0 = unset/not started). |
+| `bytetaper_l2_block_cache_mb_effective` | Gauge | Effective L2 RocksDB block cache size in MiB (0 = L2 not configured). |
+| `bytetaper_l2_write_buffer_mb_effective` | Gauge | Effective L2 RocksDB write buffer size in MiB (0 = L2 not configured). |
+| `bytetaper_l2_max_background_jobs_effective` | Gauge | Effective L2 RocksDB max background compaction jobs (0 = L2 not configured). |
+
+> [!NOTE]
+> **Secret Protection:**  
+> The cache key hash seed (`BYTETAPER_HASH_SEED_HEX`) is sensitive and is **never** exposed through the metrics endpoint or log files.
