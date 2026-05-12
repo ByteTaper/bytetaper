@@ -2380,4 +2380,25 @@ if(BUILD_TESTING)
   target_include_directories(taperquery_policy_parity_examples_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(taperquery_policy_parity_examples_test PRIVATE gtest_main bytetaper_taperquery_loader)
   add_test(NAME taperquery_policy_parity_examples_test COMMAND taperquery_policy_parity_examples_test)
+
+  add_executable(taperquery_lexer_test
+    tests/taperquery_lexer_test.cpp
+  )
+  target_include_directories(taperquery_lexer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_lexer_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_lexer_test COMMAND taperquery_lexer_test)
+
+  add_executable(taperquery_parser_test
+    tests/taperquery_parser_test.cpp
+  )
+  target_include_directories(taperquery_parser_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_parser_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_parser_test COMMAND taperquery_parser_test)
+
+  add_executable(taperquery_parser_diagnostic_test
+    tests/taperquery_parser_diagnostic_test.cpp
+  )
+  target_include_directories(taperquery_parser_diagnostic_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_parser_diagnostic_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_parser_diagnostic_test COMMAND taperquery_parser_diagnostic_test)
 endif()

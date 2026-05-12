@@ -7,6 +7,10 @@ add_library(bytetaper_taperquery STATIC
   src/taperquery/policy_ir_hash.cpp
   src/taperquery/policy_ir_printer.cpp
   src/taperquery/policy_ir_compare.cpp
+  src/taperquery/tq_lexer.cpp
+  src/taperquery/tq_ast.cpp
+  src/taperquery/tq_parser.cpp
+  src/taperquery/tq_diagnostic.cpp
 )
 
 target_include_directories(bytetaper_taperquery PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
