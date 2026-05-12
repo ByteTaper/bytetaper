@@ -38,7 +38,11 @@ routes:
         - gzip
     cache:
       behavior: store
+      enabled: true
       ttl_seconds: 300
+      layers:
+        l1:
+          enabled: true
 
   - id: "orders-observe-paginated"
     match:

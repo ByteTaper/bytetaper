@@ -7,3 +7,6 @@ route:
     enabled: true
     behavior: store
     ttl_ms: 3600000
+    l1:
+      enabled: true
+      capacity_entries: 0

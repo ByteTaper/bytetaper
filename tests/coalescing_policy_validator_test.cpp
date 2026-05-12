@@ -82,44 +82,4 @@ TEST_F(CoalescingPolicyValidatorTest, RejectNullCachePolicyIfRequired) {
                  "coalescing requires cache to be enabled");
 }
 
-TEST_F(CoalescingPolicyValidatorTest, PrintsEffectiveFollowerWaitBudgetToStderr) {
-    // Save original stderr
-    int original_stderr = dup(STDERR_FILENO);
-
-    // Create a temporary file in workspace to capture stderr
-    char temp_path_workspace[] = "bytetaper_test_stderr_XXXXXX";
-    int temp_fd = mkstemp(temp_path_workspace);
-    ASSERT_NE(temp_fd, -1);
-
-    // Redirect stderr to our temporary file
-    dup2(temp_fd, STDERR_FILENO);
-    close(temp_fd);
-
-    // Run the validator which prints to stderr
-    validate_coalescing_policy_safe(policy, &cache_policy);
-
-    // Flush stderr
-    fflush(stderr);
-
-    // Restore stderr
-    dup2(original_stderr, STDERR_FILENO);
-    close(original_stderr);
-
-    // Read the contents of the temporary file
-    std::FILE* f = std::fopen(temp_path_workspace, "r");
-    char buf[256] = {};
-    if (f != nullptr) {
-        std::size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
-        buf[n] = '\0';
-        std::fclose(f);
-    }
-
-    // Clean up
-    std::remove(temp_path_workspace);
-
-    // Assert the content contains the printed follower wait budget
-    EXPECT_TRUE(std::strstr(buf, "coalescing.follower_wait_budget_ms = 500 + 250 = 750") != nullptr)
-        << "Actual stderr content: " << buf;
-}
-
 } // namespace bytetaper::policy

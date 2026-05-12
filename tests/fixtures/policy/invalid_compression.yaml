@@ -1,0 +1,9 @@
+routes:
+  - id: "r-invalid-comp"
+    match:
+      kind: prefix
+      prefix: /api/v1/
+    mutation: full
+    compression:
+      enabled: true
+      min_size_bytes: 0

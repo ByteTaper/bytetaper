@@ -1,0 +1,6 @@
+routes:
+  - id: "r-valid"
+    match:
+      kind: prefix
+      prefix: /api/v1/
+    mutation: full

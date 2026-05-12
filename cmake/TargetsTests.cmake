@@ -393,22 +393,24 @@ if(BUILD_TESTING)
     )
     add_test(NAME server_main_args_test COMMAND server_main_args_test)
 
-    add_executable(extproc_header_view_test
-      tests/extproc_header_view_test.cpp
-      src/extproc/header_view.cpp
-    )
-    target_include_directories(extproc_header_view_test
-      PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${BYTETAPER_GENERATED_PROTO_DIR}
-    )
-    target_link_libraries(extproc_header_view_test
-      PRIVATE
-        gtest_main
-        bytetaper_extproc_proto
-        protobuf::libprotobuf
-    )
-    add_test(NAME extproc_header_view_test COMMAND extproc_header_view_test)
+    if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
+      add_executable(extproc_header_view_test
+        tests/extproc_header_view_test.cpp
+        src/extproc/header_view.cpp
+      )
+      target_include_directories(extproc_header_view_test
+        PRIVATE
+          ${CMAKE_CURRENT_SOURCE_DIR}/include
+          ${BYTETAPER_GENERATED_PROTO_DIR}
+      )
+      target_link_libraries(extproc_header_view_test
+        PRIVATE
+          gtest_main
+          bytetaper_extproc_proto
+          protobuf::libprotobuf
+      )
+      add_test(NAME extproc_header_view_test COMMAND extproc_header_view_test)
+    endif()
 
 
     add_executable(runtime_partitioned_queue_test
@@ -1335,6 +1337,24 @@ if(BUILD_TESTING)
       COMMAND policy_yaml_loader_cache_layers_test
     )
 
+    add_executable(policy_semantic_validator_test
+      tests/policy_semantic_validator_test.cpp
+    )
+    target_include_directories(policy_semantic_validator_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(policy_semantic_validator_test
+      PRIVATE
+        policy_yaml_loader
+        gtest_main
+    )
+
+    add_test(
+      NAME policy_semantic_validator_test
+      COMMAND policy_semantic_validator_test
+    )
+
     add_executable(policy_validate_command_test
       tests/policy_validate_command_test.cpp
     )
@@ -1355,8 +1375,70 @@ if(BUILD_TESTING)
 
     add_test(
       NAME policy_validate_command_example_smoke
-      COMMAND bytetaper-validate-policy
-              ${CMAKE_CURRENT_SOURCE_DIR}/examples/policy/bytetaper-policy.yaml
+      COMMAND ${CMAKE_COMMAND}
+              -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
+              -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/examples/policy/bytetaper-policy.yaml
+              -DEXPECTED_EXIT=0
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
+    )
+
+    add_test(
+      NAME policy_validate_command_valid
+      COMMAND ${CMAKE_COMMAND}
+              -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
+              -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/valid_policy.yaml
+              -DEXPECTED_EXIT=0
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
+    )
+
+    add_test(
+      NAME policy_validate_command_invalid_cache
+      COMMAND ${CMAKE_COMMAND}
+              -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
+              -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/invalid_cache.yaml
+              -DEXPECTED_EXIT=3
+              -DEXPECTED_CONTENT="field 'cache'"
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
+    )
+
+    add_test(
+      NAME policy_validate_command_invalid_compression
+      COMMAND ${CMAKE_COMMAND}
+              -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
+              -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/invalid_compression.yaml
+              -DEXPECTED_EXIT=3
+              -DEXPECTED_CONTENT="field 'compression'"
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
+    )
+
+    add_test(
+      NAME policy_validate_command_invalid_pagination
+      COMMAND ${CMAKE_COMMAND}
+              -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
+              -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/invalid_pagination.yaml
+              -DEXPECTED_EXIT=3
+              -DEXPECTED_CONTENT="field 'pagination'"
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
+    )
+
+    add_test(
+      NAME policy_validate_command_invalid_coalescing
+      COMMAND ${CMAKE_COMMAND}
+              -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
+              -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/invalid_coalescing.yaml
+              -DEXPECTED_EXIT=3
+              -DEXPECTED_CONTENT="field 'coalescing'"
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
+    )
+
+    add_test(
+      NAME policy_validate_command_warning_only
+      COMMAND ${CMAKE_COMMAND}
+              -DVALIDATE_BIN=$<TARGET_FILE:bytetaper-validate-policy>
+              -DFIXTURE_PATH=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/policy/warning_only.yaml
+              -DEXPECTED_EXIT=0
+              -DEXPECTED_CONTENT="field 'mutation'"
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/assert_policy_validate_exit.cmake
     )
 
     add_executable(policy_report_output_test
@@ -2251,33 +2333,33 @@ if(BUILD_TESTING)
         bytetaper_extproc_grpc_server
         bytetaper_extproc_grpc
     )
-
-    add_executable(taperquery_policy_ir_test
-      tests/taperquery_policy_ir_test.cpp
-    )
-    target_include_directories(taperquery_policy_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(taperquery_policy_ir_test PRIVATE gtest_main bytetaper_taperquery)
-    add_test(NAME taperquery_policy_ir_test COMMAND taperquery_policy_ir_test)
-
-    add_executable(taperquery_policy_ir_normalize_test
-      tests/taperquery_policy_ir_normalize_test.cpp
-    )
-    target_include_directories(taperquery_policy_ir_normalize_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(taperquery_policy_ir_normalize_test PRIVATE gtest_main bytetaper_taperquery)
-    add_test(NAME taperquery_policy_ir_normalize_test COMMAND taperquery_policy_ir_normalize_test)
-
-    add_executable(taperquery_policy_ir_hash_test
-      tests/taperquery_policy_ir_hash_test.cpp
-    )
-    target_include_directories(taperquery_policy_ir_hash_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(taperquery_policy_ir_hash_test PRIVATE gtest_main bytetaper_taperquery)
-    add_test(NAME taperquery_policy_ir_hash_test COMMAND taperquery_policy_ir_hash_test)
-
-    add_executable(taperquery_policy_parity_examples_test
-      tests/taperquery_policy_parity_examples_test.cpp
-    )
-    target_include_directories(taperquery_policy_parity_examples_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(taperquery_policy_parity_examples_test PRIVATE gtest_main bytetaper_taperquery_loader)
-    add_test(NAME taperquery_policy_parity_examples_test COMMAND taperquery_policy_parity_examples_test)
   endif()
+
+  add_executable(taperquery_policy_ir_test
+    tests/taperquery_policy_ir_test.cpp
+  )
+  target_include_directories(taperquery_policy_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_policy_ir_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_policy_ir_test COMMAND taperquery_policy_ir_test)
+
+  add_executable(taperquery_policy_ir_normalize_test
+    tests/taperquery_policy_ir_normalize_test.cpp
+  )
+  target_include_directories(taperquery_policy_ir_normalize_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_policy_ir_normalize_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_policy_ir_normalize_test COMMAND taperquery_policy_ir_normalize_test)
+
+  add_executable(taperquery_policy_ir_hash_test
+    tests/taperquery_policy_ir_hash_test.cpp
+  )
+  target_include_directories(taperquery_policy_ir_hash_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_policy_ir_hash_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME taperquery_policy_ir_hash_test COMMAND taperquery_policy_ir_hash_test)
+
+  add_executable(taperquery_policy_parity_examples_test
+    tests/taperquery_policy_parity_examples_test.cpp
+  )
+  target_include_directories(taperquery_policy_parity_examples_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_policy_parity_examples_test PRIVATE gtest_main bytetaper_taperquery_loader)
+  add_test(NAME taperquery_policy_parity_examples_test COMMAND taperquery_policy_parity_examples_test)
 endif()

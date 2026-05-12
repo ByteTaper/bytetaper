@@ -59,40 +59,7 @@ struct RoutePolicy {
     CoalescingPolicy coalescing = {};
 };
 
-// Validates a RoutePolicy. Returns true if usable.
-// On failure, *reason_out (if non-null) is set to a static string describing the problem.
-inline bool validate_route_policy(const RoutePolicy& policy, const char** reason_out) {
-    if (policy.route_id == nullptr || policy.route_id[0] == '\0') {
-        if (reason_out != nullptr) {
-            *reason_out = "route_id is required";
-        }
-        return false;
-    }
-    if (policy.match_kind == RouteMatchKind::Prefix) {
-        if (policy.match_prefix == nullptr || policy.match_prefix[0] != '/') {
-            if (reason_out != nullptr) {
-                *reason_out = "match_prefix must start with '/'";
-            }
-            return false;
-        }
-    }
-    const char* pagination_err = validate_pagination_policy_safe(policy.pagination);
-    if (pagination_err != nullptr) {
-        if (reason_out != nullptr) {
-            *reason_out = pagination_err;
-        }
-        return false;
-    }
-    const char* coalescing_err = validate_coalescing_policy_safe(policy.coalescing, &policy.cache);
-    if (coalescing_err != nullptr) {
-        if (reason_out != nullptr) {
-            *reason_out = coalescing_err;
-        }
-        return false;
-    }
-
-    return true;
-}
+bool validate_route_policy(const RoutePolicy& policy, const char** reason_out);
 
 // Returns true if the given response_size (in bytes) exceeds the policy limit.
 // If policy.max_response_bytes is 0, always returns false (no limit).

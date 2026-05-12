@@ -25,9 +25,12 @@ route:
   allowed_method: get
   max_response_bytes: 2097152
   cache:
-    enabled: false
+    enabled: true
     behavior: store
     ttl_ms: 300000
+    l1:
+      enabled: true
+      capacity_entries: 0
   compression:
     enabled: true
     min_size_bytes: 1024

@@ -1,0 +1,13 @@
+routes:
+  - id: "r-invalid-pag"
+    match:
+      kind: prefix
+      prefix: /api/v1/
+    mutation: full
+    pagination:
+      enabled: true
+      mode: limit_offset
+      default_limit: 50
+      max_limit: 20
+      limit_param: limit
+      offset_param: offset

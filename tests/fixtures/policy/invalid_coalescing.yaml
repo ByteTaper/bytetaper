@@ -1,0 +1,10 @@
+routes:
+  - id: "r-invalid-coal"
+    match:
+      kind: prefix
+      prefix: /api/v1/
+    mutation: full
+    coalescing:
+      enabled: true
+    cache:
+      enabled: false

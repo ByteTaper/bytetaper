@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
-#include "policy/route_policy.h"
+#include "policy/policy_semantic_validator.h"
 #include "policy/yaml_loader.h"
 
 #include <gtest/gtest.h>
@@ -18,10 +18,13 @@ routes:
     ASSERT_TRUE(load_policy_from_string(yaml, &result));
     ASSERT_GT(result.count, 0u);
 
-    for (std::size_t i = 0; i < result.count; ++i) {
-        const char* reason = nullptr;
-        EXPECT_TRUE(validate_route_policy(result.policies[i], &reason));
-    }
+    PolicyValidationResult validation{};
+    PolicyValidationOptions options{};
+    options.collect_all = false;
+    options.include_warnings = true;
+
+    EXPECT_TRUE(validate_policy_file_semantic(result, &validation, options));
+    EXPECT_TRUE(validation.ok);
 }
 
 TEST(ValidateCommandLogicTest, InvalidYamlReturnsTwoPath) {
@@ -41,9 +44,14 @@ routes:
     ASSERT_TRUE(load_policy_from_string(yaml, &result));
     ASSERT_EQ(result.count, 1u);
 
+    PolicyValidationResult validation{};
+    PolicyValidationOptions options{};
+    options.collect_all = false;
+    options.include_warnings = true;
+
     // simulate exit code 3 path
-    const char* reason = nullptr;
-    EXPECT_FALSE(validate_route_policy(result.policies[0], &reason));
+    EXPECT_FALSE(validate_policy_file_semantic(result, &validation, options));
+    EXPECT_FALSE(validation.ok);
 }
 
 } // namespace bytetaper::policy

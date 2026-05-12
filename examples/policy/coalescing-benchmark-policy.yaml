@@ -22,6 +22,9 @@ routes:
       enabled: true
       behavior: store
       ttl_seconds: 300
+      layers:
+        l1:
+          enabled: true
 
   # Leg L2-Completion: Medium body-size tier using synchronous L2 probe check on wakeup
   - id: "products-coalescing-tier-l2complete"
@@ -46,6 +49,9 @@ routes:
       enabled: true
       behavior: store
       ttl_seconds: 300
+      layers:
+        l1:
+          enabled: true
 
   # Leg L2-Warm-Only: Large body-size tier where followers fallback as payload exceeds handoff buffer limit
   - id: "products-coalescing-tier-l2warmonly"
@@ -70,6 +76,9 @@ routes:
       enabled: true
       behavior: store
       ttl_seconds: 300
+      layers:
+        l1:
+          enabled: true
 
   # Catch-all default products route to ensure existing integration tests function unmodified
   - id: "products-coalescing-benchmark-default"
@@ -94,3 +103,6 @@ routes:
       enabled: true
       behavior: store
       ttl_seconds: 300
+      layers:
+        l1:
+          enabled: true

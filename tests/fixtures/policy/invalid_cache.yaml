@@ -1,0 +1,9 @@
+routes:
+  - id: "r-invalid-cache"
+    match:
+      kind: prefix
+      prefix: /api/v1/
+    mutation: full
+    cache:
+      enabled: true
+      private_cache: true

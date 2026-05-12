@@ -38,7 +38,11 @@ routes:
         - gzip
     cache:
       behavior: store
+      enabled: true
       ttl_seconds: 300
+      layers:
+        l1:
+          enabled: true
     field_filter:
       mode: allowlist
       fields:
@@ -83,6 +87,7 @@ routes:
       enabled: true
       ttl_seconds: 60
       private_cache: true
+      auth_scope_header: authorization
       layers:
         l1:
           enabled: true

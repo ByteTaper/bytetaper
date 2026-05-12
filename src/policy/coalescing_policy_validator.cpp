@@ -38,10 +38,6 @@ const char* validate_coalescing_policy_safe(const CoalescingPolicy& policy,
                "max_active_follower_waiters";
     }
 
-    std::fprintf(stderr, "  coalescing.follower_wait_budget_ms = %u + %u = %u\n",
-                 policy.backend_timeout_ms, policy.handoff_buffer_ms,
-                 policy.backend_timeout_ms + policy.handoff_buffer_ms);
-
     // 3. Unsupported mode check (future-proofing)
     if (policy.mode != CoalescingMode::CacheAssisted) {
         return "unsupported coalescing mode";

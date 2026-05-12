@@ -8,3 +8,7 @@ routes:
       enabled: true
       behavior: store
       ttl_seconds: 3600
+      layers:
+        l1:
+          enabled: true
+

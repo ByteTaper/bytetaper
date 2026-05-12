@@ -27,9 +27,12 @@ route:
   allowed_method: get
   max_response_bytes: 2097152
   cache:
-    enabled: false
+    enabled: true
     behavior: store
     ttl_ms: 300000
+    l1:
+      enabled: true
+      capacity_entries: 0
   field_filter:
     mode: allowlist
     fields:
@@ -81,7 +84,7 @@ route:
       capacity_entries: 8
     private_cache:
       enabled: true
-      auth_scope_header:
+      auth_scope_header: authorization
 route:
   route_id: api-v1-e2e-cache
   match_prefix: /api/v1/e2e/
