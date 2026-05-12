@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <gtest/gtest.h>
+#include <thread>
 
 namespace bytetaper::coalescing {
 

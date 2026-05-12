@@ -533,6 +533,24 @@ if(BUILD_TESTING)
       COMMAND policy_route_policy_test
     )
 
+    add_executable(policy_identity_test
+      tests/policy_identity_test.cpp
+    )
+    target_include_directories(policy_identity_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(policy_identity_test
+      PRIVATE
+        gtest_main
+        policy_yaml_loader
+        bytetaper_policy
+    )
+    add_test(
+      NAME policy_identity_test
+      COMMAND policy_identity_test
+    )
+
 
     add_executable(policy_yaml_loader_test
       tests/policy_yaml_loader_test.cpp

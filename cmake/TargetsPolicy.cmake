@@ -10,6 +10,7 @@ add_library(bytetaper_policy STATIC
   src/policy/cache_policy_validator.cpp
   src/policy/coalescing_policy_validator.cpp
   src/policy/policy_semantic_validator.cpp
+  src/policy/policy_identity.cpp
 )
 target_include_directories(bytetaper_policy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
