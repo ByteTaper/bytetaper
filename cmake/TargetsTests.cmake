@@ -2233,5 +2233,26 @@ if(BUILD_TESTING)
         bytetaper_extproc_grpc_server
         bytetaper_extproc_grpc
     )
+
+    add_executable(taperquery_policy_ir_test
+      tests/taperquery_policy_ir_test.cpp
+    )
+    target_include_directories(taperquery_policy_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(taperquery_policy_ir_test PRIVATE gtest_main bytetaper_taperquery)
+    add_test(NAME taperquery_policy_ir_test COMMAND taperquery_policy_ir_test)
+
+    add_executable(taperquery_policy_ir_normalize_test
+      tests/taperquery_policy_ir_normalize_test.cpp
+    )
+    target_include_directories(taperquery_policy_ir_normalize_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(taperquery_policy_ir_normalize_test PRIVATE gtest_main bytetaper_taperquery)
+    add_test(NAME taperquery_policy_ir_normalize_test COMMAND taperquery_policy_ir_normalize_test)
+
+    add_executable(taperquery_policy_ir_hash_test
+      tests/taperquery_policy_ir_hash_test.cpp
+    )
+    target_include_directories(taperquery_policy_ir_hash_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(taperquery_policy_ir_hash_test PRIVATE gtest_main bytetaper_taperquery)
+    add_test(NAME taperquery_policy_ir_hash_test COMMAND taperquery_policy_ir_hash_test)
   endif()
 endif()
