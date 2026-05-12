@@ -2254,5 +2254,12 @@ if(BUILD_TESTING)
     target_include_directories(taperquery_policy_ir_hash_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(taperquery_policy_ir_hash_test PRIVATE gtest_main bytetaper_taperquery)
     add_test(NAME taperquery_policy_ir_hash_test COMMAND taperquery_policy_ir_hash_test)
+
+    add_executable(taperquery_policy_parity_examples_test
+      tests/taperquery_policy_parity_examples_test.cpp
+    )
+    target_include_directories(taperquery_policy_parity_examples_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(taperquery_policy_parity_examples_test PRIVATE gtest_main bytetaper_taperquery_loader)
+    add_test(NAME taperquery_policy_parity_examples_test COMMAND taperquery_policy_parity_examples_test)
   endif()
 endif()

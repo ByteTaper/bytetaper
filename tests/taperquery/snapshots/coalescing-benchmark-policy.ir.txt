@@ -1,0 +1,80 @@
+route:
+  route_id: products-coalescing-tier-l1
+  match_prefix: /products/tier-l1/
+  match_kind: prefix
+  mutation: full
+  allowed_method: get
+  max_response_bytes: 2097152
+  cache:
+    enabled: true
+    behavior: store
+    ttl_ms: 300000
+  coalescing:
+    enabled: true
+    mode: cache_assisted
+    backend_timeout_ms: 50
+    handoff_buffer_ms: 25
+    result_ready_retention_ms: 12
+    max_waiters_per_key: 128
+    require_cache_enabled: true
+    allow_authenticated: false
+route:
+  route_id: products-coalescing-tier-l2complete
+  match_prefix: /products/tier-l2complete/
+  match_kind: prefix
+  mutation: full
+  allowed_method: get
+  max_response_bytes: 2097152
+  cache:
+    enabled: true
+    behavior: store
+    ttl_ms: 300000
+  coalescing:
+    enabled: true
+    mode: cache_assisted
+    backend_timeout_ms: 50
+    handoff_buffer_ms: 25
+    result_ready_retention_ms: 12
+    max_waiters_per_key: 128
+    require_cache_enabled: true
+    allow_authenticated: false
+route:
+  route_id: products-coalescing-tier-l2warmonly
+  match_prefix: /products/tier-l2warmonly/
+  match_kind: prefix
+  mutation: full
+  allowed_method: get
+  max_response_bytes: 2097152
+  cache:
+    enabled: true
+    behavior: store
+    ttl_ms: 300000
+  coalescing:
+    enabled: true
+    mode: cache_assisted
+    backend_timeout_ms: 50
+    handoff_buffer_ms: 25
+    result_ready_retention_ms: 12
+    max_waiters_per_key: 128
+    require_cache_enabled: true
+    allow_authenticated: false
+route:
+  route_id: products-coalescing-benchmark-default
+  match_prefix: /products/
+  match_kind: prefix
+  mutation: full
+  allowed_method: get
+  max_response_bytes: 2097152
+  cache:
+    enabled: true
+    behavior: store
+    ttl_ms: 300000
+  coalescing:
+    enabled: true
+    mode: cache_assisted
+    backend_timeout_ms: 50
+    handoff_buffer_ms: 25
+    result_ready_retention_ms: 12
+    max_waiters_per_key: 128
+    require_cache_enabled: true
+    allow_authenticated: false

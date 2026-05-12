@@ -1,0 +1,11 @@
+route:
+  route_id: cache-vary-medium
+  match_prefix: /small-json
+  match_kind: prefix
+  mutation: full
+  cache:
+    enabled: true
+    behavior: store
+    ttl_ms: 3600000
+    vary_headers:
+      - accept-language

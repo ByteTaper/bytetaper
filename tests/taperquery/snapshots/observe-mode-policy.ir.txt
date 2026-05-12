@@ -1,0 +1,46 @@
+route:
+  route_id: api-v1-observe-cached
+  match_prefix: /api/v1/cached/
+  match_kind: prefix
+  cache:
+    enabled: true
+    behavior: store
+    ttl_ms: 300000
+  coalescing:
+    enabled: true
+    mode: cache_assisted
+    backend_timeout_ms: 100
+    handoff_buffer_ms: 50
+    result_ready_retention_ms: 25
+    max_waiters_per_key: 128
+    require_cache_enabled: true
+    allow_authenticated: false
+route:
+  route_id: api-v1-observe-proxy
+  match_prefix: /api/v1/
+  match_kind: prefix
+  allowed_method: get
+  max_response_bytes: 2097152
+  cache:
+    enabled: false
+    behavior: store
+    ttl_ms: 300000
+  compression:
+    enabled: true
+    min_size_bytes: 1024
+    eligible_content_types:
+      - application/json
+    preferred_algorithms:
+      - gzip
+route:
+  route_id: orders-observe-paginated
+  match_prefix: /orders
+  match_kind: prefix
+  pagination:
+    enabled: true
+    mode: limit_offset
+    limit_param: limit
+    offset_param: offset
+    default_limit: 50
+    max_limit: 500
+    upstream_supports_pagination: true

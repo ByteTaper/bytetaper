@@ -1,0 +1,14 @@
+route:
+  route_id: api-v1-compression-benchmark
+  match_prefix: /api/v1/
+  match_kind: prefix
+  mutation: full
+  allowed_method: get
+  max_response_bytes: 2097152
+  compression:
+    enabled: true
+    min_size_bytes: 1024
+    eligible_content_types:
+      - application/json
+    preferred_algorithms:
+      - gzip

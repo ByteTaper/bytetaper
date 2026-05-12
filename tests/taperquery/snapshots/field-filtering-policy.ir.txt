@@ -1,0 +1,32 @@
+route:
+  route_id: medium-filtering
+  match_prefix: /medium-json
+  match_kind: exact
+  mutation: full
+  cache:
+    enabled: false
+    behavior: store
+    ttl_ms: 60000
+    field_variant:
+      enabled: true
+      max_variants_per_route: 8
+      min_field_count: 1
+      max_field_count: 8
+      admission_threshold: 2
+      ttl_max_ms: 10000
+route:
+  route_id: large-filtering
+  match_prefix: /large-json
+  match_kind: exact
+  mutation: full
+  cache:
+    enabled: false
+    behavior: store
+    ttl_ms: 60000
+    field_variant:
+      enabled: true
+      max_variants_per_route: 8
+      min_field_count: 1
+      max_field_count: 8
+      admission_threshold: 2
+      ttl_max_ms: 10000
