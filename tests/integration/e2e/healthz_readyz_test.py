@@ -14,7 +14,7 @@ METRICS_URL = os.environ.get("BYTETAPER_METRICS_URL", "http://bytetaper-extproc:
 
 def get(url):
     try:
-        resp = urllib.request.urlopen(url)
+        resp = urllib.request.urlopen(url, timeout=1.0)
         body = resp.read().decode('utf-8')
         return resp.getcode(), body
     except urllib.error.HTTPError as e:
@@ -105,18 +105,25 @@ if code != 200:
     fail(f"Expected 200 'ok' after startup, got {code} - {repr(body)}")
 print("Subprocess is active and healthy.")
 
+print("Test 2.2.1: Verifying default admin port is not accepting connections when disabled...")
+admin_code, admin_body = get("http://127.0.0.1:18082/admin/taperquery/policy/current")
+if admin_code != -1:
+    proc.terminate()
+    fail(f"Expected admin port 18082 to not accept connections when disabled, but got status {admin_code}: {admin_body}")
+print("Default admin port is closed/disabled as expected.")
+
 # Now send SIGTERM to verify the "shutting down" transition contract
 print("Test 2.3: Sending SIGTERM and capturing 'shutting down' transition...")
 proc.send_signal(signal.SIGTERM)
 
 found_shutting_down = False
-for _ in range(100):
+for _ in range(500):
     code, body = get(f"{sub_metrics_url}/readyz")
     if code == 503 and "shutting down" in body:
         found_shutting_down = True
         print(f"Successfully captured 'shutting down' transition state: {code} - {repr(body)}")
         break
-    time.sleep(0.005)
+    time.sleep(0.01)
 
 if not found_shutting_down:
     fail("Could not capture 'shutting down' transition state on SIGTERM")

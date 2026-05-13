@@ -22,6 +22,7 @@ include(cmake/TargetsMetrics.cmake)
 include(cmake/TargetsCache.cmake)
 include(cmake/TargetsCoalescing.cmake)
 include(cmake/TargetsRuntime.cmake)
+include(cmake/TargetsAdmin.cmake)
 include(cmake/TargetsExtproc.cmake)
 
 if(BYTETAPER_ENABLE_GTEST_TESTS OR BYTETAPER_ENABLE_INTEGRATION_TESTS)

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
+#include "admin/taperquery_admin_http_server.h"
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
@@ -19,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <thread>
 
 namespace {
@@ -35,6 +37,9 @@ struct ServerArgs {
     const char* l2_cache_path = nullptr;
     const char* metrics_listen_address = "0.0.0.0";
     std::uint16_t metrics_port = 18081;
+    const char* admin_address = "127.0.0.1";
+    std::uint16_t admin_port = 18082;
+    bool admin_enable_taperquery = false;
     bool help = false;
     bool error = false;
 };
@@ -107,6 +112,37 @@ ServerArgs parse_args(int argc, char** argv) {
             continue;
         }
 
+        if (std::strcmp(arg, "--admin-address") == 0) {
+            if (i + 1 >= argc || argv[i + 1] == nullptr || argv[i + 1][0] == '\0') {
+                std::fprintf(stderr, "missing value for --admin-address\n");
+                args.error = true;
+                return args;
+            }
+            args.admin_address = argv[i + 1];
+            i += 1;
+            continue;
+        }
+
+        if (std::strcmp(arg, "--admin-port") == 0) {
+            if (i + 1 >= argc || argv[i + 1] == nullptr || argv[i + 1][0] == '\0') {
+                std::fprintf(stderr, "missing value for --admin-port\n");
+                args.error = true;
+                return args;
+            }
+            if (!bytetaper::extproc::startup::parse_u16_port("--admin-port", argv[i + 1],
+                                                             &args.admin_port)) {
+                args.error = true;
+                return args;
+            }
+            i += 1;
+            continue;
+        }
+
+        if (std::strcmp(arg, "--admin-enable-taperquery") == 0) {
+            args.admin_enable_taperquery = true;
+            continue;
+        }
+
         if (std::strcmp(arg, "--help") == 0) {
             args.help = true;
             return args;
@@ -144,7 +180,8 @@ int main(int argc, char** argv) {
     }
     if (args.help) {
         std::puts("usage: bytetaper-extproc-server [--listen-address HOST:PORT] [--policy-file "
-                  "PATH] [--l2-cache-path PATH] [--metrics-address ADDR] [--metrics-port PORT]");
+                  "PATH] [--l2-cache-path PATH] [--metrics-address ADDR] [--metrics-port PORT] "
+                  "[--admin-address ADDR] [--admin-port PORT] [--admin-enable-taperquery]");
         bytetaper::observability::logger_shutdown();
         return 0;
     }
@@ -291,6 +328,27 @@ int main(int argc, char** argv) {
         policy_store->install_initial(build_res.snapshot, &err);
     }
 
+    std::unique_ptr<bytetaper::taperquery::TqApplyService> apply_service;
+    bytetaper::admin::TaperQueryAdminHttpServerHandle admin_handle{};
+    bool admin_started = false;
+
+    if (args.admin_enable_taperquery) {
+        apply_service = std::make_unique<bytetaper::taperquery::TqApplyService>(policy_store.get());
+        bytetaper::admin::TaperQueryAdminHttpServerConfig admin_config{};
+        admin_config.listen_address = args.admin_address;
+        admin_config.port = args.admin_port;
+        admin_config.policy_store = policy_store.get();
+        admin_config.apply_service = apply_service.get();
+        admin_config.enable_taperquery_apply = true;
+
+        if (bytetaper::admin::start_taperquery_admin_http_server(admin_config, &admin_handle)) {
+            admin_started = true;
+        } else {
+            std::fprintf(stderr, "failed to start taperquery admin http server on %s:%u\n",
+                         args.admin_address, args.admin_port);
+        }
+    }
+
     bytetaper::extproc::GrpcServerConfig config{};
     config.listen_address = args.listen_address;
     config.l1_cache = l1_cache.get();
@@ -309,6 +367,9 @@ int main(int argc, char** argv) {
         } else {
             std::fprintf(stderr, "failed to start extproc server on %s\n", args.listen_address);
             health_state.not_ready_reason.store("gRPC startup error", std::memory_order_release);
+        }
+        if (admin_started) {
+            bytetaper::admin::stop_taperquery_admin_http_server(&admin_handle);
         }
         bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
         if (l2_cache != nullptr) {
@@ -335,6 +396,12 @@ int main(int argc, char** argv) {
                   args.metrics_listen_address, metrics_handle.bound_port);
     bytetaper::observability::log_info(buf);
 
+    if (admin_started) {
+        std::snprintf(buf, sizeof(buf), "admin server listening on %s:%u", args.admin_address,
+                      admin_handle.bound_port);
+        bytetaper::observability::log_info(buf);
+    }
+
     while (!g_should_stop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
@@ -345,6 +412,9 @@ int main(int argc, char** argv) {
     health_state.ready.store(false, std::memory_order_release);
 
     bytetaper::extproc::stop_grpc_server(&handle);
+    if (admin_started) {
+        bytetaper::admin::stop_taperquery_admin_http_server(&admin_handle);
+    }
     bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
     if (l2_cache != nullptr) {
         bytetaper::cache::l2_close(&l2_cache);

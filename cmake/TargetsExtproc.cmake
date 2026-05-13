@@ -205,6 +205,7 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
       policy_yaml_loader
       bytetaper_metrics_http_server
       bytetaper_prometheus_registry
+      bytetaper_admin
       bytetaper_logger
       ${YAML_CPP_LIBRARIES}
   )
