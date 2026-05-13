@@ -305,9 +305,43 @@ bool RuntimePolicyStore::swap(std::shared_ptr<const RuntimePolicySnapshot> snaps
     return true;
 }
 
+bool RuntimePolicyStore::swap_if_current(const std::string& expected_identity,
+                                         std::shared_ptr<const RuntimePolicySnapshot> snapshot,
+                                         std::string* error_out) {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (active_ == nullptr) {
+        if (error_out != nullptr) {
+            *error_out = "store not initialized";
+        }
+        return false;
+    }
+    if (active_->policy_identity != expected_identity) {
+        if (error_out != nullptr) {
+            *error_out = "CAS mismatch: active policy identity '" + active_->policy_identity +
+                         "' does not match expected identity '" + expected_identity + "'";
+        }
+        return false;
+    }
+    if (snapshot->generation != generation_ + 1) {
+        if (error_out != nullptr) {
+            *error_out = "invalid generation sequence: snapshot generation " +
+                         std::to_string(snapshot->generation) + " must be exactly " +
+                         std::to_string(generation_ + 1);
+        }
+        return false;
+    }
+    active_ = std::move(snapshot);
+    generation_ = active_->generation;
+    return true;
+}
+
 std::uint64_t RuntimePolicyStore::next_generation() {
     std::lock_guard<std::mutex> lock(mu_);
     return ++generation_;
+}
+
+std::unique_lock<std::mutex> RuntimePolicyStore::acquire_apply_lock() {
+    return std::unique_lock<std::mutex>(apply_mu_);
 }
 
 } // namespace bytetaper::runtime

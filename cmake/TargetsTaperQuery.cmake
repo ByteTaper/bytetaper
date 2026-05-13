@@ -20,6 +20,15 @@ add_library(bytetaper_taperquery STATIC
 target_include_directories(bytetaper_taperquery PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(bytetaper_taperquery PUBLIC bytetaper_hash bytetaper_policy)
 
+add_library(bytetaper_taperquery_apply STATIC
+  src/taperquery/tq_apply_service.cpp
+)
+target_include_directories(bytetaper_taperquery_apply PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(bytetaper_taperquery_apply PUBLIC
+  bytetaper_taperquery
+  bytetaper_runtime
+)
+
 add_library(bytetaper_taperquery_loader STATIC
   src/taperquery/policy_ir_from_yaml.cpp
 )

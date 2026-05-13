@@ -55,11 +55,16 @@ public:
                          std::string* error_out);
 
     bool swap(std::shared_ptr<const RuntimePolicySnapshot> snapshot, std::string* error_out);
+    bool swap_if_current(const std::string& expected_identity,
+                         std::shared_ptr<const RuntimePolicySnapshot> snapshot,
+                         std::string* error_out);
 
     std::uint64_t next_generation();
+    std::unique_lock<std::mutex> acquire_apply_lock();
 
 private:
     mutable std::mutex mu_;
+    std::mutex apply_mu_;
     std::shared_ptr<const RuntimePolicySnapshot> active_;
     std::uint64_t generation_ = 0;
 };
