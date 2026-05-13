@@ -91,16 +91,22 @@ public:
     build_snapshot(const TqPolicyDocument& policy_ir, std::uint64_t generation) = 0;
 };
 
+class TqApplyAuditStore;
+
 class TqApplyService {
 public:
     explicit TqApplyService(runtime::RuntimePolicyStore* policy_store,
-                            TqSnapshotBuilder* builder = nullptr);
+                            TqSnapshotBuilder* builder = nullptr,
+                            TqApplyAuditStore* audit_store = nullptr);
 
     TqApplyResult execute(const TqApplyRequest& request);
 
 private:
+    TqApplyResult execute_impl(const TqApplyRequest& request);
+
     runtime::RuntimePolicyStore* policy_store_ = nullptr;
     TqSnapshotBuilder* builder_ = nullptr;
+    TqApplyAuditStore* audit_store_ = nullptr;
 };
 
 } // namespace bytetaper::taperquery

@@ -5,6 +5,7 @@
 
 #include "taperquery/policy_ir_normalize.h"
 #include "taperquery/policy_ir_validator.h"
+#include "taperquery/tq_apply_audit.h"
 #include "taperquery/tq_compiler.h"
 #include "taperquery/tq_parser.h"
 
@@ -37,10 +38,21 @@ DefaultTqSnapshotBuilder g_default_builder;
 } // namespace
 
 TqApplyService::TqApplyService(runtime::RuntimePolicyStore* policy_store,
-                               TqSnapshotBuilder* builder)
-    : policy_store_(policy_store), builder_(builder ? builder : &g_default_builder) {}
+                               TqSnapshotBuilder* builder, TqApplyAuditStore* audit_store)
+    : policy_store_(policy_store), builder_(builder ? builder : &g_default_builder),
+      audit_store_(audit_store) {}
 
 TqApplyResult TqApplyService::execute(const TqApplyRequest& request) {
+    TqApplyResult result = execute_impl(request);
+
+    if (audit_store_ != nullptr && should_record(result, audit_store_->options())) {
+        audit_store_->append(build_apply_audit_record(request, result));
+    }
+
+    return result;
+}
+
+TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
     TqApplyResult result;
 
     // Step 1 - Validate service state and request shape

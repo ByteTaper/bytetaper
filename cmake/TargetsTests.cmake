@@ -2506,4 +2506,11 @@ if(BUILD_TESTING)
   target_include_directories(taperquery_admin_http_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(taperquery_admin_http_server_test PRIVATE gtest_main bytetaper_admin bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter)
   add_test(NAME taperquery_admin_http_server_test COMMAND taperquery_admin_http_server_test)
+
+  add_executable(tq_apply_audit_test
+    tests/tq_apply_audit_test.cpp
+  )
+  target_include_directories(tq_apply_audit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(tq_apply_audit_test PRIVATE gtest_main bytetaper_admin bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter)
+  add_test(NAME tq_apply_audit_test COMMAND tq_apply_audit_test)
 endif()

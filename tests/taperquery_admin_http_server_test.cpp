@@ -4,6 +4,7 @@
 #include "admin/taperquery_admin_http_server.h"
 #include "runtime/policy_snapshot.h"
 #include "taperquery/policy_ir.h"
+#include "taperquery/tq_apply_audit.h"
 #include "taperquery/tq_apply_service.h"
 
 #include <arpa/inet.h>
@@ -114,12 +115,15 @@ protected:
         std::string err;
         ASSERT_TRUE(store->install_initial(build_res.snapshot, &err)) << err;
 
-        apply_service = std::make_unique<taperquery::TqApplyService>(store.get());
+        audit_store = std::make_unique<taperquery::TqApplyAuditStore>();
+        apply_service =
+            std::make_unique<taperquery::TqApplyService>(store.get(), nullptr, audit_store.get());
 
         config.listen_address = "127.0.0.1";
         config.port = 0; // OS-assigned port
         config.policy_store = store.get();
         config.apply_service = apply_service.get();
+        config.audit_store = audit_store.get();
         config.enable_taperquery_apply = true;
         config.max_request_bytes = 4096;
 
@@ -132,6 +136,7 @@ protected:
     }
 
     std::unique_ptr<runtime::RuntimePolicyStore> store;
+    std::unique_ptr<taperquery::TqApplyAuditStore> audit_store;
     std::unique_ptr<taperquery::TqApplyService> apply_service;
     TaperQueryAdminHttpServerConfig config;
     TaperQueryAdminHttpServerHandle handle{};
@@ -420,6 +425,72 @@ TEST_F(TaperQueryAdminHttpServerTest, ApplyJsonEscapes) {
     EXPECT_NE(resp.find("HTTP/1.1 200 OK"), std::string::npos);
     EXPECT_NE(resp.find("\"ok\":true"), std::string::npos);
     EXPECT_NE(resp.find("\"status\":\"DryRunReady\""), std::string::npos);
+}
+
+TEST_F(TaperQueryAdminHttpServerTest, AuditLatestEndpoint) {
+    // Initially no audit records
+    std::string resp1 =
+        send_http_request(handle.bound_port, "GET", "/admin/taperquery/audit/latest");
+    EXPECT_NE(resp1.find("HTTP/1.1 404 Not Found"), std::string::npos);
+    EXPECT_NE(resp1.find("NO_AUDIT_RECORD"), std::string::npos);
+
+    // Perform an apply
+    std::string policy_src = "policy \"my-policy\" against sha \"" + initial_identity +
+                             "\" { route \"r1\" when path prefix \"/p\" {} }";
+    std::string body = "{\n"
+                       "  \"source_type\": \"taperquery\",\n"
+                       "  \"source\": \"" +
+                       escape_json(policy_src) +
+                       "\",\n"
+                       "  \"expected_base_identity\": \"" +
+                       initial_identity +
+                       "\",\n"
+                       "  \"mode\": \"apply\"\n"
+                       "}";
+
+    std::string resp_apply =
+        send_http_request(handle.bound_port, "POST", "/admin/taperquery/apply", body);
+    EXPECT_NE(resp_apply.find("HTTP/1.1 200 OK"), std::string::npos);
+
+    // Now GET /audit/latest should return wrapped record
+    std::string resp2 =
+        send_http_request(handle.bound_port, "GET", "/admin/taperquery/audit/latest");
+    EXPECT_NE(resp2.find("HTTP/1.1 200 OK"), std::string::npos);
+    EXPECT_NE(resp2.find("\"ok\":true"), std::string::npos);
+    EXPECT_NE(resp2.find("\"record\":{"), std::string::npos);
+    EXPECT_NE(resp2.find("\"sequence\":1"), std::string::npos);
+    EXPECT_NE(resp2.find("\"outcome\":\"Applied\""), std::string::npos);
+    EXPECT_NE(resp2.find("\"route_changes\":["), std::string::npos);
+    EXPECT_NE(resp2.find("\"issues\":["), std::string::npos);
+}
+
+TEST_F(TaperQueryAdminHttpServerTest, CurrentPolicyIncludesCompactAudit) {
+    // Perform an apply
+    std::string policy_src = "policy \"my-policy\" against sha \"" + initial_identity +
+                             "\" { route \"r1\" when path prefix \"/p\" {} }";
+    std::string body = "{\n"
+                       "  \"source_type\": \"taperquery\",\n"
+                       "  \"source\": \"" +
+                       escape_json(policy_src) +
+                       "\",\n"
+                       "  \"expected_base_identity\": \"" +
+                       initial_identity +
+                       "\",\n"
+                       "  \"mode\": \"apply\"\n"
+                       "}";
+
+    std::string resp_apply =
+        send_http_request(handle.bound_port, "POST", "/admin/taperquery/apply", body);
+    EXPECT_NE(resp_apply.find("HTTP/1.1 200 OK"), std::string::npos);
+
+    // GET /policy/current
+    std::string resp =
+        send_http_request(handle.bound_port, "GET", "/admin/taperquery/policy/current");
+    EXPECT_NE(resp.find("HTTP/1.1 200 OK"), std::string::npos);
+    EXPECT_NE(resp.find("\"has_latest_apply\":true"), std::string::npos);
+    EXPECT_NE(resp.find("\"latest_apply\":{"), std::string::npos);
+    EXPECT_EQ(resp.find("\"route_changes\":"), std::string::npos);
+    EXPECT_EQ(resp.find("\"issues\":"), std::string::npos);
 }
 
 } // namespace bytetaper::admin::testing

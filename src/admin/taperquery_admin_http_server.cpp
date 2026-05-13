@@ -3,6 +3,8 @@
 
 #include "admin/taperquery_admin_http_server.h"
 
+#include "taperquery/tq_apply_audit.h"
+
 #include <arpa/inet.h>
 #include <atomic>
 #include <cctype>
@@ -670,39 +672,70 @@ static void handle_connection(int conn_fd, TaperQueryAdminHttpServerImpl* impl) 
             return;
         }
 
+        taperquery::TqCurrentPolicySummary summary;
         auto snapshot = config.policy_store->load();
         if (!snapshot) {
-            send_response(conn_fd, 503, "Service Unavailable", "application/json",
-                          "{\"ok\":false,\"error_code\":\"NO_ACTIVE_POLICY\",\"message\":\"No "
-                          "active runtime policy snapshot is installed.\"}");
+            summary.ok = false;
+            summary.error_code = "NO_ACTIVE_POLICY";
+            summary.message = "No active runtime policy snapshot is installed.";
+        } else {
+            summary.ok = true;
+            summary.policy_identity = snapshot->policy_identity;
+            summary.generation = snapshot->generation;
+            summary.route_count = snapshot->routes.size();
+            summary.source_name = snapshot->source_name;
+            summary.source_schema_version = snapshot->policy_ir.version.source_schema_version;
+            summary.policy_ir_version = snapshot->policy_ir.version.policy_ir_version;
+            summary.identity_version = snapshot->policy_ir.version.identity_version;
+            summary.emitter_version = snapshot->policy_ir.version.emitter_version;
+            summary.runtime_min_version = snapshot->policy_ir.version.runtime_min_version;
+            summary.runtime_capability_profile =
+                snapshot->policy_ir.version.runtime_capability_profile;
+
+            if (config.audit_store != nullptr) {
+                summary.has_latest_apply = config.audit_store->latest(&summary.latest_apply);
+            } else {
+                summary.has_latest_apply = false;
+            }
+        }
+
+        std::string res_body = taperquery::to_json(summary);
+        int status_code = summary.ok ? 200 : 503;
+        const char* status_msg = summary.ok ? "OK" : "Service Unavailable";
+        send_response(conn_fd, status_code, status_msg, "application/json", res_body);
+        close(conn_fd);
+        return;
+    }
+
+    if (path == "/admin/taperquery/audit/latest") {
+        if (method != "GET") {
+            send_response(
+                conn_fd, 405, "Method Not Allowed", "application/json",
+                "{\"ok\":false,\"error_code\":\"METHOD_NOT_ALLOWED\",\"message\":\"Method " +
+                    method + " not allowed for " + path + ".\"}");
             close(conn_fd);
             return;
         }
 
-        std::string res_body = "{";
-        res_body += "\"ok\":true,";
-        res_body +=
-            "\"policy_identity\":\"" + escape_json_string(snapshot->policy_identity) + "\",";
-        res_body += "\"generation\":" + std::to_string(snapshot->generation) + ",";
-        res_body += "\"route_count\":" + std::to_string(snapshot->routes.size()) + ",";
-        res_body += "\"source_name\":\"" + escape_json_string(snapshot->source_name) + "\",";
-        res_body += "\"version\":{";
-        res_body += "\"source_schema_version\":\"" +
-                    escape_json_string(snapshot->policy_ir.version.source_schema_version) + "\",";
-        res_body += "\"policy_ir_version\":\"" +
-                    escape_json_string(snapshot->policy_ir.version.policy_ir_version) + "\",";
-        res_body += "\"identity_version\":\"" +
-                    escape_json_string(snapshot->policy_ir.version.identity_version) + "\",";
-        res_body += "\"emitter_version\":\"" +
-                    escape_json_string(snapshot->policy_ir.version.emitter_version) + "\",";
-        res_body += "\"runtime_min_version\":\"" +
-                    escape_json_string(snapshot->policy_ir.version.runtime_min_version) + "\",";
-        res_body += "\"runtime_capability_profile\":\"" +
-                    escape_json_string(snapshot->policy_ir.version.runtime_capability_profile) +
-                    "\"";
-        res_body += "}";
-        res_body += "}";
+        if (config.audit_store == nullptr) {
+            send_response(
+                conn_fd, 503, "Service Unavailable", "application/json",
+                "{\"ok\":false,\"error_code\":\"AUDIT_STORE_NOT_CONFIGURED\",\"message\":\"Audit "
+                "store is not configured.\"}");
+            close(conn_fd);
+            return;
+        }
 
+        taperquery::TqApplyAuditRecord r;
+        if (!config.audit_store->latest(&r)) {
+            send_response(conn_fd, 404, "Not Found", "application/json",
+                          "{\"ok\":false,\"error_code\":\"NO_AUDIT_RECORD\",\"message\":\"No audit "
+                          "records found.\"}");
+            close(conn_fd);
+            return;
+        }
+
+        std::string res_body = "{\"ok\":true,\"record\":" + taperquery::to_json(r) + "}";
         send_response(conn_fd, 200, "OK", "application/json", res_body);
         close(conn_fd);
         return;

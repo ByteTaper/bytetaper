@@ -12,6 +12,7 @@
 #include "metrics/prometheus_registry.h"
 #include "observability/logger.h"
 #include "policy/yaml_loader.h"
+#include "taperquery/tq_apply_audit.h"
 
 #include <atomic>
 #include <cerrno>
@@ -329,16 +330,20 @@ int main(int argc, char** argv) {
     }
 
     std::unique_ptr<bytetaper::taperquery::TqApplyService> apply_service;
+    std::unique_ptr<bytetaper::taperquery::TqApplyAuditStore> audit_store;
     bytetaper::admin::TaperQueryAdminHttpServerHandle admin_handle{};
     bool admin_started = false;
 
     if (args.admin_enable_taperquery) {
-        apply_service = std::make_unique<bytetaper::taperquery::TqApplyService>(policy_store.get());
+        audit_store = std::make_unique<bytetaper::taperquery::TqApplyAuditStore>();
+        apply_service = std::make_unique<bytetaper::taperquery::TqApplyService>(
+            policy_store.get(), nullptr, audit_store.get());
         bytetaper::admin::TaperQueryAdminHttpServerConfig admin_config{};
         admin_config.listen_address = args.admin_address;
         admin_config.port = args.admin_port;
         admin_config.policy_store = policy_store.get();
         admin_config.apply_service = apply_service.get();
+        admin_config.audit_store = audit_store.get();
         admin_config.enable_taperquery_apply = true;
 
         if (bytetaper::admin::start_taperquery_admin_http_server(admin_config, &admin_handle)) {

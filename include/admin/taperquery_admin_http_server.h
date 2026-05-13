@@ -10,6 +10,10 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace bytetaper::taperquery {
+class TqApplyAuditStore;
+}
+
 namespace bytetaper::admin {
 
 struct TaperQueryAdminHttpServerConfig {
@@ -18,6 +22,7 @@ struct TaperQueryAdminHttpServerConfig {
 
     runtime::RuntimePolicyStore* policy_store = nullptr;
     taperquery::TqApplyService* apply_service = nullptr;
+    taperquery::TqApplyAuditStore* audit_store = nullptr;
 
     bool enable_taperquery_apply = false;
 
