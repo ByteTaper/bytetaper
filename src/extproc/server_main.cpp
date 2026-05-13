@@ -255,6 +255,42 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    auto policy_store = std::make_unique<bytetaper::runtime::RuntimePolicyStore>();
+    if (policy_result.ok) {
+        auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_routes(
+            policy_result.policies, policy_result.count, args.policy_file,
+            policy_store->next_generation());
+        if (!build_res.ok) {
+            std::fprintf(stderr, "failed to build initial policy snapshot: %s\n",
+                         build_res.error.c_str());
+            health_state.not_ready_reason.store("initial policy snapshot build error",
+                                                std::memory_order_release);
+            bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
+            if (l2_cache != nullptr) {
+                bytetaper::cache::l2_close(&l2_cache);
+            }
+            bytetaper::observability::logger_shutdown();
+            return 5;
+        }
+        std::string err;
+        if (!policy_store->install_initial(build_res.snapshot, &err)) {
+            std::fprintf(stderr, "failed to install initial policy snapshot: %s\n", err.c_str());
+            health_state.not_ready_reason.store("initial policy snapshot install error",
+                                                std::memory_order_release);
+            bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
+            if (l2_cache != nullptr) {
+                bytetaper::cache::l2_close(&l2_cache);
+            }
+            bytetaper::observability::logger_shutdown();
+            return 6;
+        }
+    } else {
+        auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_routes(
+            nullptr, 0, "none", policy_store->next_generation());
+        std::string err;
+        policy_store->install_initial(build_res.snapshot, &err);
+    }
+
     bytetaper::extproc::GrpcServerConfig config{};
     config.listen_address = args.listen_address;
     config.l1_cache = l1_cache.get();
@@ -262,10 +298,7 @@ int main(int argc, char** argv) {
     config.metrics_registry = &metrics_registry;
     config.coalescing_registry = coalescing_registry.get();
     config.wq_config = wq_config;
-    if (policy_result.ok) {
-        config.policies = policy_result.policies;
-        config.policy_count = policy_result.count;
-    }
+    config.policy_store = policy_store.get();
 
     bytetaper::extproc::GrpcServerHandle handle{};
     if (!bytetaper::extproc::start_grpc_server(config, &handle)) {

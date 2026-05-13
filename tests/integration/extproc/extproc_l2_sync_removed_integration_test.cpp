@@ -6,6 +6,7 @@
 #include "cache/l2_disk_cache.h"
 #include "envoy/service/ext_proc/v3/external_processor.grpc.pb.h"
 #include "extproc/grpc_server.h"
+#include "policy/policy_identity.h"
 #include "policy/route_policy.h"
 
 #include <chrono>
@@ -25,6 +26,7 @@ int main() {
     policy.match_kind = policy::RouteMatchKind::Prefix;
     policy.match_prefix = "/";
     policy.cache.behavior = policy::CacheBehavior::Store;
+    policy::copy_route_policy_identity_v2_to_legacy_slot(&policy);
 
     // 2. Setup Caches
     auto l1_cache = std::make_unique<cache::L1Cache>();
@@ -60,7 +62,7 @@ int main() {
         ki.method = policy::HttpMethod::Get;
         ki.route_id = "test-route";
         ki.path = "/scenario-a";
-        ki.policy_version = "test-route";
+        ki.policy_version = policy.policy_identity;
 
         char key[cache::kCacheKeyMaxLen] = {};
         cache::build_cache_key(ki, key, sizeof(key));
@@ -129,7 +131,7 @@ int main() {
         ki.method = policy::HttpMethod::Get;
         ki.route_id = "test-route";
         ki.path = "/scenario-b";
-        ki.policy_version = "test-route";
+        ki.policy_version = policy.policy_identity;
 
         char key[cache::kCacheKeyMaxLen] = {};
         cache::build_cache_key(ki, key, sizeof(key));

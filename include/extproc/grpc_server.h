@@ -8,6 +8,7 @@
 #include "cache/l2_disk_cache.h"
 #include "metrics/prometheus_registry.h"
 #include "policy/route_policy.h"
+#include "runtime/policy_snapshot.h"
 #include "runtime/worker_queue.h"
 
 #include <cstddef>
@@ -21,8 +22,9 @@ namespace bytetaper::extproc {
 
 struct GrpcServerConfig {
     const char* listen_address = "127.0.0.1:0";
-    const policy::RoutePolicy* policies = nullptr;
-    std::size_t policy_count = 0;
+    runtime::RuntimePolicyStore* policy_store = nullptr;
+    const policy::RoutePolicy* policies = nullptr; // Deprecated backwards compatibility field
+    std::size_t policy_count = 0;                  // Deprecated backwards compatibility field
     cache::L1Cache* l1_cache = nullptr;
     cache::L2DiskCache* l2_cache = nullptr;
     metrics::MetricsRegistry* metrics_registry = nullptr;

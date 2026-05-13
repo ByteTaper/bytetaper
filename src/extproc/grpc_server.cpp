@@ -52,6 +52,7 @@ struct StreamFilterState {
     json_transform::JsonResponseKind response_kind =
         json_transform::JsonResponseKind::SkipUnsupported;
     bool has_query_selection = false;
+    std::shared_ptr<const runtime::RuntimePolicySnapshot> active_policy_snapshot = nullptr;
     const policy::RoutePolicy* matched_policy = nullptr;
     bool is_non_2xx_response = false;
 
@@ -467,16 +468,12 @@ bool build_filtered_body_response(const envoy::service::ext_proc::v3::Processing
 class ExternalProcessorSkeletonService final
     : public envoy::service::ext_proc::v3::ExternalProcessor::Service {
 public:
-    const policy::RoutePolicy* policies = nullptr;
-    std::size_t policy_count = 0;
-    CompiledRouteRuntimeTable route_runtimes{};
+    runtime::RuntimePolicyStore* policy_store = nullptr;
     cache::L1Cache* l1_cache = nullptr;
     cache::L2DiskCache* l2_cache = nullptr;
     metrics::MetricsRegistry* metrics_registry = nullptr;
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
     std::unique_ptr<runtime::WorkerQueue> worker_queue;
-    policy::CompiledRouteMatcher route_matcher{};
-    bool route_matcher_ready = false;
 
     grpc::Status Process(grpc::ServerContext*,
                          grpc::ServerReaderWriter<envoy::service::ext_proc::v3::ProcessingResponse,
@@ -542,11 +539,17 @@ public:
             }
 
             if (kind == ProcessingRequestKind::RequestHeaders) {
+                if (policy_store != nullptr) {
+                    filter_state.active_policy_snapshot = policy_store->load();
+                }
                 const auto req_view = apply_request_headers_selection(request, &filter_state);
                 filter_state.matched_policy = nullptr;
-                if (route_matcher_ready && filter_state.context.raw_path_length > 0) {
+                if (filter_state.active_policy_snapshot != nullptr &&
+                    filter_state.active_policy_snapshot->route_matcher_ready &&
+                    filter_state.context.raw_path_length > 0) {
                     filter_state.matched_policy = policy::match_route_compiled(
-                        route_matcher, filter_state.context.raw_path,
+                        filter_state.active_policy_snapshot->route_matcher,
+                        filter_state.context.raw_path,
                         metrics_registry ? &metrics_registry->runtime_metrics : nullptr);
                 }
 
@@ -606,7 +609,11 @@ public:
                     }
 
                     const auto* route_runtime =
-                        find_compiled_route_runtime(route_runtimes, filter_state.matched_policy);
+                        (filter_state.active_policy_snapshot != nullptr)
+                            ? find_compiled_route_runtime(
+                                  filter_state.active_policy_snapshot->route_runtimes,
+                                  filter_state.matched_policy)
+                            : nullptr;
                     if (route_runtime != nullptr) {
                         apg::run_pipeline(route_runtime->lookup_stages, route_runtime->lookup_count,
                                           filter_state.context);
@@ -746,8 +753,12 @@ public:
                             }
                         }
                     } else {
-                        const auto* route_runtime = find_compiled_route_runtime(
-                            route_runtimes, filter_state.matched_policy);
+                        const auto* route_runtime =
+                            (filter_state.active_policy_snapshot != nullptr)
+                                ? find_compiled_route_runtime(
+                                      filter_state.active_policy_snapshot->route_runtimes,
+                                      filter_state.matched_policy)
+                                : nullptr;
                         if (route_runtime != nullptr) {
                             apg::run_pipeline(route_runtime->response_stages,
                                               route_runtime->response_count, filter_state.context);
@@ -927,8 +938,12 @@ public:
                                 &resp_body_span.span->span_id);
                         }
 
-                        const auto* route_runtime = find_compiled_route_runtime(
-                            route_runtimes, filter_state.matched_policy);
+                        const auto* route_runtime =
+                            (filter_state.active_policy_snapshot != nullptr)
+                                ? find_compiled_route_runtime(
+                                      filter_state.active_policy_snapshot->route_runtimes,
+                                      filter_state.matched_policy)
+                                : nullptr;
                         if (route_runtime != nullptr) {
                             apg::run_pipeline(route_runtime->store_stages,
                                               route_runtime->store_count, filter_state.context);
@@ -953,7 +968,11 @@ public:
                         filter_state.context.response_body_size_known = true;
                     }
                     const auto* route_runtime =
-                        find_compiled_route_runtime(route_runtimes, filter_state.matched_policy);
+                        (filter_state.active_policy_snapshot != nullptr)
+                            ? find_compiled_route_runtime(
+                                  filter_state.active_policy_snapshot->route_runtimes,
+                                  filter_state.matched_policy)
+                            : nullptr;
                     if (route_runtime != nullptr) {
                         apg::run_pipeline(route_runtime->response_stages,
                                           route_runtime->response_count, filter_state.context);
@@ -1048,6 +1067,7 @@ public:
 struct GrpcServerImpl {
     ExternalProcessorSkeletonService service{};
     std::unique_ptr<grpc::Server> server{};
+    std::unique_ptr<runtime::RuntimePolicyStore> owned_policy_store{};
 };
 
 struct WorkerQueueStartGuard {
@@ -1070,15 +1090,14 @@ struct WorkerQueueStartGuard {
     }
 };
 
-std::size_t derive_async_store_max_body_size(const policy::RoutePolicy* policies,
-                                             std::size_t policy_count) {
+std::size_t derive_async_store_max_body_size(const runtime::RuntimePolicySnapshot* snapshot) {
     std::size_t max_body_size = 0;
     bool has_unlimited_policy = false;
-    if (policies == nullptr) {
+    if (snapshot == nullptr || snapshot->routes.empty()) {
         return runtime::kAsyncL2StoreDefaultMaxBodySize;
     }
-    for (std::size_t i = 0; i < policy_count; ++i) {
-        const std::uint32_t route_limit = policies[i].max_response_bytes;
+    for (const auto& r : snapshot->routes) {
+        const std::uint32_t route_limit = r.max_response_bytes;
         if (route_limit == 0) {
             has_unlimited_policy = true;
             continue;
@@ -1127,15 +1146,27 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
                              &selected_port);
     builder.RegisterService(&impl->service);
 
-    impl->service.policies = config.policies;
-    impl->service.policy_count = config.policy_count;
-    compile_route_runtime_table(config.policies, config.policy_count,
-                                &impl->service.route_runtimes);
-    if (config.policies != nullptr && config.policy_count > 0) {
-        policy::compile_route_matcher(config.policies, config.policy_count,
-                                      &impl->service.route_matcher);
-        impl->service.route_matcher_ready = true;
+    if (config.policy_store != nullptr) {
+        impl->service.policy_store = config.policy_store;
+    } else {
+        impl->owned_policy_store = std::make_unique<runtime::RuntimePolicyStore>();
+        if (config.policies != nullptr && config.policy_count > 0) {
+            auto build_res = runtime::build_runtime_policy_snapshot_from_routes(
+                config.policies, config.policy_count, "compat",
+                impl->owned_policy_store->next_generation());
+            if (build_res.ok) {
+                std::string err;
+                impl->owned_policy_store->install_initial(build_res.snapshot, &err);
+            }
+        } else {
+            auto build_res = runtime::build_runtime_policy_snapshot_from_routes(
+                nullptr, 0, "none", impl->owned_policy_store->next_generation());
+            std::string err;
+            impl->owned_policy_store->install_initial(build_res.snapshot, &err);
+        }
+        impl->service.policy_store = impl->owned_policy_store.get();
     }
+
     impl->service.l1_cache = config.l1_cache;
     impl->service.l2_cache = config.l2_cache;
     impl->service.metrics_registry = config.metrics_registry;
@@ -1151,8 +1182,11 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     // Initialize background worker resources
     runtime::WorkerQueueConfig wq_config = config.wq_config;
     if (wq_config.async_store_max_body_size == 0) {
-        wq_config.async_store_max_body_size =
-            derive_async_store_max_body_size(config.policies, config.policy_count);
+        std::shared_ptr<const runtime::RuntimePolicySnapshot> active_snap = nullptr;
+        if (impl->service.policy_store != nullptr) {
+            active_snap = impl->service.policy_store->load();
+        }
+        wq_config.async_store_max_body_size = derive_async_store_max_body_size(active_snap.get());
     }
     const char* wq_err = runtime::worker_queue_init(impl->service.worker_queue.get(), wq_config);
     if (wq_err != nullptr) {

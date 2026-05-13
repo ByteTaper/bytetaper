@@ -372,6 +372,11 @@ if(BUILD_TESTING)
     add_executable(grpc_server_worker_lifecycle_test
       tests/grpc_server_worker_lifecycle_test.cpp
     )
+    target_include_directories(grpc_server_worker_lifecycle_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${BYTETAPER_GENERATED_PROTO_DIR}
+    )
     target_link_libraries(grpc_server_worker_lifecycle_test
       PRIVATE
         gtest_main
@@ -531,6 +536,43 @@ if(BUILD_TESTING)
     add_test(
       NAME policy_route_policy_test
       COMMAND policy_route_policy_test
+    )
+
+    add_executable(runtime_policy_snapshot_test
+      tests/runtime_policy_snapshot_test.cpp
+    )
+    target_include_directories(runtime_policy_snapshot_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(runtime_policy_snapshot_test
+      PRIVATE
+        gtest_main
+        bytetaper_runtime
+        bytetaper_extproc_adapter
+    )
+    add_test(
+      NAME runtime_policy_snapshot_test
+      COMMAND runtime_policy_snapshot_test
+    )
+
+    add_executable(runtime_policy_store_test
+      tests/runtime_policy_store_test.cpp
+    )
+    target_include_directories(runtime_policy_store_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(runtime_policy_store_test
+      PRIVATE
+        gtest_main
+        bytetaper_runtime
+        bytetaper_extproc_adapter
+        policy_yaml_loader
+    )
+    add_test(
+      NAME runtime_policy_store_test
+      COMMAND runtime_policy_store_test
     )
 
     add_executable(policy_identity_test

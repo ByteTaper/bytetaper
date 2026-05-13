@@ -8,9 +8,10 @@ target_include_directories(bytetaper_apg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/incl
 
 add_library(bytetaper_runtime STATIC
   src/runtime/worker_queue.cpp
+  src/runtime/policy_snapshot.cpp
 )
 target_include_directories(bytetaper_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(bytetaper_runtime PUBLIC bytetaper_cache bytetaper_coalescing bytetaper_prometheus_registry Threads::Threads)
+target_link_libraries(bytetaper_runtime PUBLIC bytetaper_cache bytetaper_coalescing bytetaper_prometheus_registry Threads::Threads bytetaper_policy bytetaper_taperquery)
 
 add_library(bytetaper_pagination STATIC
   src/pagination/pagination_decision.cpp
