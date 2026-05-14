@@ -1,0 +1,17 @@
+{{- if and .Values.l2Cache.enabled .Values.l2Cache.persistence.enabled (not .Values.l2Cache.persistence.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "bytetaper.fullname" . }}-l2-cache
+  labels:
+    {{- include "bytetaper.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.l2Cache.persistence.accessModes | nindent 4 }}
+  {{- if .Values.l2Cache.persistence.storageClassName }}
+  storageClassName: {{ .Values.l2Cache.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.l2Cache.persistence.size | quote }}
+{{- end -}}

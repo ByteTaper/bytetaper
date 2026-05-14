@@ -1,0 +1,16 @@
+ByteTaper API Performance Gateway has been successfully deployed!
+
+1. Get the application URL by running these commands:
+   export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "bytetaper.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+   export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[?(@.name=='extproc')].containerPort}")
+   echo "Forwarding external processor port to localhost..."
+   kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 18080:$CONTAINER_PORT
+
+2. To inspect Prometheus performance metrics and operational health:
+   kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 18081:18081
+   curl http://localhost:18081/healthz
+   curl http://localhost:18081/readyz
+   curl http://localhost:18081/metrics
+
+3. For comprehensive configuration options and production runbooks, visit:
+   https://github.com/haluan/bytetaper

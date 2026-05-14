@@ -1,0 +1,154 @@
+replicaCount: 1
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 25%
+
+image:
+  repository: ghcr.io/haluan/bytetaper-runtime
+  pullPolicy: IfNotPresent
+  tag: ""
+  digest: ""
+  pullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+deploymentAnnotations: {}
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+runtime:
+  listenAddress: "0.0.0.0:18080"
+  extProcPort: 18080
+  policyPath: "/etc/bytetaper/policy.yaml"
+  l2CachePath: "/var/lib/bytetaper/l2-cache"
+  metricsAddress: "0.0.0.0"
+  metricsPort: 18081
+
+policy:
+  mode: inline
+  inline: |
+    routes: []
+  existingConfigMap:
+    name: ""
+    key: "policy.yaml"
+  existingSecret:
+    name: ""
+    key: "policy.yaml"
+
+l2Cache:
+  enabled: true
+  persistence:
+    enabled: true
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+    existingClaim: ""
+  emptyDir:
+    enabled: false
+    sizeLimit: ""
+
+admin:
+  enabled: false
+  address: "127.0.0.1"
+  port: 18082
+  service:
+    enabled: false
+    type: ClusterIP
+    annotations: {}
+
+service:
+  type: ClusterIP
+  extProcPort: 18080
+  metricsPort: 18081
+  annotations: {}
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    namespace: ""
+    labels: {}
+
+probes:
+  liveness:
+    enabled: true
+    path: /healthz
+    port: metrics
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 6
+  readiness:
+    enabled: true
+    path: /readyz
+    port: metrics
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 6
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
+topologySpreadConstraints: []
+
+env: []
+
+extraArgs: []
+
+extraVolumes: []
+
+extraVolumeMounts: []
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

@@ -1,0 +1,15 @@
+image:
+  repository: ghcr.io/haluan/bytetaper-runtime
+  tag: ci
+
+policy:
+  mode: inline
+  inline: |
+    routes: []
+
+l2Cache:
+  enabled: true
+  persistence:
+    enabled: false
+  emptyDir:
+    enabled: true

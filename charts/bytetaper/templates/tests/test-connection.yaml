@@ -1,0 +1,27 @@
+{{- if .Values.metrics.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "{{ include "bytetaper.fullname" . }}-test-connection"
+  labels:
+    {{- include "bytetaper.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "bytetaper.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: wget
+          image: curlimages/curl:latest
+          command: ['sh', '-c']
+          args:
+            - |
+              set -eu
+              curl -fsS http://{{ include "bytetaper.fullname" . }}:{{ .Values.service.metricsPort }}/healthz
+              curl -fsS http://{{ include "bytetaper.fullname" . }}:{{ .Values.service.metricsPort }}/readyz
+              curl -fsS http://{{ include "bytetaper.fullname" . }}:{{ .Values.service.metricsPort }}/metrics
+      restartPolicy: Never
+{{- end -}}

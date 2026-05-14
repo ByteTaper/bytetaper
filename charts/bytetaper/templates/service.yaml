@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bytetaper.fullname" . }}
+  labels:
+    {{- include "bytetaper.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.service.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: extproc
+      port: {{ .Values.service.extProcPort }}
+      targetPort: extproc
+      protocol: TCP
+    {{- if .Values.metrics.enabled }}
+    - name: metrics
+      port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}
+  selector:
+    {{- include "bytetaper.selectorLabels" . | nindent 4 }}
+---
+{{- if and .Values.admin.enabled .Values.admin.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bytetaper.fullname" . }}-admin
+  labels:
+    {{- include "bytetaper.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.admin.service.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.admin.service.type }}
+  ports:
+    - name: admin
+      port: {{ .Values.admin.port }}
+      targetPort: admin
+      protocol: TCP
+  selector:
+    {{- include "bytetaper.selectorLabels" . | nindent 4 }}
+{{- end }}

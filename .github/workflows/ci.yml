@@ -216,3 +216,39 @@ jobs:
           name: runtime-smoke-${{ github.sha }}
           path: dist/runtime-smoke/
           retention-days: 30
+
+  helm-chart:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+      - name: Lint chart
+        run: helm lint charts/bytetaper
+      - name: Template — default chart values
+        run: helm template bytetaper charts/bytetaper
+      - name: Template — ci defaults
+        run: helm template bytetaper charts/bytetaper --values charts/bytetaper/ci/default-values.yaml
+      - name: Template — image digest
+        run: helm template bytetaper charts/bytetaper --set image.digest=sha256:example
+      - name: Template — existingConfigMap policy
+        run: helm template bytetaper charts/bytetaper --set policy.mode=existingConfigMap --set policy.existingConfigMap.name=bytetaper-policy --set policy.existingConfigMap.key=custom-policy.yaml
+      - name: Template — existingSecret policy
+        run: helm template bytetaper charts/bytetaper --set policy.mode=existingSecret --set policy.existingSecret.name=bytetaper-policy --set policy.existingSecret.key=custom-policy.yaml
+      - name: Template — admin enabled
+        run: helm template bytetaper charts/bytetaper --set admin.enabled=true --set admin.service.enabled=true
+      - name: Template — full optional features
+        run: helm template bytetaper charts/bytetaper --set autoscaling.enabled=true --set podDisruptionBudget.enabled=true --set metrics.serviceMonitor.enabled=true
+      - name: Template — metrics disabled
+        run: helm template bytetaper charts/bytetaper --set metrics.enabled=false
+      - name: Template — emptyDir cache
+        run: helm template bytetaper charts/bytetaper --set l2Cache.persistence.enabled=false --set l2Cache.emptyDir.enabled=true
+      - name: Template — emptyDir cache with sizeLimit
+        run: helm template bytetaper charts/bytetaper --set l2Cache.persistence.enabled=false --set l2Cache.emptyDir.enabled=true --set l2Cache.emptyDir.sizeLimit=1Gi
+      - name: Template — probes disabled
+        run: helm template bytetaper charts/bytetaper --set probes.liveness.enabled=false --set probes.readiness.enabled=false
+      - name: Template — networkPolicy enabled with custom ports
+        run: helm template bytetaper charts/bytetaper --set networkPolicy.enabled=true --set runtime.extProcPort=19080 --set runtime.metricsPort=19081 --set service.extProcPort=19080 --set service.metricsPort=19081
+      - name: Template — invalid policy mode should fail
+        run: helm template bytetaper charts/bytetaper --set policy.mode=invalid && exit 1 || exit 0

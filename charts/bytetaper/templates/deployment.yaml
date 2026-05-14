@@ -1,0 +1,171 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bytetaper.fullname" . }}
+  labels:
+    {{- include "bytetaper.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.deploymentAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "bytetaper.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "bytetaper.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "bytetaper.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          image: {{ include "bytetaper.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--listen-address={{ .Values.runtime.listenAddress }}"
+            - "--policy-file={{ .Values.runtime.policyPath }}"
+            - "--l2-cache-path={{ .Values.runtime.l2CachePath }}"
+            - "--metrics-address={{ .Values.runtime.metricsAddress }}"
+            - "--metrics-port={{ .Values.runtime.metricsPort }}"
+            {{- if .Values.admin.enabled }}
+            - "--admin-enable-taperquery"
+            - "--admin-address={{ .Values.admin.address }}"
+            - "--admin-port={{ .Values.admin.port }}"
+            {{- end }}
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: extproc
+              containerPort: {{ .Values.runtime.extProcPort }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.runtime.metricsPort }}
+              protocol: TCP
+            {{- if .Values.admin.enabled }}
+            - name: admin
+              containerPort: {{ .Values.admin.port }}
+              protocol: TCP
+            {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: {{ .Values.probes.liveness.port }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: {{ .Values.probes.readiness.port }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: policy
+              mountPath: {{ .Values.runtime.policyPath }}
+              subPath: policy.yaml
+              readOnly: true
+            {{- if .Values.l2Cache.enabled }}
+            - name: l2-cache
+              mountPath: {{ .Values.runtime.l2CachePath }}
+            {{- end }}
+            - name: run-dir
+              mountPath: /var/run/bytetaper
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: policy
+          {{- if eq .Values.policy.mode "inline" }}
+          configMap:
+            name: {{ include "bytetaper.fullname" . }}-policy
+          {{- else if eq .Values.policy.mode "existingConfigMap" }}
+          {{- if not .Values.policy.existingConfigMap.name }}
+          {{- fail "policy.existingConfigMap.name must be set when policy.mode is existingConfigMap" }}
+          {{- end }}
+          configMap:
+            name: {{ .Values.policy.existingConfigMap.name }}
+            items:
+              - key: {{ .Values.policy.existingConfigMap.key | quote }}
+                path: policy.yaml
+          {{- else if eq .Values.policy.mode "existingSecret" }}
+          {{- if not .Values.policy.existingSecret.name }}
+          {{- fail "policy.existingSecret.name must be set when policy.mode is existingSecret" }}
+          {{- end }}
+          secret:
+            secretName: {{ .Values.policy.existingSecret.name }}
+            items:
+              - key: {{ .Values.policy.existingSecret.key | quote }}
+                path: policy.yaml
+          {{- else }}
+          {{- fail "policy.mode must be one of: inline, existingConfigMap, existingSecret" }}
+          {{- end }}
+        {{- if .Values.l2Cache.enabled }}
+        - name: l2-cache
+          {{- if .Values.l2Cache.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ if .Values.l2Cache.persistence.existingClaim }}{{ .Values.l2Cache.persistence.existingClaim }}{{ else }}{{ include "bytetaper.fullname" . }}-l2-cache{{ end }}
+          {{- else if .Values.l2Cache.emptyDir.enabled }}
+          {{- if .Values.l2Cache.emptyDir.sizeLimit }}
+          emptyDir:
+            sizeLimit: {{ .Values.l2Cache.emptyDir.sizeLimit }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+          {{- else }}
+          {{- fail "Either l2Cache.persistence.enabled or l2Cache.emptyDir.enabled must be true when l2Cache.enabled is true" }}
+          {{- end }}
+        {{- end }}
+        - name: run-dir
+          emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
