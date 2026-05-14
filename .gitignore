@@ -88,3 +88,6 @@ benchmark-summary.json
 benchmark-summary.md
 mock-api-metrics.json
 coalescing-summary.json
+dist/
+__pycache__/
+*.py[cod]

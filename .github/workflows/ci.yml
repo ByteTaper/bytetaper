@@ -102,6 +102,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Build dev image
         run: |
@@ -176,3 +178,28 @@ jobs:
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
             docker compose --profile runtime-test run --rm bytetaper-runtime-smoke-validator
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin
+
+      - name: Check legal notice freshness
+        run: |
+          tools/supply_chain/check_notice_freshness.sh "${{ github.event.pull_request.base.sha || 'HEAD~1' }}" "${{ github.sha || 'HEAD' }}"
+
+      - name: Run supply-chain readiness check
+        run: |
+          mkdir -p dist/supply-chain
+          tools/supply_chain/check_runtime_image.sh bytetaper-runtime:ci
+
+      - name: Upload supply-chain artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-${{ github.sha }}
+          path: |
+            dist/supply-chain/
+            THIRD_PARTY_NOTICES.md
+            LICENSES/
+          retention-days: 30
