@@ -19,6 +19,9 @@ LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-ubsan-te
 
 # TSAN — concurrency (concurrency-tagged tests only)
 LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-tsan-test
+
+# Admin HTTP integration tests
+docker compose run --rm bytetaper-admin-http-test
 ```
 
 ## Notes

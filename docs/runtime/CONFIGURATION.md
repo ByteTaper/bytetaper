@@ -63,6 +63,18 @@ These variables tune the background concurrency and execution slots of `runtime:
 
 ---
 
+### TaperQuery Admin HTTP
+
+These variables control the administrative control-plane HTTP server used for dynamic policy inspection and hot-reloading.
+
+| Variable | Default | Valid Range | Effect / Description |
+|---|---|---|---|
+| `BYTETAPER_ADMIN_ENABLED` | `1` | `0`, `1` | Enable or disable the TaperQuery Admin HTTP server. |
+| `BYTETAPER_ADMIN_ADDRESS` | `"0.0.0.0"` | IP String | Bind address. For production, loopback (`127.0.0.1`) is strongly recommended. |
+| `BYTETAPER_ADMIN_PORT` | `18082` | `1..65535` | Listen port for Admin HTTP requests. |
+
+---
+
 ### Hash Hardening
 
 | Variable | Default | Valid Range | Effect / Description |

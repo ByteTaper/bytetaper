@@ -156,6 +156,11 @@ The `bytetaper-extproc` service exposes:
 
 - `18080`: ExtProc server listen port
 - `18081`: HTTP server exposing `/metrics` (Prometheus), `/healthz` (liveness), and `/readyz` (readiness) endpoints
+- `18082`: TaperQuery Admin HTTP control-plane port
+
+Get current policy: `curl -s http://localhost:18082/admin/taperquery/policy/current | jq .`
+
+See [docs/taperquery/admin-http.md](docs/taperquery/admin-http.md) for dry-run, apply, and CAS workflow.
 
 Stop the local stack:
 
@@ -189,6 +194,7 @@ Exit codes:
 - [Compression Policy](docs/compression-policy.md)
 - [Request Coalescing](docs/coalescing-policy.md)
 - [Materialized Field-Filtered Variant Cache](docs/materialized-filed-filtered-variant-cache.policy)
+- [TaperQuery Admin HTTP Guide](docs/taperquery/admin-http.md)
 - [Runtime Execution Boundaries](docs/runtime/RUNTIME_BOUNDARIES.md)
 - [Compiled Route Runtime](docs/runtime/COMPILED_ROUTE_RUNTIME.md)
 - [Body Size Contract](docs/runtime/BODY_SIZE_CONTRACT.md)
