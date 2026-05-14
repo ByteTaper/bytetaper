@@ -1,0 +1,55 @@
+name: Strict Digest Deploy ByteTaper via Helm
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: "Kubernetes namespace"
+        required: true
+        default: "bytetaper"
+      release_name:
+        description: "Helm release name"
+        required: true
+        default: "bytetaper"
+      image_digest:
+        description: "Pinned SHA256 image digest (must start with sha256:)"
+        required: true
+      chart_version:
+        description: "Helm chart version to deploy"
+        required: true
+        default: "0.1.0"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: Validate image digest input
+        run: |
+          DIGEST="${{ inputs.image_digest }}"
+          if [[ -z "${DIGEST}" || ! "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Invalid or missing image_digest input: '${DIGEST}'. Must be exactly 'sha256:' followed by 64 lowercase hex characters."
+            exit 1
+          fi
+          echo "Deploying image: ghcr.io/haluan/bytetaper-runtime@${DIGEST}"
+
+      - name: Configure Kubernetes credentials
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Deploy Helm Chart
+        run: |
+          helm upgrade --install "${{ inputs.release_name }}" charts/bytetaper \
+            --namespace "${{ inputs.namespace }}" --create-namespace \
+            --set image.digest="${{ inputs.image_digest }}" \
+            --version "${{ inputs.chart_version }}"

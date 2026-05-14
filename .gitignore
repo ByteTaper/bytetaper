@@ -91,3 +91,11 @@ coalescing-summary.json
 dist/
 __pycache__/
 *.py[cod]
+
+# Terraform generated artifacts
+.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log

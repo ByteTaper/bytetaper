@@ -1,0 +1,51 @@
+name: Validate ByteTaper Helm Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: "Kubernetes namespace"
+        required: true
+        default: "bytetaper"
+      release_name:
+        description: "Helm release name"
+        required: true
+        default: "bytetaper"
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Configure Kubernetes credentials
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Inspect Pod Status
+        run: |
+          kubectl get pods -n ${{ inputs.namespace }} -l app.kubernetes.io/instance=${{ inputs.release_name }} -o wide
+
+      - name: Await Deployment Rollout
+        run: |
+          kubectl rollout status deployment/${{ inputs.release_name }} -n ${{ inputs.namespace }} --timeout=300s
+
+      - name: Verify Health and Metrics Endpoints
+        run: |
+          kubectl port-forward svc/${{ inputs.release_name }} -n ${{ inputs.namespace }} 18081:18081 &
+          PF_PID=$!
+          sleep 3
+
+          echo "==> Probing /healthz..."
+          curl -fsS http://localhost:18081/healthz
+          echo ""
+
+          echo "==> Probing /readyz..."
+          curl -fsS http://localhost:18081/readyz
+          echo ""
+
+          echo "==> Probing /metrics..."
+          curl -fsS http://localhost:18081/metrics > /dev/null
+          echo "PASS: Metrics endpoint reachable."
+
+          kill $PF_PID

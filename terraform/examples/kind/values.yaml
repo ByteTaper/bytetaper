@@ -1,0 +1,5 @@
+image:
+  pullPolicy: Never
+
+metrics:
+  enabled: true

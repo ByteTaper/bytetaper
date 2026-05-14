@@ -252,3 +252,41 @@ jobs:
         run: helm template bytetaper charts/bytetaper --set networkPolicy.enabled=true --set runtime.extProcPort=19080 --set runtime.metricsPort=19081 --set service.extProcPort=19080 --set service.metricsPort=19081
       - name: Template — invalid policy mode should fail
         run: helm template bytetaper charts/bytetaper --set policy.mode=invalid && exit 1 || exit 0
+
+  infra-templates:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.8.0"
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive terraform/
+
+      - name: Validate module
+        run: |
+          terraform -chdir=terraform/modules/bytetaper-helm init -backend=false
+          terraform -chdir=terraform/modules/bytetaper-helm validate
+
+      - name: Validate kind example
+        run: |
+          terraform -chdir=terraform/examples/kind init -backend=false
+          terraform -chdir=terraform/examples/kind validate
+
+      - name: Validate eks example
+        run: |
+          terraform -chdir=terraform/examples/eks init -backend=false
+          terraform -chdir=terraform/examples/eks validate
+
+      - name: Validate gke example
+        run: |
+          terraform -chdir=terraform/examples/gke init -backend=false
+          terraform -chdir=terraform/examples/gke validate
+
+      - name: Validate aks example
+        run: |
+          terraform -chdir=terraform/examples/aks init -backend=false
+          terraform -chdir=terraform/examples/aks validate

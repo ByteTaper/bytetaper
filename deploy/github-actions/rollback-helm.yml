@@ -1,0 +1,40 @@
+name: Rollback ByteTaper Helm Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: "Kubernetes namespace"
+        required: true
+        default: "bytetaper"
+      release_name:
+        description: "Helm release name"
+        required: true
+        default: "bytetaper"
+      revision:
+        description: "Helm revision number to rollback to (e.g., 1)"
+        required: true
+
+jobs:
+  rollback:
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: Configure Kubernetes credentials
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Execute Helm Rollback
+        run: |
+          helm rollback "${{ inputs.release_name }}" "${{ inputs.revision }}" --namespace "${{ inputs.namespace }}"
+
+      - name: Verify Rollout Status
+        run: |
+          kubectl rollout status deployment/${{ inputs.release_name }} -n ${{ inputs.namespace }} --timeout=300s

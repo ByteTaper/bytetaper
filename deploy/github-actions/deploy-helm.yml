@@ -1,0 +1,46 @@
+name: Deploy ByteTaper via Helm
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: "Kubernetes namespace"
+        required: true
+        default: "bytetaper"
+      release_name:
+        description: "Helm release name"
+        required: true
+        default: "bytetaper"
+      image_digest:
+        description: "Pinned SHA256 image digest (e.g. sha256:abcdef...)"
+        required: true
+      chart_version:
+        description: "Helm chart version to deploy"
+        required: true
+        default: "0.1.0"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: Configure Kubernetes credentials
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Deploy Helm Chart
+        run: |
+          helm upgrade --install "${{ inputs.release_name }}" charts/bytetaper \
+            --namespace "${{ inputs.namespace }}" --create-namespace \
+            --set image.digest="${{ inputs.image_digest }}" \
+            --version "${{ inputs.chart_version }}"
