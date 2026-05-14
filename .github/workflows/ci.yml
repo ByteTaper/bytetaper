@@ -203,3 +203,16 @@ jobs:
             THIRD_PARTY_NOTICES.md
             LICENSES/
           retention-days: 30
+
+      - name: Run production compose smoke matrix
+        run: |
+          mkdir -p dist/runtime-smoke
+          tests/runtime/smoke_runtime_matrix.sh bytetaper-runtime:ci
+
+      - name: Upload runtime smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-smoke-${{ github.sha }}
+          path: dist/runtime-smoke/
+          retention-days: 30

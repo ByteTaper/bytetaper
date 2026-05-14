@@ -1,0 +1,38 @@
+services:
+  bytetaper:
+    image: ${BYTETAPER_IMAGE:-bytetaper-runtime:latest}
+    command:
+      - "--listen-address"
+      - "0.0.0.0:18080"
+      - "--policy-file"
+      - "/etc/bytetaper/policy.yaml"
+      - "--l2-cache-path"
+      - "/var/lib/bytetaper/l2-cache"
+      - "--metrics-address"
+      - "0.0.0.0"
+      - "--metrics-port"
+      - "18081"
+    volumes:
+      - ./examples/policy/bytetaper-policy.yaml:/etc/bytetaper/policy.yaml:ro
+      - bytetaper-l2-cache:/var/lib/bytetaper/l2-cache
+    ports:
+      - "18080:18080"
+      - "18081:18081"
+    healthcheck:
+      test: ["CMD-SHELL",
+             "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/bytetaper
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  bytetaper-l2-cache:
