@@ -1,0 +1,213 @@
+name: Release Publishing Pipeline
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Push image to registry and publish GitHub Release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: Export release metadata
+        run: |
+          PUBLISH="false"
+          if [[ "${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}" == "true" ]]; then
+            PUBLISH="true"
+          elif [[ "${{ github.event_name == 'workflow_dispatch' && inputs.publish == true }}" == "true" ]]; then
+            if [[ ! "${GITHUB_REF}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "ERROR: Manual publishing mode (publish=true) requires running against a valid SemVer tag ref (refs/tags/vMAJOR.MINOR.PATCH)."
+              exit 1
+            fi
+            PUBLISH="true"
+          fi
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="v0.1.0-dryrun-${GITHUB_SHA:0:12}"
+          fi
+          echo "BYTETAPER_RELEASE_PUBLISH=${PUBLISH}" >> $GITHUB_ENV
+          echo "BYTETAPER_VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "BYTETAPER_GIT_SHA=${GITHUB_SHA}" >> $GITHUB_ENV
+          echo "BYTETAPER_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+
+      - name: Log in to GitHub Container Registry
+        if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Phase 1 — Verify release inputs
+        run: tools/release/verify_release_inputs.sh
+
+      - name: Phase 2 — Build production image
+        run: |
+          docker buildx build --load --platform linux/amd64 -f docker/production.Dockerfile \
+            --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
+            --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
+            --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
+            -t ghcr.io/haluan/bytetaper-runtime:${BYTETAPER_VERSION} \
+            -t ghcr.io/haluan/bytetaper-runtime:${BYTETAPER_VERSION#v} \
+            -t ghcr.io/haluan/bytetaper-runtime:sha-${GITHUB_SHA:0:12} \
+            -t bytetaper-runtime:release .
+
+      - name: Pre-publish validation — Binary version and info
+        run: |
+          VER_OUT=$(docker run --rm bytetaper-runtime:release --version)
+          echo "$VER_OUT"
+          echo "$VER_OUT" | grep -q "ByteTaper extproc server" || (echo "ERROR: Missing title" && exit 1)
+          echo "$VER_OUT" | grep -q "version:    ${BYTETAPER_VERSION}" || (echo "ERROR: Version mismatch" && exit 1)
+          echo "$VER_OUT" | grep -q "git_sha:    ${BYTETAPER_GIT_SHA}" || (echo "ERROR: Git SHA mismatch" && exit 1)
+          echo "$VER_OUT" | grep -q "build_date: ${BYTETAPER_BUILD_DATE}" || (echo "ERROR: Build date mismatch" && exit 1)
+          echo "$VER_OUT" | grep -q "build_type: Release" || (echo "ERROR: Build type mismatch" && exit 1)
+
+      - name: Pre-publish validation — OCI labels
+        run: |
+          LABELS=$(docker image inspect --format '{{json .Config.Labels}}' bytetaper-runtime:release)
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.title"] == "ByteTaper Runtime"' >/dev/null || (echo "ERROR: Title label mismatch" && exit 1)
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.description"] == "ByteTaper API Performance Gateway runtime image"' >/dev/null || (echo "ERROR: Description label mismatch" && exit 1)
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.source"] == "https://github.com/haluan/bytetaper"' >/dev/null || (echo "ERROR: Source label mismatch" && exit 1)
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.revision"] == "'"${BYTETAPER_GIT_SHA}"'"' >/dev/null || (echo "ERROR: Revision label mismatch" && exit 1)
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.version"] == "'"${BYTETAPER_VERSION}"'"' >/dev/null || (echo "ERROR: Version label mismatch" && exit 1)
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.created"] == "'"${BYTETAPER_BUILD_DATE}"'"' >/dev/null || (echo "ERROR: Created label mismatch" && exit 1)
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.licenses"] == "AGPL-3.0-only OR LicenseRef-Commercial"' >/dev/null || (echo "ERROR: Licenses label mismatch" && exit 1)
+
+      - name: Pre-publish validation — Non-root user contract
+        run: |
+          USER=$(docker image inspect --format='{{.Config.User}}' bytetaper-runtime:release)
+          if [[ "${USER}" != "bytetaper" && "${USER}" != "1001" ]]; then
+            echo "ERROR: Expected non-root container user bytetaper or 1001, got '${USER}'"
+            exit 1
+          fi
+
+      - name: Pre-publish validation — Filesystem permission probe
+        run: |
+          docker run --rm --entrypoint /bin/sh bytetaper-runtime:release -c '
+            set -eu
+            test -w /var/lib/bytetaper/l2-cache || (echo "ERROR: L2 cache dir is not writable" && exit 1)
+            test -w /var/run/bytetaper || (echo "ERROR: Run dir is not writable" && exit 1)
+            ! test -w /usr/local/bin || (echo "ERROR: System bin dir is writable" && exit 1)
+            ! test -w /opt/bytetaper || (echo "ERROR: System opt dir is writable" && exit 1)
+            ! test -w /etc/bytetaper || (echo "ERROR: System etc dir is writable" && exit 1)
+          '
+
+      - name: Phase 3a — Runtime smoke matrix
+        run: tests/runtime/smoke_runtime_matrix.sh bytetaper-runtime:release
+
+      - name: Setup Trivy for supply-chain check
+        uses: aquasecurity/setup-trivy@v0.2.2
+        with:
+          version: v0.58.0
+
+      - name: Phase 3b — Supply-chain readiness
+        run: tools/supply_chain/check_runtime_image.sh bytetaper-runtime:release
+
+      - name: Phase 3c — Helm chart lint and package
+        run: tools/release/package_helm_chart.sh
+
+      - name: Phase 4 — Copy SBOM and vulnerability artifacts
+        run: |
+          mkdir -p dist/release
+          cp dist/supply-chain/bytetaper-supply-chain-manifest.json dist/release/bytetaper-supply-chain-manifest.json
+          cp dist/supply-chain/bytetaper-runtime-sbom.cdx.json dist/release/bytetaper-sbom.cdx.json
+          cp dist/supply-chain/bytetaper-runtime-sbom.spdx.json dist/release/bytetaper-sbom.spdx.json
+          cp dist/supply-chain/bytetaper-runtime-vulnerability-report.json dist/release/bytetaper-vulnerability-report.json
+          cp dist/supply-chain/bytetaper-runtime-vulnerability-report.sarif dist/release/bytetaper-vulnerability-report.sarif
+
+      - name: Phase 5 — Push image and capture digest
+        if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
+        run: |
+          docker push ghcr.io/haluan/bytetaper-runtime:${BYTETAPER_VERSION}
+          docker push ghcr.io/haluan/bytetaper-runtime:${BYTETAPER_VERSION#v}
+          docker push ghcr.io/haluan/bytetaper-runtime:sha-${GITHUB_SHA:0:12}
+          IMAGE_REF="ghcr.io/haluan/bytetaper-runtime:${BYTETAPER_VERSION}"
+          INSPECT_OUT=$(docker buildx imagetools inspect "${IMAGE_REF}")
+          DIGEST=$(printf "%s\n" "${INSPECT_OUT}" | awk '/^Digest:[[:space:]]*sha256:/ {print $2; exit}')
+          if ! [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Failed to capture or validate remote OCI digest for ${IMAGE_REF}"
+            echo "Inspect output was:"
+            printf "%s\n" "${INSPECT_OUT}"
+            exit 1
+          fi
+          REF="ghcr.io/haluan/bytetaper-runtime@${DIGEST}"
+          cat <<EOF > dist/release/bytetaper-runtime-image-digest.txt
+          image=ghcr.io/haluan/bytetaper-runtime
+          tag=${BYTETAPER_VERSION}
+          digest=${DIGEST}
+          reference=${REF}
+          git_sha=${BYTETAPER_GIT_SHA}
+          EOF
+
+      - name: Phase 5 (Dry Run) — Simulate digest capture
+        if: ${{ env.BYTETAPER_RELEASE_PUBLISH != 'true' }}
+        run: |
+          cat <<EOF > dist/release/bytetaper-runtime-image-digest.txt
+          image=ghcr.io/haluan/bytetaper-runtime
+          tag=${BYTETAPER_VERSION}
+          digest=sha256:0000000000000000000000000000000000000000000000000000000000000000
+          reference=ghcr.io/haluan/bytetaper-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          git_sha=${BYTETAPER_GIT_SHA}
+          EOF
+
+      - name: Phase 7 — Build release manifest
+        run: tools/release/build_release_manifest.sh
+
+      - name: Phase 8 — Generate checksums
+        run: tools/release/generate_checksums.sh
+
+      - name: Generate release body
+        run: |
+          DIGEST_REF=$(grep "^reference=" dist/release/bytetaper-runtime-image-digest.txt | cut -d= -f2)
+          CHART_PKG=$(basename $(ls dist/release/bytetaper-*.tgz))
+          cat <<EOF > dist/release/bytetaper-release-body.md
+          ## ByteTaper Runtime Release ${BYTETAPER_VERSION}
+
+          Hardened production runtime release verified across all security, SBOM, and smoke testing gates.
+
+          ### Container Contracts & References
+          * **OCI Runtime Reference:** \`${DIGEST_REF}\`
+          * **Helm Chart Package:** \`${CHART_PKG}\`
+          * **Release Manifest:** \`bytetaper-release-manifest.json\`
+          * **Supply Chain Manifest:** \`bytetaper-supply-chain-manifest.json\`
+
+          ### Artifact Checksums
+          \`\`\`text
+          $(cat dist/release/bytetaper-checksums.txt)
+          \`\`\`
+          EOF
+
+      - name: Phase 9 — Create GitHub Release
+        if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ByteTaper ${{ env.BYTETAPER_VERSION }}
+          files: dist/release/**
+          body_path: dist/release/bytetaper-release-body.md

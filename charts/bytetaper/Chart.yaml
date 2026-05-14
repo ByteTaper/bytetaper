@@ -3,7 +3,7 @@ name: bytetaper
 description: A Helm chart for deploying the ByteTaper API Performance Gateway runtime
 type: application
 version: 0.1.0
-appVersion: "0.1.0"
+appVersion: "v0.1.0"
 home: https://github.com/haluan/bytetaper
 sources:
   - https://github.com/haluan/bytetaper
