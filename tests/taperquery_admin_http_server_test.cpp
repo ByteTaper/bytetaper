@@ -55,7 +55,8 @@ static std::string escape_json(const std::string& input) {
 
 std::string send_http_request(std::uint16_t port, const std::string& method,
                               const std::string& path, const std::string& body = "",
-                              const std::string& extra_headers = "") {
+                              const std::string& extra_headers = "",
+                              bool include_content_length = true) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0)
         return "";
@@ -73,7 +74,7 @@ std::string send_http_request(std::uint16_t port, const std::string& method,
 
     std::string request = method + " " + path + " HTTP/1.1\r\n";
     request += "Host: 127.0.0.1\r\n";
-    if (!body.empty() || method == "POST") {
+    if (include_content_length && (!body.empty() || method == "POST")) {
         request += "Content-Length: " + std::to_string(body.size()) + "\r\n";
         request += "Content-Type: application/json\r\n";
     }
@@ -330,10 +331,23 @@ TEST_F(TaperQueryAdminHttpServerTest, InvalidRequests) {
         EXPECT_NE(resp.find("HTTP/1.1 405 Method Not Allowed"), std::string::npos);
     }
 
-    // Not found
+    // Not found (GET)
     {
         std::string resp = send_http_request(handle.bound_port, "GET", "/unknown");
         EXPECT_NE(resp.find("HTTP/1.1 404 Not Found"), std::string::npos);
+    }
+
+    // Not found (POST)
+    {
+        std::string resp = send_http_request(handle.bound_port, "POST", "/unknown", "{}");
+        EXPECT_NE(resp.find("HTTP/1.1 404 Not Found"), std::string::npos);
+    }
+
+    // Length Required (POST apply without Content-Length)
+    {
+        std::string resp = send_http_request(handle.bound_port, "POST", "/admin/taperquery/apply",
+                                             "{}", "", false);
+        EXPECT_NE(resp.find("HTTP/1.1 411 Length Required"), std::string::npos);
     }
 }
 

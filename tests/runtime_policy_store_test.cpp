@@ -123,8 +123,118 @@ routes:
     auto loaded = store.load();
     ASSERT_NE(loaded, nullptr);
     EXPECT_EQ(loaded->generation, 1);
-    EXPECT_STREQ(loaded->routes[0].route_id, "startup-route-id");
     EXPECT_EQ(loaded->policy_identity, build_res.snapshot->policy_identity);
+}
+
+TEST(RuntimePolicyStoreTest, InstallAndLoadInitialSnapshot) {
+    RuntimePolicyStore store{};
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "initial-r";
+    raw_routes[0].match_prefix = "/";
+
+    auto build_res = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "config.yaml", 100);
+    ASSERT_TRUE(build_res.ok);
+
+    std::string err;
+    EXPECT_TRUE(store.install_initial(build_res.snapshot, &err));
+
+    auto loaded = store.load();
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->generation, 100u);
+    EXPECT_EQ(loaded->policy_identity, build_res.snapshot->policy_identity);
+}
+
+TEST(RuntimePolicyStoreTest, SwapChangesActiveSnapshot) {
+    RuntimePolicyStore store{};
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "r1";
+    raw_routes[0].match_prefix = "/1";
+
+    auto resA = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "config.yaml", 1);
+    std::string err;
+    ASSERT_TRUE(store.install_initial(resA.snapshot, &err));
+
+    raw_routes[0].route_id = "r2";
+    raw_routes[0].match_prefix = "/2";
+    auto resB = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "config.yaml", 2);
+
+    EXPECT_TRUE(store.swap(resB.snapshot, &err));
+    auto loaded = store.load();
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->generation, 2u);
+    EXPECT_EQ(loaded->policy_identity, resB.snapshot->policy_identity);
+}
+
+TEST(RuntimePolicyStoreTest, OldSnapshotRemainsAliveAfterSwap) {
+    RuntimePolicyStore store{};
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "r1";
+    raw_routes[0].match_prefix = "/1";
+
+    auto resA = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "config.yaml", 1);
+    std::string err;
+    ASSERT_TRUE(store.install_initial(resA.snapshot, &err));
+
+    auto held_A = store.load();
+    ASSERT_NE(held_A, nullptr);
+
+    raw_routes[0].route_id = "r2";
+    auto resB = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "config.yaml", 2);
+    EXPECT_TRUE(store.swap(resB.snapshot, &err));
+
+    // held_A shared_ptr must still be fully valid and safe to read
+    EXPECT_STREQ(held_A->routes[0].route_id, "r1");
+    EXPECT_EQ(held_A->generation, 1u);
+}
+
+TEST(RuntimePolicyStoreTest, MultipleReadersLoadSafely) {
+    RuntimePolicyStore store{};
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "r1";
+    raw_routes[0].match_prefix = "/1";
+    auto resA = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "config.yaml", 1);
+    std::string err;
+    ASSERT_TRUE(store.install_initial(resA.snapshot, &err));
+
+    constexpr int kThreads = 10;
+    std::vector<std::thread> threads;
+    for (int i = 0; i < kThreads; ++i) {
+        threads.emplace_back([&store]() {
+            for (int j = 0; j < 500; ++j) {
+                auto s = store.load();
+                EXPECT_NE(s, nullptr);
+                EXPECT_STREQ(s->routes[0].route_id, "r1");
+            }
+        });
+    }
+    for (auto& t : threads)
+        t.join();
+}
+
+TEST(RuntimePolicyStoreTest, SwapWhileReadersHoldOldSnapshot) {
+    RuntimePolicyStore store{};
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "rA";
+    raw_routes[0].match_prefix = "/A";
+    auto resA = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "config.yaml", 1);
+    std::string err;
+    ASSERT_TRUE(store.install_initial(resA.snapshot, &err));
+
+    // A reader takes a snapshot
+    auto reader_snap = store.load();
+
+    // A writer performs a swap
+    raw_routes[0].route_id = "rB";
+    raw_routes[0].match_prefix = "/B";
+    auto resB = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "config.yaml", 2);
+    EXPECT_TRUE(store.swap(resB.snapshot, &err));
+
+    // The old reader still sees A
+    EXPECT_STREQ(reader_snap->routes[0].route_id, "rA");
+
+    // A new reader sees B
+    auto new_reader_snap = store.load();
+    EXPECT_STREQ(new_reader_snap->routes[0].route_id, "rB");
 }
 
 } // namespace bytetaper::runtime

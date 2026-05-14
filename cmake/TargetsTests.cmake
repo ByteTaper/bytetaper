@@ -2513,4 +2513,18 @@ if(BUILD_TESTING)
   target_include_directories(tq_apply_audit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(tq_apply_audit_test PRIVATE gtest_main bytetaper_admin bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter)
   add_test(NAME tq_apply_audit_test COMMAND tq_apply_audit_test)
+
+  add_executable(taperquery_apply_concurrency_test
+    tests/taperquery_apply_concurrency_test.cpp
+  )
+  target_include_directories(taperquery_apply_concurrency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_apply_concurrency_test PRIVATE gtest_main bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter Threads::Threads)
+  add_test(NAME taperquery_apply_concurrency_test COMMAND taperquery_apply_concurrency_test)
+
+  add_executable(taperquery_hot_reload_integration_test
+    tests/taperquery_hot_reload_integration_test.cpp
+  )
+  target_include_directories(taperquery_hot_reload_integration_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_hot_reload_integration_test PRIVATE gtest_main bytetaper_admin bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter Threads::Threads)
+  add_test(NAME taperquery_hot_reload_integration_test COMMAND taperquery_hot_reload_integration_test)
 endif()

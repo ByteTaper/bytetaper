@@ -479,4 +479,113 @@ TEST_F(TqApplyServiceTest, ConcurrencySequentialFifo) {
     EXPECT_EQ(cas_mismatch_count, kThreadCount - 1);
 }
 
+TEST_F(TqApplyServiceTest, DryRunDoesNotMutateActivePolicy) {
+    TqApplyService service(&store);
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" { route \"new_r\" when path prefix \"/new\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::DryRun;
+
+    auto res = service.execute(req);
+    EXPECT_TRUE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::DryRunReady);
+    EXPECT_EQ(store.load()->policy_identity, initial_identity);
+}
+
+TEST_F(TqApplyServiceTest, ApplySuccessMutatesActivePolicy) {
+    TqApplyService service(&store);
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" { route \"new_r\" when path prefix \"/new\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+
+    auto res = service.execute(req);
+    EXPECT_TRUE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::Applied);
+    EXPECT_NE(store.load()->policy_identity, initial_identity);
+    EXPECT_EQ(store.load()->generation, 2u);
+}
+
+TEST_F(TqApplyServiceTest, CasMismatchRejectsStaleApply) {
+    TqApplyService service(&store);
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" { route \"new_r\" when path prefix \"/new\" {} }";
+    req.expected_base_identity = "bad_base_identity";
+    req.mode = TqApplyMode::Apply;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedCasMismatch);
+    EXPECT_EQ(store.load()->policy_identity, initial_identity);
+}
+
+TEST_F(TqApplyServiceTest, ParseFailureDoesNotMutate) {
+    TqApplyService service(&store);
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" { invalid_syntax ";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedParseError);
+    EXPECT_EQ(store.load()->policy_identity, initial_identity);
+}
+
+TEST_F(TqApplyServiceTest, CompileFailureDoesNotMutate) {
+    TqApplyService service(&store);
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" { route \"r1\" when path prefix \"/\" {} route \"r1\" when "
+                 "path prefix \"/\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedCompileError);
+    EXPECT_EQ(store.load()->policy_identity, initial_identity);
+}
+
+TEST_F(TqApplyServiceTest, SemanticValidationFailureDoesNotMutate) {
+    TqApplyService service(&store);
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" { route \"r1\" when path prefix \"/api\" { cache store ttl "
+                 "60s { l1 enabled capacity 0 entries } } }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedValidation);
+    EXPECT_EQ(store.load()->policy_identity, initial_identity);
+}
+
+TEST_F(TqApplyServiceTest, NoOpApplyRejected) {
+    TqApplyService service(&store);
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"initial_route\" when path prefix "
+                 "\"/initial\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedNoChanges);
+    EXPECT_EQ(store.load()->policy_identity, initial_identity);
+}
+
+TEST_F(TqApplyServiceTest, DryRunNoOpAllowed) {
+    TqApplyService service(&store);
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"initial_route\" when path prefix "
+                 "\"/initial\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::DryRun;
+
+    auto res = service.execute(req);
+    EXPECT_TRUE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::DryRunReady);
+    EXPECT_EQ(store.load()->policy_identity, initial_identity);
+}
+
 } // namespace bytetaper::taperquery

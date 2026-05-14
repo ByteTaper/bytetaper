@@ -73,4 +73,71 @@ TEST(RuntimePolicySnapshotTest, BuildFromTqPolicyDocument) {
     EXPECT_EQ(snapshot->routes[0].route_id, snapshot->policy_ir.routes[0].route_id.c_str());
 }
 
+TEST(RuntimePolicySnapshotTest, SnapshotOwnsDataAfterSourceOutOfScope) {
+    std::shared_ptr<const RuntimePolicySnapshot> snapshot;
+    {
+        policy::RoutePolicy raw_routes[1]{};
+        raw_routes[0].route_id = "temp-route";
+        raw_routes[0].match_prefix = "/temp";
+        auto build_res = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "temp.yaml", 10);
+        ASSERT_TRUE(build_res.ok);
+        snapshot = build_res.snapshot;
+    }
+    // raw_routes is out of scope, but snapshot must own its data perfectly
+    EXPECT_STREQ(snapshot->routes[0].route_id, "temp-route");
+    EXPECT_STREQ(snapshot->routes[0].match_prefix, "/temp");
+}
+
+TEST(RuntimePolicySnapshotTest, RouteMatcherPointsIntoSnapshotRoutes) {
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "matcher-route";
+    raw_routes[0].match_prefix = "/match";
+    auto build_res = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "matcher.yaml", 11);
+    ASSERT_TRUE(build_res.ok);
+    const auto& snapshot = build_res.snapshot;
+
+    const policy::RoutePolicy* matched =
+        policy::match_route_compiled(snapshot->route_matcher, "/match/foo", nullptr);
+    ASSERT_NE(matched, nullptr);
+    // matched ptr must be exactly inside snapshot->routes
+    EXPECT_EQ(matched, &snapshot->routes[0]);
+}
+
+TEST(RuntimePolicySnapshotTest, RouteRuntimeTableBelongsToSameSnapshot) {
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "runtime-route";
+    raw_routes[0].match_prefix = "/run";
+    auto build_res = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "runtime.yaml", 12);
+    ASSERT_TRUE(build_res.ok);
+    const auto& snapshot = build_res.snapshot;
+
+    auto compiled =
+        extproc::find_compiled_route_runtime(snapshot->route_runtimes, &snapshot->routes[0]);
+    ASSERT_NE(compiled, nullptr);
+    EXPECT_STREQ(compiled->policy->route_id, "runtime-route");
+}
+
+TEST(RuntimePolicySnapshotTest, SnapshotIdentityIsStable) {
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "stable-route";
+    raw_routes[0].match_prefix = "/stable";
+
+    auto res1 = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "stable.yaml", 1);
+    auto res2 = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "stable.yaml", 2);
+
+    ASSERT_TRUE(res1.ok);
+    ASSERT_TRUE(res2.ok);
+    EXPECT_FALSE(res1.snapshot->policy_identity.empty());
+    EXPECT_EQ(res1.snapshot->policy_identity, res2.snapshot->policy_identity);
+}
+
+TEST(RuntimePolicySnapshotTest, SnapshotGenerationPreserved) {
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "gen-route";
+    raw_routes[0].match_prefix = "/gen";
+    auto res = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "gen.yaml", 999);
+    ASSERT_TRUE(res.ok);
+    EXPECT_EQ(res.snapshot->generation, 999u);
+}
+
 } // namespace bytetaper::runtime
