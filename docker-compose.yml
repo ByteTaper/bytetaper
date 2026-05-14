@@ -979,13 +979,14 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./examples/policy/coalescing-benchmark-policy.yaml:/etc/bytetaper/policy.yaml:ro
+      - bt-l2-cache:/var/lib/bytetaper/l2-cache
     command:
       - "--listen-address"
       - "0.0.0.0:18080"
       - "--policy-file"
       - "/etc/bytetaper/policy.yaml"
       - "--l2-cache-path"
-      - "/tmp/bt-runtime-test"
+      - "/var/lib/bytetaper/l2-cache"
       - "--metrics-address"
       - "0.0.0.0"
       - "--metrics-port"
@@ -996,6 +997,30 @@ services:
       timeout: 2s
       retries: 10
       start_period: 5s
+    profiles: ["runtime-test"]
+
+  bytetaper-runtime-contract-check:
+    image: bytetaper-runtime:latest
+    depends_on:
+      bytetaper-runtime-image-build:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        echo "Verifying binary version..."
+        bytetaper-extproc-server --version | grep -q "version:"
+        bytetaper-extproc-server --version | grep -q "build_type: Release"
+        echo "Verifying build-info.json..."
+        grep -q "version" /opt/bytetaper/build-info.json
+        grep -q "git_sha" /opt/bytetaper/build-info.json
+        echo "Verifying writable runtime directories..."
+        test -w /var/lib/bytetaper/l2-cache
+        test -w /var/run/bytetaper
+        echo "Verifying non-writable protected directories..."
+        ! test -w /usr/local/bin
+        ! test -w /opt/bytetaper
+        echo "SUCCESS: Runtime contract check passed!"
     profiles: ["runtime-test"]
 
   bytetaper-runtime-smoke-validator:

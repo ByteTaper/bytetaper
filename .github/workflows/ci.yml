@@ -113,6 +113,65 @@ jobs:
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
             docker compose run --rm bytetaper-build-server
 
+      - name: Export CI build metadata
+        run: |
+          echo "BYTETAPER_VERSION=${GITHUB_REF_NAME:-dev}" >> "$GITHUB_ENV"
+          echo "BYTETAPER_GIT_SHA=${GITHUB_SHA:-unknown}" >> "$GITHUB_ENV"
+          echo "BYTETAPER_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Build production image with metadata
+        run: |
+          docker build \
+            -f docker/production.Dockerfile \
+            --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
+            --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
+            --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
+            -t bytetaper-runtime:ci \
+            .
+
+      - name: Verify binary version
+        run: |
+          VERSION_OUT=$(docker run --rm bytetaper-runtime:ci --version)
+          echo "$VERSION_OUT"
+          echo "$VERSION_OUT" | grep -q "version:    ${BYTETAPER_VERSION}"
+          echo "$VERSION_OUT" | grep -q "git_sha:    ${BYTETAPER_GIT_SHA}"
+          echo "$VERSION_OUT" | grep -q "build_date: ${BYTETAPER_BUILD_DATE}"
+          echo "$VERSION_OUT" | grep -q "build_type: Release"
+
+      - name: Verify OCI labels
+        run: |
+          LABELS=$(docker image inspect bytetaper-runtime:ci --format '{{json .Config.Labels}}')
+          echo "$LABELS" | jq .
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.title"] == "ByteTaper Runtime"' > /dev/null
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.description"] == "ByteTaper API Performance Gateway runtime image"' > /dev/null
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.source"] == "https://github.com/haluan/bytetaper"' > /dev/null
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.revision"] == "'"${BYTETAPER_GIT_SHA}"'"' > /dev/null
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.version"] == "'"${BYTETAPER_VERSION}"'"' > /dev/null
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.created"] == "'"${BYTETAPER_BUILD_DATE}"'"' > /dev/null
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.licenses"] == "AGPL-3.0-only OR LicenseRef-Commercial"' > /dev/null
+
+      - name: Verify non-root user
+        run: |
+          USER=$(docker image inspect bytetaper-runtime:ci --format '{{.Config.User}}')
+          echo "User: $USER"
+          [ "$USER" = "bytetaper" ] || [ "$USER" = "1001" ]
+
+      - name: Verify runtime permission contract
+        run: |
+          docker run --rm --entrypoint /bin/sh bytetaper-runtime:ci -c '
+            set -eu
+            test -w /var/lib/bytetaper/l2-cache
+            test -w /var/run/bytetaper
+            ! test -w /usr/local/bin
+            ! test -w /opt/bytetaper
+            ! test -w /etc/bytetaper
+          '
+
+      - name: Run production runtime contract check
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+            docker compose --profile runtime-test run --rm bytetaper-runtime-contract-check
+
       - name: Run production smoke validation suite
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \

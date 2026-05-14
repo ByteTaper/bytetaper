@@ -1,0 +1,9 @@
+// SPDX-FileCopyrightText: 2026 Haluan Irsad
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
+
+#pragma once
+
+#define BYTETAPER_VERSION    "@BYTETAPER_VERSION@"
+#define BYTETAPER_GIT_SHA    "@BYTETAPER_GIT_SHA@"
+#define BYTETAPER_BUILD_DATE "@BYTETAPER_BUILD_DATE@"
+#define BYTETAPER_BUILD_TYPE "@BYTETAPER_BUILD_TYPE@"

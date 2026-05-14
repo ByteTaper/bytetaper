@@ -197,6 +197,7 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/include
       ${BYTETAPER_GENERATED_PROTO_DIR}
+      ${CMAKE_BINARY_DIR}/generated
   )
   target_link_libraries(bytetaper-extproc-server
     PRIVATE

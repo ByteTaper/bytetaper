@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.22)
 project(ByteTaper LANGUAGES CXX)
 
+set(BYTETAPER_VERSION "$ENV{BYTETAPER_VERSION}" CACHE STRING "ByteTaper version string")
+set(BYTETAPER_GIT_SHA "$ENV{BYTETAPER_GIT_SHA}" CACHE STRING "ByteTaper git SHA")
+set(BYTETAPER_BUILD_DATE "$ENV{BYTETAPER_BUILD_DATE}" CACHE STRING "ByteTaper build date")
+set(BYTETAPER_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
+
+configure_file(
+    src/runtime/build_info.h.in
+    ${CMAKE_BINARY_DIR}/generated/bytetaper_build_info.h
+    @ONLY
+)
+
 include(CTest)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 

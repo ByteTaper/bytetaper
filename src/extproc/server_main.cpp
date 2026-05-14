@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
 #include "admin/taperquery_admin_http_server.h"
+#include "bytetaper_build_info.h"
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
@@ -160,6 +161,20 @@ ServerArgs parse_args(int argc, char** argv) {
 } // namespace
 
 int main(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--version") == 0) {
+            std::printf("ByteTaper extproc server\n"
+                        "version:    %s\n"
+                        "git_sha:    %s\n"
+                        "build_date: %s\n"
+                        "build_type: %s\n"
+                        "license:    AGPL-3.0-only OR LicenseRef-Commercial\n",
+                        BYTETAPER_VERSION, BYTETAPER_GIT_SHA, BYTETAPER_BUILD_DATE,
+                        BYTETAPER_BUILD_TYPE);
+            return 0;
+        }
+    }
+
     bytetaper::observability::LoggerConfig log_config{};
     log_config.enabled = true;
     log_config.level = bytetaper::observability::LogLevel::Info;
