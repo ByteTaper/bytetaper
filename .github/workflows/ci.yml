@@ -290,3 +290,25 @@ jobs:
         run: |
           terraform -chdir=terraform/examples/aks init -backend=false
           terraform -chdir=terraform/examples/aks validate
+
+  operator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.0"
+
+      - name: Verify operator manifests
+        run: make -C operator manifests
+
+      - name: Verify generated code
+        run: make -C operator generate
+
+      - name: Run operator tests
+        run: make -C operator test
+
+      - name: Build operator image
+        run: make -C operator docker-build IMG=bytetaper-operator:ci

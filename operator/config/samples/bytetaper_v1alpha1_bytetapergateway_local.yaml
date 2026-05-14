@@ -1,0 +1,28 @@
+apiVersion: bytetaper.io/v1alpha1
+kind: ByteTaperGateway
+metadata:
+  labels:
+    app.kubernetes.io/name: bytetapergateway
+    app.kubernetes.io/instance: bytetapergateway-local
+    app.kubernetes.io/part-of: operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: operator
+  name: bytetapergateway-local
+  namespace: bytetaper
+spec:
+  replicas: 1
+  image:
+    repository: bytetaper-runtime
+    tag: local
+    pullPolicy: Never
+  policy:
+    configMapRef:
+      name: bytetaper-policy
+    key: policy.yaml
+  l2Cache:
+    enabled: true
+    persistence:
+      enabled: false
+  admin:
+    enabled: true
+    serviceEnabled: true
