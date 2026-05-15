@@ -216,6 +216,25 @@ if(BUILD_TESTING)
       COMMAND l2_cache_invalidation_test
     )
 
+    add_executable(l1_variant_invalidation_test
+      tests/l1_variant_invalidation_test.cpp
+    )
+    target_include_directories(l1_variant_invalidation_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(l1_variant_invalidation_test
+      PRIVATE
+        gtest_main
+        bytetaper_cache
+        bytetaper_prometheus_registry
+        RocksDB::RocksDB
+    )
+    add_test(
+      NAME l1_variant_invalidation_test
+      COMMAND l1_variant_invalidation_test
+    )
+
     add_executable(runtime_worker_queue_test
       tests/runtime_worker_queue_test.cpp
     )

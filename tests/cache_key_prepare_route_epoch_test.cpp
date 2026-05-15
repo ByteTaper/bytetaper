@@ -44,7 +44,31 @@ TEST_F(CacheKeyPrepareRouteEpochTest, ReadsEpochForCacheableRoute) {
     EXPECT_TRUE(std::strstr(ctx.cache_key, "epoch:2") != nullptr);
 }
 
-TEST_F(CacheKeyPrepareRouteEpochTest, BuildsVariantKeyWithSameEpoch) {
+TEST_F(CacheKeyPrepareRouteEpochTest, BuildsVariantKeyWithRouteEpoch) {
+    policy.cache.field_variant.enabled = true;
+    runtime::route_cache_epoch_register(&store, "route-1");
+    runtime::route_cache_epoch_bump(&store, "route-1", nullptr); // epoch 2
+    ctx.route_cache_epoch_store = &store;
+
+    cache_key_prepare_stage(ctx);
+
+    EXPECT_TRUE(ctx.variant_cache_key_ready);
+    EXPECT_TRUE(std::strstr(ctx.variant_cache_key, "var:GET|route-1|epoch:2|") != nullptr);
+}
+
+TEST_F(CacheKeyPrepareRouteEpochTest, BypassesVariantKeyWhenEpochMissing) {
+    policy.cache.field_variant.enabled = true;
+    // Store is present, but "route-1" is NOT registered
+    ctx.route_cache_epoch_store = &store;
+
+    cache_key_prepare_stage(ctx);
+
+    EXPECT_FALSE(ctx.cache_eligible);
+    EXPECT_FALSE(ctx.route_cache_epoch_ready);
+    EXPECT_FALSE(ctx.variant_cache_key_ready);
+}
+
+TEST_F(CacheKeyPrepareRouteEpochTest, RawAndVariantKeysShareEpoch) {
     policy.cache.field_variant.enabled = true;
     runtime::route_cache_epoch_register(&store, "route-1");
     ctx.route_cache_epoch_store = &store;
@@ -53,8 +77,22 @@ TEST_F(CacheKeyPrepareRouteEpochTest, BuildsVariantKeyWithSameEpoch) {
 
     EXPECT_TRUE(ctx.cache_key_ready);
     EXPECT_TRUE(ctx.variant_cache_key_ready);
+    EXPECT_EQ(ctx.route_cache_epoch, 1);
     EXPECT_TRUE(std::strstr(ctx.cache_key, "epoch:1") != nullptr);
     EXPECT_TRUE(std::strstr(ctx.variant_cache_key, "epoch:1") != nullptr);
+}
+
+TEST_F(CacheKeyPrepareRouteEpochTest, VariantKeyNotReadyWhenFieldVariantDisabled) {
+    policy.cache.field_variant.enabled = false;
+    runtime::route_cache_epoch_register(&store, "route-1");
+    ctx.route_cache_epoch_store = &store;
+
+    cache_key_prepare_stage(ctx);
+
+    EXPECT_TRUE(ctx.cache_key_ready);
+    EXPECT_FALSE(ctx.variant_cache_key_ready);
+    EXPECT_TRUE(std::strstr(ctx.cache_key, "epoch:1") != nullptr);
+    EXPECT_EQ(ctx.variant_cache_key[0], '\0');
 }
 
 TEST_F(CacheKeyPrepareRouteEpochTest, BypassesCacheWhenEpochStoreMissing) {

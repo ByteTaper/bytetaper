@@ -48,22 +48,74 @@ TEST_F(CacheKeyRouteEpochTest, DifferentEpochProducesDifferentKey) {
     EXPECT_STRNE(buf7, buf8);
 }
 
-TEST_F(CacheKeyRouteEpochTest, RawAndVariantKeysBothIncludeEpoch) {
+TEST_F(CacheKeyRouteEpochTest, VariantKeyIncludesEpochWhenReady) {
+    auto ki = make_input();
+    ki.variant = true;
+    ki.route_cache_epoch = 42;
+    ki.route_cache_epoch_ready = true;
+
+    EXPECT_TRUE(build_cache_key(ki, buf, sizeof(buf)));
+    EXPECT_TRUE(std::strstr(buf, "var:GET|route-1|epoch:42|") != nullptr);
+}
+
+TEST_F(CacheKeyRouteEpochTest, DifferentEpochProducesDifferentVariantKey) {
+    auto ki = make_input();
+    ki.variant = true;
+    ki.route_cache_epoch_ready = true;
+
+    char buf7[1024];
+    ki.route_cache_epoch = 7;
+    build_cache_key(ki, buf7, sizeof(buf7));
+
+    char buf8[1024];
+    ki.route_cache_epoch = 8;
+    build_cache_key(ki, buf8, sizeof(buf8));
+
+    EXPECT_STRNE(buf7, buf8);
+    EXPECT_TRUE(std::strstr(buf7, "epoch:7") != nullptr);
+    EXPECT_TRUE(std::strstr(buf8, "epoch:8") != nullptr);
+}
+
+TEST_F(CacheKeyRouteEpochTest, RawAndVariantUseSameEpoch) {
     auto ki = make_input();
     ki.route_cache_epoch = 42;
     ki.route_cache_epoch_ready = true;
 
-    // Raw
+    char raw_buf[1024];
     ki.variant = false;
-    build_cache_key(ki, buf, sizeof(buf));
-    EXPECT_TRUE(std::strstr(buf, "epoch:42") != nullptr);
-    EXPECT_TRUE(std::strncmp(buf, "GET|", 4) == 0);
+    build_cache_key(ki, raw_buf, sizeof(raw_buf));
 
-    // Variant
+    char var_buf[1024];
     ki.variant = true;
-    build_cache_key(ki, buf, sizeof(buf));
-    EXPECT_TRUE(std::strstr(buf, "epoch:42") != nullptr);
-    EXPECT_TRUE(std::strncmp(buf, "var:GET|", 8) == 0);
+    build_cache_key(ki, var_buf, sizeof(var_buf));
+
+    // Both should have "epoch:42"
+    EXPECT_TRUE(std::strstr(raw_buf, "epoch:42") != nullptr);
+    EXPECT_TRUE(std::strstr(var_buf, "epoch:42") != nullptr);
+
+    // Variant has var: prefix but the rest of the epoch segment should be identical
+    // raw: GET|route-1|epoch:42|...
+    // var: var:GET|route-1|epoch:42|...
+    EXPECT_TRUE(std::strstr(var_buf, "GET|route-1|epoch:42|") != nullptr);
+}
+
+TEST_F(CacheKeyRouteEpochTest, VariantKeyStillSortsAndDeduplicatesFields) {
+    auto ki = make_input();
+    ki.variant = true;
+    ki.route_cache_epoch = 7;
+    ki.route_cache_epoch_ready = true;
+
+    char fields[3][policy::kMaxFieldNameLen] = {};
+    std::strncpy(fields[0], "b", policy::kMaxFieldNameLen - 1);
+    std::strncpy(fields[1], "a", policy::kMaxFieldNameLen - 1);
+    std::strncpy(fields[2], "b", policy::kMaxFieldNameLen - 1);
+    ki.selected_fields = fields;
+    ki.selected_field_count = 3;
+
+    EXPECT_TRUE(build_cache_key(ki, buf, sizeof(buf)));
+    // Should contain epoch and sorted/deduped fields "a,b"
+    EXPECT_TRUE(std::strstr(buf, "epoch:7") != nullptr);
+    EXPECT_TRUE(std::strstr(buf, "|a,b|") != nullptr);
 }
 
 TEST_F(CacheKeyRouteEpochTest, PreservesOldBehaviorWhenEpochNotReady) {
