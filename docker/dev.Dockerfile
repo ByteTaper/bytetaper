@@ -1,4 +1,4 @@
-ARG ROCKSPACK_IMAGE=haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d
+ARG ROCKSPACK_IMAGE=haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d-devel
 
 FROM ${ROCKSPACK_IMAGE}
 

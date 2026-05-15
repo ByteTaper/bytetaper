@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Haluan Irsad
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
-ARG ROCKSPACK_IMAGE=haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d
+ARG ROCKSPACK_IMAGE=haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d-devel
 
 ARG BYTETAPER_VERSION=dev
 ARG BYTETAPER_GIT_SHA=unknown
