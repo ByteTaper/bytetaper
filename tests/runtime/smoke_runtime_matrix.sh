@@ -10,23 +10,33 @@ COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 OUT_DIR="${BYTETAPER_RUNTIME_SMOKE_OUT_DIR:-dist/runtime-smoke}"
 mkdir -p "${OUT_DIR}"
 
+if docker compose version >/dev/null 2>&1; then
+    COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE=(docker-compose)
+else
+    echo "ERROR: neither 'docker compose' nor 'docker-compose' is available"
+    exit 127
+fi
+
 echo "Starting smoke runtime matrix for image: $IMAGE"
+echo "Using Compose command: ${COMPOSE[*]}"
 
 cleanup() {
     echo "Collecting post-test artifacts..."
-    docker-compose -f "${COMPOSE_FILE}" ps > "${OUT_DIR}/compose-ps.txt" 2>&1 || true
-    docker-compose -f "${COMPOSE_FILE}" logs bytetaper > "${OUT_DIR}/bytetaper-logs.txt" 2>&1 || true
+    "${COMPOSE[@]}" -f "${COMPOSE_FILE}" ps > "${OUT_DIR}/compose-ps.txt" 2>&1 || true
+    "${COMPOSE[@]}" -f "${COMPOSE_FILE}" logs bytetaper > "${OUT_DIR}/bytetaper-logs.txt" 2>&1 || true
     # capture container id safely
-    CID=$(docker-compose -f "${COMPOSE_FILE}" ps -q bytetaper 2>/dev/null || true)
+    CID=$("${COMPOSE[@]}" -f "${COMPOSE_FILE}" ps -q bytetaper 2>/dev/null || true)
     if [ -n "$CID" ]; then
         docker inspect "$CID" > "${OUT_DIR}/inspect-bytetaper.json" 2>/dev/null || true
     fi
     echo "Tearing down compose stack..."
-    docker-compose -f "${COMPOSE_FILE}" down -v || true
+    "${COMPOSE[@]}" -f "${COMPOSE_FILE}" down -v || true
 }
 trap cleanup EXIT
 
-docker-compose -f "${COMPOSE_FILE}" up -d
+"${COMPOSE[@]}" -f "${COMPOSE_FILE}" up -d
 
 echo "Waiting for container readiness..."
 # Wait up to 30 seconds for readiness
@@ -44,7 +54,7 @@ done
 
 if [ $READY -eq 0 ]; then
     echo "ERROR: Container failed to become ready within ${TIMEOUT}s."
-    docker-compose -f "${COMPOSE_FILE}" logs bytetaper
+    "${COMPOSE[@]}" -f "${COMPOSE_FILE}" logs bytetaper
     exit 1
 fi
 echo "Container ready."
@@ -54,7 +64,7 @@ curl -fsS http://localhost:18081/healthz > "${OUT_DIR}/healthz.txt" || true
 curl -fsS http://localhost:18081/readyz > "${OUT_DIR}/readyz.txt" || true
 curl -fsS http://localhost:18081/metrics > "${OUT_DIR}/metrics.txt" || true
 
-CONTAINER_NAME=$(docker-compose -f "${COMPOSE_FILE}" ps -q bytetaper)
+CONTAINER_NAME=$("${COMPOSE[@]}" -f "${COMPOSE_FILE}" ps -q bytetaper)
 
 echo "Running assertion suite..."
 tests/runtime/assert_runtime_health.sh "$CONTAINER_NAME"
