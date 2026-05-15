@@ -5,6 +5,7 @@
 #include "cache/l1_cache.h"
 #include "metrics/cache_metrics.h"
 #include "policy/route_policy.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/l1_cache_store_stage.h"
 
@@ -19,9 +20,12 @@ protected:
     void SetUp() override {
         l1_cache_ptr_ = std::make_unique<cache::L1Cache>();
         l1_init(l1_cache_ptr_.get());
+        store_.count = 0;
+        runtime::route_cache_epoch_register(&store_, "rt1");
     }
 
     std::unique_ptr<cache::L1Cache> l1_cache_ptr_;
+    runtime::RouteCacheEpochStore store_;
     policy::RoutePolicy policy_{};
     metrics::CacheMetrics cache_metrics_{};
 };
@@ -35,6 +39,7 @@ TEST_F(L1CacheStoreStageTest, EligibleResponseStored) {
     ctx.matched_policy = &policy_;
     ctx.l1_cache = l1_cache_ptr_.get();
     ctx.cache_metrics = &cache_metrics_;
+    ctx.route_cache_epoch_store = &store_;
     ctx.request_method = policy::HttpMethod::Get;
     ctx.request_epoch_ms = 1000;
     std::strncpy(ctx.raw_path, "/api/items", sizeof(ctx.raw_path) - 1);
@@ -60,6 +65,8 @@ TEST_F(L1CacheStoreStageTest, EligibleResponseStored) {
     ki.route_id = "rt1";
     ki.path = "/api/items";
     ki.policy_version = "rt1";
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     ASSERT_TRUE(cache::build_cache_key(ki, key_buf, sizeof(key_buf)));
 
     cache::CacheEntry hit{};
@@ -80,6 +87,7 @@ TEST_F(L1CacheStoreStageTest, NonGetNotStored) {
     ctx.matched_policy = &policy_;
     ctx.l1_cache = l1_cache_ptr_.get();
     ctx.cache_metrics = &cache_metrics_;
+    ctx.route_cache_epoch_store = &store_;
     ctx.request_method = policy::HttpMethod::Post; // Non-GET
     ctx.response_status_code = 200;
     ctx.response_body = "body";
@@ -110,6 +118,7 @@ TEST_F(L1CacheStoreStageTest, Non2xxNotStored) {
     ctx.matched_policy = &policy_;
     ctx.l1_cache = l1_cache_ptr_.get();
     ctx.cache_metrics = &cache_metrics_;
+    ctx.route_cache_epoch_store = &store_;
     ctx.request_method = policy::HttpMethod::Get;
     ctx.response_status_code = 404; // Non-2xx
     ctx.response_body = "body";
@@ -140,6 +149,7 @@ TEST_F(L1CacheStoreStageTest, MissingKeyNotStored) {
     ctx.matched_policy = &policy_;
     ctx.l1_cache = l1_cache_ptr_.get();
     ctx.cache_metrics = &cache_metrics_;
+    ctx.route_cache_epoch_store = &store_;
     ctx.request_method = policy::HttpMethod::Get;
     ctx.response_status_code = 200;
     ctx.response_body = "body";

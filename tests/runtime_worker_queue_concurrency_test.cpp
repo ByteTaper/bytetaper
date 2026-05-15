@@ -6,6 +6,7 @@
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
 #include "metrics/prometheus_registry.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "runtime/worker_queue.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/coalescing_decision_stage.h"
@@ -33,6 +34,9 @@ public:
         config.worker_count = 2;
         worker_queue_init(worker_queue.get(), config);
 
+        store.count = 0;
+        runtime::route_cache_epoch_register(&store, "test_route");
+
         resources.l1_cache = l1_cache.get();
         resources.runtime_metrics = &metrics_reg->runtime_metrics;
     }
@@ -44,6 +48,7 @@ public:
     std::unique_ptr<WorkerQueue> worker_queue;
     std::unique_ptr<cache::L1Cache> l1_cache;
     std::unique_ptr<metrics::MetricsRegistry> metrics_reg;
+    runtime::RouteCacheEpochStore store;
     WorkerQueueResources resources;
 };
 
@@ -115,6 +120,7 @@ TEST_F(WorkerQueueConcurrencyTest, L1StoreBeforeLeaderCompletion) {
     ctx.coalescing_metrics = &this->metrics_reg->coalescing_metrics;
     ctx.runtime_metrics = &this->metrics_reg->runtime_metrics;
     ctx.worker_queue = this->worker_queue.get();
+    ctx.route_cache_epoch_store = &this->store;
     ctx.response_status_code = 200;
     ctx.request_epoch_ms = 1000;
 
@@ -149,6 +155,8 @@ TEST_F(WorkerQueueConcurrencyTest, L1StoreBeforeLeaderCompletion) {
     ki.route_id = policy.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     char key_buf[cache::kCacheKeyMaxLen] = {};
     cache::build_cache_key(ki, key_buf, sizeof(key_buf));
 
@@ -166,6 +174,7 @@ TEST_F(WorkerQueueConcurrencyTest, FollowerCanReadL1AfterLeaderCompletion) {
     leader_ctx.coalescing_metrics = &this->metrics_reg->coalescing_metrics;
     leader_ctx.runtime_metrics = &this->metrics_reg->runtime_metrics;
     leader_ctx.worker_queue = this->worker_queue.get();
+    leader_ctx.route_cache_epoch_store = &this->store;
     leader_ctx.response_status_code = 200;
     leader_ctx.request_epoch_ms = 1000;
 
@@ -203,6 +212,7 @@ TEST_F(WorkerQueueConcurrencyTest, FollowerCanReadL1AfterLeaderCompletion) {
     follower_ctx.coalescing_metrics = &this->metrics_reg->coalescing_metrics;
     follower_ctx.coalescing_registry = registry.get();
     follower_ctx.matched_policy = &policy;
+    follower_ctx.route_cache_epoch_store = &this->store;
     ::strncpy(follower_ctx.raw_path, "/shared", sizeof(follower_ctx.raw_path) - 1);
 
     follower_ctx.coalescing_decision.action = coalescing::CoalescingAction::Follower;

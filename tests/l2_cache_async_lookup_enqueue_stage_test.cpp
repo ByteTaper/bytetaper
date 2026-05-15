@@ -7,6 +7,7 @@
 #include "cache/l2_disk_cache.h"
 #include "hash/hash.h"
 #include "metrics/runtime_metrics.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "runtime/worker_queue.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/l2_cache_async_lookup_enqueue_stage.h"
@@ -36,10 +37,14 @@ protected:
         policy.cache.behavior = policy::CacheBehavior::Store;
         policy.route_id = "test_route";
 
+        store.count = 0;
+        runtime::route_cache_epoch_register(&store, policy.route_id);
+
         ctx.matched_policy = &policy;
         ctx.l1_cache = l1_cache.get();
         ctx.l2_cache = l2_cache;
         ctx.worker_queue = worker_queue.get();
+        ctx.route_cache_epoch_store = &store;
         ctx.runtime_metrics = &metrics;
         std::strcpy(ctx.raw_path, "/path");
         ctx.request_method = policy::HttpMethod::Get;
@@ -53,6 +58,7 @@ protected:
     std::unique_ptr<cache::L1Cache> l1_cache;
     cache::L2DiskCache* l2_cache;
     std::unique_ptr<runtime::WorkerQueue> worker_queue;
+    runtime::RouteCacheEpochStore store;
     metrics::RuntimeMetrics metrics{};
     policy::RoutePolicy policy;
     apg::ApgTransformContext ctx;
@@ -106,6 +112,8 @@ TEST_F(L2CacheAsyncLookupEnqueueStageTest, DuplicateKeySkipped) {
     ki.policy_version = policy.route_id;
     ki.selected_field_count = ctx.selected_field_count;
     ki.selected_fields = ctx.selected_fields;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     cache::build_cache_key(ki, actual_key, sizeof(actual_key));
 
     // Fill shards using the same key
@@ -136,6 +144,8 @@ TEST_F(L2CacheAsyncLookupEnqueueStageTest, QueueFullContinuesPendingCleared) {
     ki.route_id = policy.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     cache::build_cache_key(ki, actual_key, sizeof(actual_key));
 
     // Find shard for actual_key

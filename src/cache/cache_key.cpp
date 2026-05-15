@@ -98,6 +98,19 @@ bool build_cache_key(const CacheKeyInput& input, char* out_buf, std::size_t out_
     if (!key_append_char(&pos, &remaining, '|')) {
         return false;
     }
+
+    if (input.route_cache_epoch_ready) {
+        char epoch_buf[32];
+        int n = std::snprintf(epoch_buf, sizeof(epoch_buf), "epoch:%llu|",
+                              static_cast<unsigned long long>(input.route_cache_epoch));
+        if (n < 0 || static_cast<std::size_t>(n) >= sizeof(epoch_buf)) {
+            return false;
+        }
+        if (!key_append(&pos, &remaining, epoch_buf, static_cast<std::size_t>(n))) {
+            return false;
+        }
+    }
+
     const std::size_t path_len = std::strlen(input.path);
     if (!key_append(&pos, &remaining, input.path, path_len)) {
         return false;

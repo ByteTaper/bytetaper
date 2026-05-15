@@ -7,6 +7,7 @@
 #include "coalescing/inflight_registry.h"
 #include "extproc/default_pipelines.h"
 #include "policy/route_policy.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "runtime/worker_queue.h"
 #include "stages/coalescing_follower_wait_stage.h"
 
@@ -38,10 +39,14 @@ protected:
         policy.cache.behavior = policy::CacheBehavior::Store;
         policy.coalescing.enabled = true;
 
+        store.count = 0;
+        runtime::route_cache_epoch_register(&store, policy.route_id);
+
         ctx.matched_policy = &policy;
         ctx.l1_cache = l1.get();
         ctx.coalescing_registry = registry.get();
         ctx.worker_queue = q.get();
+        ctx.route_cache_epoch_store = &store;
         ctx.coalescing_decision.action = coalescing::CoalescingAction::Bypass;
 
         std::strcpy(ctx.raw_path, "/test");
@@ -55,6 +60,7 @@ protected:
     std::unique_ptr<cache::L1Cache> l1;
     std::unique_ptr<coalescing::InFlightRegistry> registry;
     std::unique_ptr<runtime::WorkerQueue> q;
+    runtime::RouteCacheEpochStore store;
     policy::RoutePolicy policy;
     apg::ApgTransformContext ctx;
 };
@@ -67,6 +73,8 @@ TEST_F(CacheHotPathTailRegressionTest, HotPathL1HitLatencyBoundedUnderLoad) {
     ki.path = ctx.raw_path;
     ki.route_id = policy.route_id;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     cache::build_cache_key(ki, entry.key, sizeof(entry.key));
 
     entry.expires_at_epoch_ms = 2000000000000LL; // far future

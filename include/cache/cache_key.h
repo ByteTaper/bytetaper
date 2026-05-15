@@ -25,6 +25,8 @@ struct CacheKeyInput {
     const char (*selected_fields)[policy::kMaxFieldNameLen] = nullptr;
     std::size_t selected_field_count = 0;
     const char* policy_version = nullptr;
+    std::uint64_t route_cache_epoch = 0;
+    bool route_cache_epoch_ready = false;
     CacheVaryKeyPart vary_headers[policy::kMaxCacheVaryHeaders] = {};
     std::size_t vary_header_count = 0;
     bool private_cache = false;       // when true, auth_scope is required

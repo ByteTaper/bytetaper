@@ -6,6 +6,7 @@
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
 #include "metrics/coalescing_metrics.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/coalescing_follower_wait_stage.h"
 
@@ -28,8 +29,12 @@ protected:
         policy.cache.behavior = policy::CacheBehavior::Store;
         policy.route_id = "12345";
 
+        store_.count = 0;
+        runtime::route_cache_epoch_register(&store_, policy.route_id);
+
         ctx.matched_policy = &policy;
         ctx.l1_cache = l1_cache.get();
+        ctx.route_cache_epoch_store = &store_;
         std::strcpy(ctx.raw_path, "/path");
         ctx.request_method = policy::HttpMethod::Get;
 
@@ -53,6 +58,7 @@ protected:
     std::unique_ptr<coalescing::InFlightRegistry> registry;
 
     std::unique_ptr<cache::L1Cache> l1_cache;
+    runtime::RouteCacheEpochStore store_;
     policy::RoutePolicy policy;
     apg::ApgTransformContext ctx;
     std::unique_ptr<metrics::CoalescingMetrics> coalescing_metrics;
@@ -78,6 +84,8 @@ TEST_F(CoalescingFollowerWaitTest, ImmediateHitReturnsSkip) {
     ki.route_id = policy.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
 
     cache::build_cache_key(ki, entry.key, sizeof(entry.key));
 
@@ -143,6 +151,8 @@ TEST_F(CoalescingFollowerWaitTest, FollowerDirectWait_L1Ready) {
     ki.route_id = policy.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
 
     cache::build_cache_key(ki, entry.key, sizeof(entry.key));
     cache::l1_put(l1_cache.get(), entry);
@@ -262,6 +272,8 @@ TEST_F(CoalescingFollowerWaitTest, FollowerDirectWait_L2Ready) {
     ki.route_id = policy.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
 
     cache::build_cache_key(ki, entry.key, sizeof(entry.key));
 
@@ -485,6 +497,8 @@ TEST_F(CoalescingFollowerWaitTest, ProbeMetrics_ProbeLatencyRecorded) {
     ki.route_id = policy.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
 
     cache::build_cache_key(ki, entry.key, sizeof(entry.key));
 

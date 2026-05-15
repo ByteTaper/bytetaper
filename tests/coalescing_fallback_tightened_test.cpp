@@ -7,6 +7,7 @@
 #include "coalescing/inflight_registry.h"
 #include "hash/hash.h"
 #include "policy/route_policy.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/coalescing_follower_wait_stage.h"
 
@@ -34,7 +35,11 @@ protected:
         policy.coalescing.backend_timeout_ms = 150;
         policy.coalescing.handoff_buffer_ms = 50;
 
+        store.count = 0;
+        runtime::route_cache_epoch_register(&store, "test-route");
+
         ctx.matched_policy = &policy;
+        ctx.route_cache_epoch_store = &store;
         ctx.l1_cache = l1.get();
         ctx.coalescing_registry = registry.get();
         ctx.coalescing_decision.action = coalescing::CoalescingAction::Follower;
@@ -78,6 +83,7 @@ protected:
 
     std::unique_ptr<coalescing::InFlightRegistry> registry;
     std::unique_ptr<cache::L1Cache> l1;
+    runtime::RouteCacheEpochStore store;
     policy::RoutePolicy policy;
     apg::ApgTransformContext ctx;
 };
@@ -95,6 +101,8 @@ TEST_F(CoalescingFallbackTightenedTest, FinalL1HitSavesFollowerBeforeFallback) {
         ki.path = ctx.raw_path;
         ki.route_id = policy.route_id;
         ki.policy_version = policy.route_id;
+        ki.route_cache_epoch = 1;
+        ki.route_cache_epoch_ready = true;
         char key[256];
         cache::build_cache_key(ki, key, sizeof(key));
 
@@ -130,6 +138,8 @@ TEST_F(CoalescingFallbackTightenedTest, WaiterCountDecrementedOnPreWaitL1Hit) {
     ki.path = ctx.raw_path;
     ki.route_id = policy.route_id;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     char key[256];
     cache::build_cache_key(ki, key, sizeof(key));
     populate_l1(key);
@@ -156,6 +166,8 @@ TEST_F(CoalescingFallbackTightenedTest, WaiterCountDecrementedOnPostWaitL1Hit) {
         ki.path = ctx.raw_path;
         ki.route_id = policy.route_id;
         ki.policy_version = policy.route_id;
+        ki.route_cache_epoch = 1;
+        ki.route_cache_epoch_ready = true;
         char key[256];
         cache::build_cache_key(ki, key, sizeof(key));
 

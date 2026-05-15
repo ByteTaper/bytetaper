@@ -9,6 +9,7 @@
 #include "coalescing/inflight_registry.h"
 #include "hash/hash.h"
 #include "metrics/runtime_metrics.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "runtime/worker_queue.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/l2_cache_async_store_enqueue_stage.h"
@@ -43,7 +44,11 @@ protected:
         runtime::worker_queue_init(worker_queue.get(), wq_config);
         worker_queue->running = true;
 
+        store.count = 0;
+        runtime::route_cache_epoch_register(&store, "test_route");
+
         ctx.matched_policy = &policy;
+        ctx.route_cache_epoch_store = &store;
         ctx.l1_cache = l1_cache.get();
         ctx.l2_cache = l2_cache;
         ctx.worker_queue = worker_queue.get();
@@ -63,6 +68,7 @@ protected:
     std::unique_ptr<cache::L1Cache> l1_cache;
     cache::L2DiskCache* l2_cache;
     std::unique_ptr<runtime::WorkerQueue> worker_queue;
+    runtime::RouteCacheEpochStore store;
     metrics::RuntimeMetrics metrics{};
     policy::RoutePolicy policy;
     apg::ApgTransformContext ctx;
@@ -110,6 +116,8 @@ TEST_F(L2CacheAsyncStoreEnqueueStageTest, L2StoreQueueFullDoesNotFailResponse) {
     ki.route_id = policy.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     cache::build_cache_key(ki, actual_key, sizeof(actual_key));
 
     // Find shard for actual_key

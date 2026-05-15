@@ -219,6 +219,36 @@ if(BUILD_TESTING)
       COMMAND runtime_worker_queue_test
     )
 
+    add_executable(route_cache_epoch_store_test
+      tests/route_cache_epoch_store_test.cpp
+    )
+    target_link_libraries(route_cache_epoch_store_test
+      PRIVATE
+        gtest_main
+        bytetaper_runtime
+    )
+    add_test(NAME route_cache_epoch_store_test COMMAND route_cache_epoch_store_test)
+
+    add_executable(cache_key_route_epoch_test
+      tests/cache_key_route_epoch_test.cpp
+    )
+    target_link_libraries(cache_key_route_epoch_test
+      PRIVATE
+        gtest_main
+        bytetaper_cache
+    )
+    add_test(NAME cache_key_route_epoch_test COMMAND cache_key_route_epoch_test)
+
+    add_executable(cache_key_prepare_route_epoch_test
+      tests/cache_key_prepare_route_epoch_test.cpp
+    )
+    target_link_libraries(cache_key_prepare_route_epoch_test
+      PRIVATE
+        gtest_main
+        bytetaper_stages
+    )
+    add_test(NAME cache_key_prepare_route_epoch_test COMMAND cache_key_prepare_route_epoch_test)
+
     add_executable(l1_cache_lookup_stage_test
       tests/l1_cache_lookup_stage_test.cpp
     )

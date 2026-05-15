@@ -6,6 +6,7 @@
 #include "coalescing/inflight_registry.h"
 #include "metrics/coalescing_metrics.h"
 #include "metrics/runtime_metrics.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/coalescing_follower_wait_stage.h"
 #include "stages/coalescing_leader_completion_stage.h"
@@ -24,9 +25,12 @@ protected:
         l1_cache_ptr_ = std::make_unique<cache::L1Cache>();
         l1_init(l1_cache_ptr_.get());
         coalescing::registry_init(&registry_);
+        store_.count = 0;
+        runtime::route_cache_epoch_register(&store_, "rt1");
 
         ctx.l1_cache = l1_cache_ptr_.get();
         ctx.coalescing_registry = &registry_;
+        ctx.route_cache_epoch_store = &store_;
         ctx.coalescing_decision.action = coalescing::CoalescingAction::Follower;
         std::strcpy(ctx.coalescing_decision.key, "c_key:test:1:/api");
 
@@ -41,6 +45,7 @@ protected:
 
     std::unique_ptr<cache::L1Cache> l1_cache_ptr_;
     coalescing::InFlightRegistry registry_;
+    runtime::RouteCacheEpochStore store_;
     apg::ApgTransformContext ctx;
     policy::RoutePolicy policy;
 };
@@ -52,6 +57,8 @@ TEST_F(CoalescingCacheIntegrationTest, FollowerObservesCacheHit) {
     ki.route_id = policy.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     char key_buf[cache::kCacheKeyMaxLen] = {};
     ASSERT_TRUE(cache::build_cache_key(ki, key_buf, sizeof(key_buf)));
 
@@ -153,6 +160,7 @@ TEST_F(CoalescingCacheIntegrationTest, LargeBodyLeaderDoesNotPublishL2ReadyToFol
     follower_ctx.coalescing_metrics = &coalescing_metrics_;
     follower_ctx.runtime_metrics = &runtime_metrics_;
     follower_ctx.matched_policy = &policy;
+    follower_ctx.route_cache_epoch_store = &store_;
     follower_ctx.request_epoch_ms = 1000;
     std::strncpy(follower_ctx.raw_path, "/api", sizeof(follower_ctx.raw_path) - 1);
 

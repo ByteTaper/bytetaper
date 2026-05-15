@@ -8,6 +8,7 @@
 #include "coalescing/inflight_registry.h"
 #include "extproc/default_pipelines.h"
 #include "policy/route_policy.h"
+#include "runtime/route_cache_epoch_store.h"
 
 #include <cstring>
 #include <gtest/gtest.h>
@@ -24,6 +25,10 @@ TEST(CacheHotPathRegression, L1HitDoesNotTouchCoalescingRegistry) {
     policy.cache.behavior = policy::CacheBehavior::Store;
     policy.cache.ttl_seconds = 60;
 
+    runtime::RouteCacheEpochStore store{};
+    store.count = 0;
+    runtime::route_cache_epoch_register(&store, policy.route_id);
+
     cache::CacheEntry entry{};
     // Build a matching cache key and populate L1.
     cache::CacheKeyInput ki{};
@@ -31,6 +36,8 @@ TEST(CacheHotPathRegression, L1HitDoesNotTouchCoalescingRegistry) {
     ki.route_id = policy.route_id;
     ki.path = "/test";
     ki.policy_version = policy.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     ASSERT_TRUE(cache::build_cache_key(ki, entry.key, sizeof(entry.key)));
     entry.status_code = 200;
     const char body[] = "cached-response";
@@ -51,6 +58,7 @@ TEST(CacheHotPathRegression, L1HitDoesNotTouchCoalescingRegistry) {
     ctx.matched_policy = &policy;
     ctx.l1_cache = l1.get();
     ctx.coalescing_registry = registry.get();
+    ctx.route_cache_epoch_store = &store;
     ctx.request_epoch_ms = 5000;
     ctx.request_method = policy::HttpMethod::Get;
     std::strcpy(ctx.raw_path, "/test");
@@ -83,10 +91,15 @@ TEST(CacheHotPathRegression, L1MissStillEvaluatesCoalescing) {
     auto registry = std::make_unique<coalescing::InFlightRegistry>();
     coalescing::registry_init(registry.get());
 
+    runtime::RouteCacheEpochStore store{};
+    store.count = 0;
+    runtime::route_cache_epoch_register(&store, policy.route_id);
+
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &policy;
     ctx.l1_cache = l1.get();
     ctx.coalescing_registry = registry.get();
+    ctx.route_cache_epoch_store = &store;
     ctx.request_epoch_ms = 5000;
     ctx.request_method = policy::HttpMethod::Get;
     std::strcpy(ctx.raw_path, "/test");

@@ -4,6 +4,7 @@
 #include "cache/cache_key.h"
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/l1_cache_lookup_stage.h"
 #include "stages/l2_cache_lookup_stage.h"
@@ -24,6 +25,8 @@ protected:
         ASSERT_NE(l2_, nullptr);
         l1_ = std::make_unique<cache::L1Cache>();
         cache::l1_init(l1_.get());
+        store_.count = 0;
+        runtime::route_cache_epoch_register(&store_, "rt1");
     }
 
     void TearDown() override {
@@ -38,6 +41,8 @@ protected:
         ki.route_id = pol->route_id;
         ki.path = path;
         ki.policy_version = pol->route_id;
+        ki.route_cache_epoch = 1;
+        ki.route_cache_epoch_ready = true;
         char key_buf[cache::kCacheKeyMaxLen] = {};
         cache::build_cache_key(ki, key_buf, sizeof(key_buf));
 
@@ -53,12 +58,14 @@ protected:
         ctx->matched_policy = pol;
         ctx->l2_cache = l2_;
         ctx->l1_cache = l1_.get();
+        ctx->route_cache_epoch_store = &store_;
         std::strncpy(ctx->raw_path, path, sizeof(ctx->raw_path) - 1);
         return l2_;
     }
 
     cache::L2DiskCache* l2_ = nullptr;
     std::unique_ptr<cache::L1Cache> l1_;
+    runtime::RouteCacheEpochStore store_;
 };
 
 TEST_F(L2PromotionTest, L2HitPromotesToL1) {
@@ -78,6 +85,8 @@ TEST_F(L2PromotionTest, L2HitPromotesToL1) {
     ki.route_id = pol.route_id;
     ki.path = "/api/items";
     ki.policy_version = pol.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     char key_buf[cache::kCacheKeyMaxLen] = {};
     cache::build_cache_key(ki, key_buf, sizeof(key_buf));
     char body_buf[cache::kL1MaxBodySize];
@@ -113,6 +122,7 @@ TEST_F(L2PromotionTest, SecondRequestHitsL1AfterPromotion) {
     apg::ApgTransformContext ctx2{};
     ctx2.matched_policy = &pol;
     ctx2.l1_cache = l1_.get();
+    ctx2.route_cache_epoch_store = &store_;
     ctx2.request_method = policy::HttpMethod::Get;
     ctx2.request_epoch_ms = 1000;
     std::strncpy(ctx2.raw_path, "/api/items", sizeof(ctx2.raw_path) - 1);
@@ -144,6 +154,8 @@ TEST_F(L2PromotionTest, ExpiredL2NotPromoted) {
     ki.route_id = pol.route_id;
     ki.path = "/api/items";
     ki.policy_version = pol.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     char key_buf[cache::kCacheKeyMaxLen] = {};
     cache::build_cache_key(ki, key_buf, sizeof(key_buf));
 
@@ -160,6 +172,7 @@ TEST_F(L2PromotionTest, NullL1CacheSkipsPromotion) {
     apg::ApgTransformContext ctx{};
     setup_l2_entry(&ctx, &pol, "/api/items", 9999999);
     ctx.request_method = policy::HttpMethod::Get;
+    ctx.route_cache_epoch_store = &store_;
     ctx.l1_cache = nullptr; // Explicitly null
 
     cache_key_prepare_stage(ctx);

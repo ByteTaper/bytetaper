@@ -3,6 +3,7 @@
 
 #include "cache/cache_key.h"
 #include "cache/l2_disk_cache.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/l2_cache_lookup_stage.h"
 
@@ -20,6 +21,8 @@ protected:
         cache::l2_destroy(kTestDbPath);
         l2_ = cache::l2_open(kTestDbPath);
         ASSERT_NE(l2_, nullptr);
+        store_.count = 0;
+        runtime::route_cache_epoch_register(&store_, "rt1");
     }
 
     void TearDown() override {
@@ -37,6 +40,8 @@ protected:
         ki.route_id = pol->route_id;
         ki.path = path;
         ki.policy_version = pol->route_id;
+        ki.route_cache_epoch = 1;
+        ki.route_cache_epoch_ready = true;
         char key_buf[cache::kCacheKeyMaxLen] = {};
         cache::build_cache_key(ki, key_buf, sizeof(key_buf));
 
@@ -53,11 +58,13 @@ protected:
         // wire context
         ctx->matched_policy = pol;
         ctx->l2_cache = l2_;
+        ctx->route_cache_epoch_store = &store_;
         std::strncpy(ctx->raw_path, path, sizeof(ctx->raw_path) - 1);
         return l2_;
     }
 
     cache::L2DiskCache* l2_ = nullptr;
+    runtime::RouteCacheEpochStore store_;
 };
 
 TEST_F(L2CacheLookupStageTest, DisabledPolicySkips) {
@@ -68,6 +75,7 @@ TEST_F(L2CacheLookupStageTest, DisabledPolicySkips) {
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &pol;
     ctx.l2_cache = l2_;
+    ctx.route_cache_epoch_store = &store_;
 
     cache_key_prepare_stage(ctx);
     auto out = l2_cache_lookup_stage(ctx);
@@ -120,6 +128,7 @@ TEST_F(L2CacheLookupStageTest, L2MissContinues) {
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &pol;
     ctx.l2_cache = l2_;
+    ctx.route_cache_epoch_store = &store_;
     std::strncpy(ctx.raw_path, "/not/in/cache", sizeof(ctx.raw_path) - 1);
 
     cache_key_prepare_stage(ctx);

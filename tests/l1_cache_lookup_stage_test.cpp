@@ -4,6 +4,7 @@
 #include "cache/cache_key.h"
 #include "cache/l1_cache.h"
 #include "policy/route_policy.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "stages/cache_key_prepare_stage.h"
 #include "stages/l1_cache_lookup_stage.h"
 
@@ -18,9 +19,12 @@ protected:
     void SetUp() override {
         l1_cache_ = std::make_unique<cache::L1Cache>();
         l1_init(l1_cache_.get());
+        store_.count = 0;
+        runtime::route_cache_epoch_register(&store_, "rt1");
     }
 
     std::unique_ptr<cache::L1Cache> l1_cache_;
+    runtime::RouteCacheEpochStore store_;
     policy::RoutePolicy policy_{};
 };
 
@@ -54,6 +58,7 @@ TEST_F(L1CacheLookupStageTest, L1MissContinues) {
     apg::ApgTransformContext ctx{};
     ctx.matched_policy = &policy_;
     ctx.l1_cache = l1_cache_.get();
+    ctx.route_cache_epoch_store = &store_;
     std::strncpy(ctx.raw_path, "/api", sizeof(ctx.raw_path) - 1);
     cache_key_prepare_stage(ctx);
     auto out = l1_cache_lookup_stage(ctx);
@@ -76,6 +81,8 @@ TEST_F(L1CacheLookupStageTest, L1HitPreparesResponse) {
     ki.route_id = policy_.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy_.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     char key_buf[cache::kCacheKeyMaxLen] = {};
     ASSERT_TRUE(cache::build_cache_key(ki, key_buf, sizeof(key_buf)));
 
@@ -85,6 +92,7 @@ TEST_F(L1CacheLookupStageTest, L1HitPreparesResponse) {
     entry.status_code = 200;
     cache::l1_put(l1_cache_.get(), entry);
 
+    ctx.route_cache_epoch_store = &store_;
     cache_key_prepare_stage(ctx);
     auto out = l1_cache_lookup_stage(ctx);
     EXPECT_EQ(out.result, apg::StageResult::SkipRemaining);
@@ -110,6 +118,8 @@ TEST_F(L1CacheLookupStageTest, ExpiredHitMisses) {
     ki.route_id = policy_.route_id;
     ki.path = ctx.raw_path;
     ki.policy_version = policy_.route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     char key_buf[cache::kCacheKeyMaxLen] = {};
     ASSERT_TRUE(cache::build_cache_key(ki, key_buf, sizeof(key_buf)));
 
@@ -120,6 +130,7 @@ TEST_F(L1CacheLookupStageTest, ExpiredHitMisses) {
     entry.expires_at_epoch_ms = 1000; // Expired at 2000
     cache::l1_put(l1_cache_.get(), entry);
 
+    ctx.route_cache_epoch_store = &store_;
     cache_key_prepare_stage(ctx);
     auto out = l1_cache_lookup_stage(ctx);
     EXPECT_EQ(out.result, apg::StageResult::Continue);

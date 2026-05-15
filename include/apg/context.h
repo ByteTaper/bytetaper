@@ -24,6 +24,7 @@
 
 namespace bytetaper::runtime {
 struct WorkerQueue;
+struct RouteCacheEpochStore;
 } // namespace bytetaper::runtime
 
 namespace bytetaper::apg {
@@ -72,8 +73,13 @@ struct ApgTransformContext {
     // --- Cache lookup inputs (set by caller before running pipeline) ---
     const policy::RoutePolicy* matched_policy = nullptr;
     cache::L1Cache* l1_cache = nullptr;
+    runtime::RouteCacheEpochStore* route_cache_epoch_store = nullptr;
     policy::HttpMethod request_method = policy::HttpMethod::Get;
     std::int64_t request_epoch_ms = 0;
+
+    // --- Route cache epoch (populated by cache_key_prepare_stage) ---
+    std::uint64_t route_cache_epoch = 0;
+    bool route_cache_epoch_ready = false;
 
     // --- Prepared cache key (written once by cache_key_prepare_stage) ---
     char cache_key[cache::kCacheKeyMaxLen] = {};

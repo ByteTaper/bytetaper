@@ -63,6 +63,8 @@ int main() {
         ki.route_id = "test-route";
         ki.path = "/scenario-a";
         ki.policy_version = policy.policy_identity;
+        ki.route_cache_epoch = 1;
+        ki.route_cache_epoch_ready = true;
 
         char key[cache::kCacheKeyMaxLen] = {};
         cache::build_cache_key(ki, key, sizeof(key));
@@ -77,6 +79,7 @@ int main() {
 
         // Send RequestHeaders
         grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
         auto stream = stub->Process(&ctx);
 
         envoy::service::ext_proc::v3::ProcessingRequest req;
@@ -90,11 +93,19 @@ int main() {
         p_hdr->set_key(":path");
         p_hdr->set_raw_value("/scenario-a");
 
-        stream->Write(req);
+        if (!stream->Write(req)) {
+            extproc::stop_grpc_server(&handle);
+            cache::l2_close(&l2_cache);
+            return 9;
+        }
 
         // Read Response
         envoy::service::ext_proc::v3::ProcessingResponse resp;
-        stream->Read(&resp);
+        if (!stream->Read(&resp)) {
+            extproc::stop_grpc_server(&handle);
+            cache::l2_close(&l2_cache);
+            return 11;
+        }
 
         // ASSERT: No immediate response (L2 lookup was skipped)
         if (resp.has_immediate_response()) {
@@ -109,19 +120,38 @@ int main() {
         auto* s_hdr = rsh_map->add_headers();
         s_hdr->set_key(":status");
         s_hdr->set_raw_value("200");
-        stream->Write(req);
+        if (!stream->Write(req)) {
+            extproc::stop_grpc_server(&handle);
+            cache::l2_close(&l2_cache);
+            return 12;
+        }
 
         req.Clear();
         auto* rb = req.mutable_response_body();
         rb->set_body("UPSTREAM-BODY");
-        stream->Write(req);
+        rb->set_end_of_stream(true);
+        if (!stream->Write(req)) {
+            extproc::stop_grpc_server(&handle);
+            cache::l2_close(&l2_cache);
+            return 13;
+        }
 
         stream->WritesDone();
 
         // Read ResponseHeaders response
-        stream->Read(&resp);
+        if (!stream->Read(&resp)) {
+            extproc::stop_grpc_server(&handle);
+            cache::l2_close(&l2_cache);
+            return 14;
+        }
         // Read ResponseBody response
-        stream->Read(&resp);
+        if (!stream->Read(&resp)) {
+            extproc::stop_grpc_server(&handle);
+            cache::l2_close(&l2_cache);
+            return 15;
+        }
+
+        stream->Finish();
     }
 
     // Scenario B: L1 Hit (Seeded) -> Should still short-circuit.
@@ -132,6 +162,8 @@ int main() {
         ki.route_id = "test-route";
         ki.path = "/scenario-b";
         ki.policy_version = policy.policy_identity;
+        ki.route_cache_epoch = 1;
+        ki.route_cache_epoch_ready = true;
 
         char key[cache::kCacheKeyMaxLen] = {};
         cache::build_cache_key(ki, key, sizeof(key));
@@ -146,6 +178,7 @@ int main() {
 
         // Send RequestHeaders
         grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
         auto stream = stub->Process(&ctx);
 
         envoy::service::ext_proc::v3::ProcessingRequest req;
@@ -159,11 +192,19 @@ int main() {
         p_hdr->set_key(":path");
         p_hdr->set_raw_value("/scenario-b");
 
-        stream->Write(req);
+        if (!stream->Write(req)) {
+            extproc::stop_grpc_server(&handle);
+            cache::l2_close(&l2_cache);
+            return 19;
+        }
 
         // Read Response
         envoy::service::ext_proc::v3::ProcessingResponse resp;
-        stream->Read(&resp);
+        if (!stream->Read(&resp)) {
+            extproc::stop_grpc_server(&handle);
+            cache::l2_close(&l2_cache);
+            return 22;
+        }
 
         // ASSERT: Immediate response (L1 hit)
         if (!resp.has_immediate_response()) {
@@ -177,6 +218,9 @@ int main() {
             cache::l2_close(&l2_cache);
             return 21;
         }
+
+        stream->WritesDone();
+        stream->Finish();
     }
 
     extproc::stop_grpc_server(&handle);

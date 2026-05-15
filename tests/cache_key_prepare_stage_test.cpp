@@ -3,6 +3,7 @@
 
 #include "cache/cache_key.h"
 #include "policy/route_policy.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "stages/cache_key_prepare_stage.h"
 
 #include <cstring>
@@ -14,10 +15,15 @@ class CacheKeyPrepareStageTest : public ::testing::Test {
 protected:
     apg::ApgTransformContext context{};
     policy::RoutePolicy policy{};
+    runtime::RouteCacheEpochStore store{};
 
     void SetUp() override {
-        context.matched_policy = &policy;
+        store.count = 0;
         policy.route_id = "test-route";
+        runtime::route_cache_epoch_register(&store, "test-route");
+
+        context.matched_policy = &policy;
+        context.route_cache_epoch_store = &store;
         policy.cache.behavior = policy::CacheBehavior::Store;
         context.request_method = policy::HttpMethod::Get;
         std::strncpy(context.raw_path, "/api/test", sizeof(context.raw_path) - 1);
@@ -76,6 +82,8 @@ TEST_F(CacheKeyPrepareStageTest, PrepareStage_SharedKeyProof) {
     ki.selected_fields = nullptr;
     ki.selected_field_count = 0;
     ki.policy_version = context.matched_policy->route_id;
+    ki.route_cache_epoch = 1;
+    ki.route_cache_epoch_ready = true;
     ki.variant = false;
 
     char expected_key[cache::kCacheKeyMaxLen] = {};

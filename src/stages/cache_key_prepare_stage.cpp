@@ -5,6 +5,7 @@
 
 #include "cache/cache_key.h"
 #include "policy/cache_policy.h"
+#include "runtime/route_cache_epoch_store.h"
 
 namespace bytetaper::stages {
 
@@ -14,6 +15,7 @@ apg::StageOutput cache_key_prepare_stage(apg::ApgTransformContext& context) {
     context.cache_key_ready = false;
     context.variant_cache_key_ready = false;
     context.sanitized_query_ready = false;
+    context.route_cache_epoch_ready = false;
 
     // 2. Pre-flight checks
     if (context.matched_policy == nullptr) {
@@ -30,6 +32,24 @@ apg::StageOutput cache_key_prepare_stage(apg::ApgTransformContext& context) {
 
     if (context.cache_auth_bypass) {
         return { apg::StageResult::Continue, "auth-cache-bypass" };
+    }
+
+    // 2.5 Resolve Route Cache Epoch
+    if (context.route_cache_epoch_store != nullptr) {
+        std::uint64_t epoch = 0;
+        const auto res = runtime::route_cache_epoch_get(context.route_cache_epoch_store,
+                                                        context.matched_policy->route_id, &epoch);
+        if (res == runtime::RouteCacheEpochResult::Ok) {
+            context.route_cache_epoch = epoch;
+            context.route_cache_epoch_ready = true;
+        } else {
+            // Epoch store present but route not registered → bypass cache
+            // Not an error, just a safe skip.
+            return { apg::StageResult::Continue, "route-epoch-not-ready" };
+        }
+    } else {
+        // Epoch store missing for cacheable route → bypass cache
+        return { apg::StageResult::Continue, "route-epoch-not-ready" };
     }
 
     // 3. Mark as eligible
@@ -81,6 +101,8 @@ apg::StageOutput cache_key_prepare_stage(apg::ApgTransformContext& context) {
         ki_raw.variant = false;
     }
     ki_raw.policy_version = policy_version;
+    ki_raw.route_cache_epoch = context.route_cache_epoch;
+    ki_raw.route_cache_epoch_ready = context.route_cache_epoch_ready;
     ki_raw.private_cache = pol_private;
     ki_raw.auth_scope = auth_scope;
 
@@ -106,6 +128,8 @@ apg::StageOutput cache_key_prepare_stage(apg::ApgTransformContext& context) {
         ki_var.selected_fields = context.selected_fields;
         ki_var.selected_field_count = context.selected_field_count;
         ki_var.policy_version = policy_version;
+        ki_var.route_cache_epoch = context.route_cache_epoch;
+        ki_var.route_cache_epoch_ready = context.route_cache_epoch_ready;
         ki_var.variant = true;
         ki_var.private_cache = pol_private;
         ki_var.auth_scope = auth_scope;
