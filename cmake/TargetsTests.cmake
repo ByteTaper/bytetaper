@@ -259,6 +259,21 @@ if(BUILD_TESTING)
     )
     add_test(NAME mutation_invalidation_prepare_stage_test COMMAND mutation_invalidation_prepare_stage_test)
 
+    add_executable(cache_invalidation_target_resolver_test
+      tests/cache_invalidation_target_resolver_test.cpp
+    )
+    target_include_directories(cache_invalidation_target_resolver_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(cache_invalidation_target_resolver_test
+      PRIVATE
+        gtest_main
+        bytetaper_cache
+        bytetaper_policy
+    )
+    add_test(NAME cache_invalidation_target_resolver_test COMMAND cache_invalidation_target_resolver_test)
+
     add_executable(mutation_invalidation_apply_stage_test
       tests/mutation_invalidation_apply_stage_test.cpp
     )

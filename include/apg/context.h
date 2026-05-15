@@ -104,6 +104,8 @@ struct ApgTransformContext {
 
     // --- Cache lookup inputs (set by caller before running pipeline) ---
     const policy::RoutePolicy* matched_policy = nullptr;
+    const policy::RoutePolicy* active_routes = nullptr;
+    std::size_t active_route_count = 0;
     cache::L1Cache* l1_cache = nullptr;
     runtime::RouteCacheEpochStore* route_cache_epoch_store = nullptr;
     policy::HttpMethod request_method = policy::HttpMethod::Get;

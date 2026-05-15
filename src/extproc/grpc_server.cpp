@@ -583,6 +583,14 @@ public:
                 // Run lookup pipeline
                 if (filter_state.matched_policy != nullptr) {
                     filter_state.context.matched_policy = filter_state.matched_policy;
+
+                    if (filter_state.active_policy_snapshot != nullptr) {
+                        filter_state.context.active_routes =
+                            filter_state.active_policy_snapshot->routes.data();
+                        filter_state.context.active_route_count =
+                            filter_state.active_policy_snapshot->routes.size();
+                    }
+
                     prepare_cache_auth_context(request.request_headers().headers(), req_view,
                                                &filter_state.context);
                     prepare_cache_vary_context(request.request_headers().headers(),

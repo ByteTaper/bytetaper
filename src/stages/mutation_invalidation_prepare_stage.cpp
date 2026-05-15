@@ -4,6 +4,7 @@
 #include "stages/mutation_invalidation_prepare_stage.h"
 
 #include "apg/context.h"
+#include "cache/cache_invalidation_target_resolver.h"
 #include "policy/route_policy.h"
 
 #include <cstring>
@@ -14,58 +15,33 @@ apg::StageOutput mutation_invalidation_prepare_stage(apg::ApgTransformContext& c
     auto& plan = context.mutation_invalidation;
     plan = apg::PendingMutationInvalidationPlan{};
 
-    const policy::RoutePolicy* pol = context.matched_policy;
-    if (pol == nullptr) {
-        plan.decision = apg::MutationInvalidationDecision::SkippedNoPolicy;
-        return { apg::StageResult::Continue, "no-policy" };
-    }
+    auto resolved =
+        cache::resolve_invalidation_targets(context.active_routes, context.active_route_count,
+                                            context.matched_policy, context.request_method);
 
-    if (!pol->cache.invalidation.enabled) {
-        plan.decision = apg::MutationInvalidationDecision::SkippedNoPolicy;
-        return { apg::StageResult::Continue, "no-invalidation-policy" };
-    }
-
-    const policy::HttpMethod method = context.request_method;
-    bool method_supported = false;
-    bool method_enabled = false;
-
-    if (method == policy::HttpMethod::Put) {
-        method_supported = true;
-        method_enabled = pol->cache.invalidation.on_put;
-    } else if (method == policy::HttpMethod::Patch) {
-        method_supported = true;
-        method_enabled = pol->cache.invalidation.on_patch;
-    } else if (method == policy::HttpMethod::Delete) {
-        method_supported = true;
-        method_enabled = pol->cache.invalidation.on_delete;
-    }
-
-    if (!method_supported) {
-        plan.decision = apg::MutationInvalidationDecision::SkippedNonMutationMethod;
-        return { apg::StageResult::Continue, "non-mutation-method" };
-    }
-
-    if (!method_enabled) {
-        plan.decision = apg::MutationInvalidationDecision::SkippedMethodNotEnabled;
-        return { apg::StageResult::Continue, "method-not-enabled" };
+    if (!resolved.ok) {
+        if (resolved.status == cache::InvalidationTargetResolveStatus::NonMutationMethod) {
+            plan.decision = apg::MutationInvalidationDecision::SkippedNonMutationMethod;
+        } else if (resolved.status == cache::InvalidationTargetResolveStatus::MethodNotEnabled) {
+            plan.decision = apg::MutationInvalidationDecision::SkippedMethodNotEnabled;
+        } else {
+            plan.decision = apg::MutationInvalidationDecision::SkippedNoPolicy;
+        }
+        plan.reason = resolved.reason;
+        return { apg::StageResult::Continue, resolved.reason };
     }
 
     // Prepare the plan
     plan.prepared = true;
     plan.decision = apg::MutationInvalidationDecision::Prepared;
-    plan.success_status_min = pol->cache.invalidation.success_status_min;
-    plan.success_status_max = pol->cache.invalidation.success_status_max;
+    plan.success_status_min = resolved.success_status_min;
+    plan.success_status_max = resolved.success_status_max;
 
-    const std::size_t limit =
-        (pol->cache.invalidation.target_count < apg::kMaxPendingInvalidationTargets)
-            ? pol->cache.invalidation.target_count
-            : apg::kMaxPendingInvalidationTargets;
-
-    for (std::size_t i = 0; i < limit; ++i) {
-        const auto& src_target = pol->cache.invalidation.targets[i];
-        auto& dst_target = plan.targets[i];
-        std::strncpy(dst_target.route_id, src_target.route_id, apg::kInvalidationRouteIdMaxLen - 1);
-        dst_target.route_id[apg::kInvalidationRouteIdMaxLen - 1] = '\0';
+    for (std::size_t i = 0; i < resolved.target_count; ++i) {
+        const auto& src = resolved.targets[i];
+        auto& dst = plan.targets[i];
+        std::strncpy(dst.route_id, src.route_id, apg::kInvalidationRouteIdMaxLen - 1);
+        dst.route_id[apg::kInvalidationRouteIdMaxLen - 1] = '\0';
         plan.target_count++;
     }
 

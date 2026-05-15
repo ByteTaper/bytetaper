@@ -1,6 +1,7 @@
 # cmake/TargetsCache.cmake — Cache library targets
 
 add_library(bytetaper_cache STATIC
+  src/cache/cache_invalidation_target_resolver.cpp
   src/cache/l1_cache.cpp
   src/cache/l2_rocksdb_cache.cpp
   src/cache/cache_entry_codec.cpp

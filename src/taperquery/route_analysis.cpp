@@ -63,6 +63,19 @@ std::string match_kind_to_string(TqRouteMatchKind kind) {
     }
 }
 
+std::string strategy_to_string(TqCacheInvalidationStrategy strategy) {
+    switch (strategy) {
+    case TqCacheInvalidationStrategy::RouteEpoch:
+        return "RouteEpoch";
+    case TqCacheInvalidationStrategy::ExactKey:
+        return "ExactKey";
+    case TqCacheInvalidationStrategy::Prefix:
+        return "Prefix";
+    default:
+        return "Unknown";
+    }
+}
+
 } // namespace
 
 std::uint32_t compute_route_specificity_score(const TqRoutePolicy& route) {
@@ -224,6 +237,79 @@ TqRouteAnalysisReport analyze_taperquery_route_precedence(const TqPolicyDocument
                                    "RocksDB lock or cache contamination.";
                     report.findings.push_back(finding);
                 }
+            }
+        }
+    }
+
+    // 3. Invalidation target analysis
+    for (const auto& mutation_route : policy.routes) {
+        if (!mutation_route.cache.invalidation.enabled) {
+            continue;
+        }
+
+        for (const auto& target : mutation_route.cache.invalidation.targets) {
+            // Find target route
+            const TqRoutePolicy* target_route = nullptr;
+            for (const auto& r : policy.routes) {
+                if (r.route_id == target.route_id) {
+                    target_route = &r;
+                    break;
+                }
+            }
+
+            if (target_route == nullptr) {
+                TqRouteAnalysisFinding finding;
+                finding.severity = TqRouteAnalysisSeverity::Warning;
+                finding.kind = TqRouteAnalysisKind::UnknownInvalidationTarget;
+                finding.route_id = mutation_route.route_id;
+                finding.field_path = "cache.invalidation.targets";
+                finding.reason = "Mutation route '" + mutation_route.route_id +
+                                 "' targets unknown route '" + target.route_id + "'";
+                finding.hint = "Ensure the target route_id is defined in the policy document.";
+                report.findings.push_back(finding);
+                continue;
+            }
+
+            if (target_route->allowed_method != TqHttpMethod::Get) {
+                TqRouteAnalysisFinding finding;
+                finding.severity = TqRouteAnalysisSeverity::Warning;
+                finding.kind = TqRouteAnalysisKind::InvalidInvalidationTargetMethod;
+                finding.route_id = mutation_route.route_id;
+                finding.related_route_id = target_route->route_id;
+                finding.field_path = "cache.invalidation.targets";
+                finding.reason = "Invalidation target '" + target_route->route_id +
+                                 "' is not a GET route (method=" +
+                                 method_to_string(target_route->allowed_method) + ")";
+                finding.hint = "Mutation invalidation only supports clearing GET route caches.";
+                report.findings.push_back(finding);
+            }
+
+            if (!target_route->cache.enabled ||
+                target_route->cache.behavior != TqCacheBehavior::Store) {
+                TqRouteAnalysisFinding finding;
+                finding.severity = TqRouteAnalysisSeverity::Warning;
+                finding.kind = TqRouteAnalysisKind::InvalidInvalidationTargetCachePolicy;
+                finding.route_id = mutation_route.route_id;
+                finding.related_route_id = target_route->route_id;
+                finding.field_path = "cache.invalidation.targets";
+                finding.reason = "Invalidation target '" + target_route->route_id +
+                                 "' does not have cache.behavior=Store";
+                finding.hint =
+                    "The target route must have cache.behavior=Store to benefit from invalidation.";
+                report.findings.push_back(finding);
+            }
+
+            if (target.strategy != TqCacheInvalidationStrategy::RouteEpoch) {
+                TqRouteAnalysisFinding finding;
+                finding.severity = TqRouteAnalysisSeverity::Warning;
+                finding.kind = TqRouteAnalysisKind::UnsupportedInvalidationStrategy;
+                finding.route_id = mutation_route.route_id;
+                finding.field_path = "cache.invalidation.targets";
+                finding.reason = "Unsupported invalidation strategy '" +
+                                 strategy_to_string(target.strategy) + "' for target '" +
+                                 target.route_id + "'";
+                finding.hint = "Currently only 'RouteEpoch' strategy is supported.";
+                report.findings.push_back(finding);
             }
         }
     }

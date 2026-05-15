@@ -305,3 +305,120 @@ TEST(TaperQueryRouteAnalysisTest, DeclarationOrderIsPreserved) {
     EXPECT_EQ(report.precedence[1].route_id, "r2");
     EXPECT_EQ(report.precedence[2].route_id, "r3");
 }
+
+TEST(TaperQueryRouteAnalysisTest, DetectsUnknownInvalidationTarget) {
+    TqRoutePolicy r1;
+    r1.route_id = "r1";
+    r1.cache.invalidation.enabled = true;
+    r1.cache.invalidation.targets = { { "ghost", TqCacheInvalidationStrategy::RouteEpoch } };
+
+    TqPolicyDocument doc;
+    doc.routes = { r1 };
+
+    auto report = analyze_taperquery_route_precedence(doc);
+    bool found = false;
+    for (const auto& f : report.findings) {
+        if (f.kind == TqRouteAnalysisKind::UnknownInvalidationTarget) {
+            found = true;
+            EXPECT_EQ(f.route_id, "r1");
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST(TaperQueryRouteAnalysisTest, DetectsInvalidInvalidationTargetMethod) {
+    TqRoutePolicy target;
+    target.route_id = "target";
+    target.allowed_method = TqHttpMethod::Post;
+
+    TqRoutePolicy mutator;
+    mutator.route_id = "mutator";
+    mutator.cache.invalidation.enabled = true;
+    mutator.cache.invalidation.targets = { { "target", TqCacheInvalidationStrategy::RouteEpoch } };
+
+    TqPolicyDocument doc;
+    doc.routes = { target, mutator };
+
+    auto report = analyze_taperquery_route_precedence(doc);
+    bool found = false;
+    for (const auto& f : report.findings) {
+        if (f.kind == TqRouteAnalysisKind::InvalidInvalidationTargetMethod) {
+            found = true;
+            EXPECT_EQ(f.route_id, "mutator");
+            EXPECT_EQ(f.related_route_id, "target");
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST(TaperQueryRouteAnalysisTest, DetectsInvalidInvalidationTargetCachePolicy) {
+    TqRoutePolicy target;
+    target.route_id = "target";
+    target.allowed_method = TqHttpMethod::Get;
+    target.cache.enabled = false;
+
+    TqRoutePolicy mutator;
+    mutator.route_id = "mutator";
+    mutator.cache.invalidation.enabled = true;
+    mutator.cache.invalidation.targets = { { "target", TqCacheInvalidationStrategy::RouteEpoch } };
+
+    {
+        TqPolicyDocument doc;
+        doc.routes = { target, mutator };
+
+        auto report = analyze_taperquery_route_precedence(doc);
+        bool found = false;
+        for (const auto& f : report.findings) {
+            if (f.kind == TqRouteAnalysisKind::InvalidInvalidationTargetCachePolicy) {
+                found = true;
+                EXPECT_EQ(f.route_id, "mutator");
+                EXPECT_EQ(f.related_route_id, "target");
+            }
+        }
+        EXPECT_TRUE(found);
+    }
+
+    // Test behavior = Default
+    target.cache.enabled = true;
+    target.cache.behavior = TqCacheBehavior::Default;
+    {
+        TqPolicyDocument doc;
+        doc.routes = { target, mutator };
+
+        auto report = analyze_taperquery_route_precedence(doc);
+        bool found = false;
+        for (const auto& f : report.findings) {
+            if (f.kind == TqRouteAnalysisKind::InvalidInvalidationTargetCachePolicy) {
+                found = true;
+                EXPECT_EQ(f.route_id, "mutator");
+                EXPECT_EQ(f.related_route_id, "target");
+            }
+        }
+        EXPECT_TRUE(found);
+    }
+}
+
+TEST(TaperQueryRouteAnalysisTest, DetectsUnsupportedInvalidationStrategy) {
+    TqRoutePolicy target;
+    target.route_id = "target";
+    target.allowed_method = TqHttpMethod::Get;
+    target.cache.enabled = true;
+
+    TqRoutePolicy mutator;
+    mutator.route_id = "mutator";
+    mutator.cache.invalidation.enabled = true;
+    mutator.cache.invalidation.targets = { { "target", TqCacheInvalidationStrategy::ExactKey } };
+
+    TqPolicyDocument doc;
+    doc.routes = { target, mutator };
+
+    auto report = analyze_taperquery_route_precedence(doc);
+    bool found = false;
+    for (const auto& f : report.findings) {
+        if (f.kind == TqRouteAnalysisKind::UnsupportedInvalidationStrategy) {
+            found = true;
+            EXPECT_EQ(f.route_id, "mutator");
+        }
+    }
+    EXPECT_TRUE(found);
+}

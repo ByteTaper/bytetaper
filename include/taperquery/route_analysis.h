@@ -26,6 +26,10 @@ enum class TqRouteAnalysisKind : std::uint8_t {
     PrefixShadowsExact,
     EarlierRouteWins,
     SharedL2CachePath,
+    UnknownInvalidationTarget,
+    InvalidInvalidationTargetMethod,
+    InvalidInvalidationTargetCachePolicy,
+    UnsupportedInvalidationStrategy,
 };
 
 struct TqRouteAnalysisFinding {
