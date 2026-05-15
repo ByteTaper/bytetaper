@@ -273,3 +273,58 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.8.0"
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive terraform/
+
+      - name: Validate module
+        run: |
+          terraform -chdir=terraform/modules/bytetaper-helm init -backend=false
+          terraform -chdir=terraform/modules/bytetaper-helm validate
+
+      - name: Validate kind example
+        run: |
+          terraform -chdir=terraform/examples/kind init -backend=false
+          terraform -chdir=terraform/examples/kind validate
+
+      - name: Validate eks example
+        run: |
+          terraform -chdir=terraform/examples/eks init -backend=false
+          terraform -chdir=terraform/examples/eks validate
+
+      - name: Validate gke example
+        run: |
+          terraform -chdir=terraform/examples/gke init -backend=false
+          terraform -chdir=terraform/examples/gke validate
+
+      - name: Validate aks example
+        run: |
+          terraform -chdir=terraform/examples/aks init -backend=false
+          terraform -chdir=terraform/examples/aks validate
+
+  operator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.0"
+
+      - name: Verify operator manifests
+        run: make -C operator manifests
+
+      - name: Verify generated code
+        run: make -C operator generate
+
+      - name: Run operator tests
+        run: make -C operator test
+
+      - name: Build operator image
+        run: make -C operator docker-build IMG=bytetaper-operator:ci
