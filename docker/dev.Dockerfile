@@ -45,8 +45,10 @@ RUN groupadd -f -o -g "${LOCAL_GID}" bytetaper \
     && useradd -m -o -u "${LOCAL_UID}" -g "${LOCAL_GID}" -s /bin/bash bytetaper \
     && mkdir -p /home/bytetaper/.cache/ccache \
     && mkdir -p /var/cache/bytetaper \
+    && mkdir -p /workspace/build \
     && chown -R bytetaper:bytetaper /home/bytetaper/.cache \
-    && chown bytetaper:bytetaper /var/cache/bytetaper
+    && chown bytetaper:bytetaper /var/cache/bytetaper \
+    && chown -R bytetaper:bytetaper /workspace
 
 WORKDIR /workspace
 USER bytetaper
