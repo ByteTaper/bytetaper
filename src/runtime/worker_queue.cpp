@@ -44,6 +44,8 @@ static bool worker_ready_try_pop(WorkerQueue* q, std::size_t worker_id, std::siz
 static bool worker_ready_wait_pop(WorkerQueue* q, std::size_t worker_id, std::size_t* shard_id_out);
 static bool shard_try_pop_lookup_job(WorkerQueue* q, std::size_t shard_idx, L2LookupJob* job_out);
 static bool shard_try_pop_store_job(WorkerQueue* q, std::size_t shard_idx, L2StoreJob* job_out);
+static bool shard_try_pop_invalidate_job(WorkerQueue* q, std::size_t shard_idx,
+                                         L2InvalidateJob* job_out);
 static void shard_requeue_or_clear(WorkerQueue* q, std::size_t shard_idx);
 
 static bool shard_has_pending_lookup(const RuntimeShard& shard) {
@@ -55,7 +57,7 @@ static bool shard_has_pending_store(const RuntimeShard& shard) {
 }
 
 static bool shard_has_pending_work(const RuntimeShard& shard) {
-    return shard.lookup_count > 0 || shard.store_count > 0;
+    return shard.lookup_count > 0 || shard.store_count > 0 || shard.invalidate_count > 0;
 }
 
 static constexpr std::size_t kLookupLaneQuota = 4;
@@ -324,6 +326,33 @@ static void execute_store_job(WorkerQueue* q, RuntimeShard* shard, L2StoreJob& j
     }
 }
 
+static void execute_invalidate_job(WorkerQueue* q, RuntimeShard* shard, L2InvalidateJob& job) {
+    (void) shard;
+    auto* resources_runtime_metrics = q->resources.runtime_metrics;
+    const std::uint64_t now_ms = current_time_ms();
+
+    const std::uint64_t wait_ms = now_ms > job.enqueued_at_ms ? now_ms - job.enqueued_at_ms : 0;
+    ::bytetaper::metrics::record_runtime_wait_ms(
+        resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2InvalidateLaneWait,
+        wait_ms);
+
+    ::bytetaper::metrics::record_runtime_event(
+        resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobExecuted);
+
+    auto* l2 = q->resources.l2_cache;
+    if (l2 != nullptr) {
+        cache::l2_remove(l2, job.key);
+        ::bytetaper::metrics::record_runtime_event(
+            resources_runtime_metrics,
+            ::bytetaper::metrics::RuntimeMetricEvent::L2InvalidateSuccess);
+    } else {
+        ::bytetaper::metrics::record_runtime_event(
+            resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2InvalidateError);
+        ::bytetaper::metrics::record_runtime_event(
+            resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::JobError);
+    }
+}
+
 static WorkerEvent worker_wait_for_event(WorkerQueue* q, std::size_t worker_id) {
     std::size_t shard_id = 0;
     bool got_shard = worker_ready_wait_pop(q, worker_id, &shard_id);
@@ -345,6 +374,16 @@ static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size
             lookup_executed++;
         } else {
             break; // No more lookup jobs in this shard
+        }
+    }
+
+    // Process up to invalidate quota
+    for (std::size_t i = 0; i < q->effective_invalidate_lane_quota; ++i) {
+        L2InvalidateJob invalidate_job{};
+        if (shard_try_pop_invalidate_job(q, shard_id, &invalidate_job)) {
+            execute_invalidate_job(q, &shard, invalidate_job);
+        } else {
+            break;
         }
     }
 
@@ -463,6 +502,29 @@ static bool shard_try_pop_store_job(WorkerQueue* q, std::size_t shard_idx, L2Sto
     return false;
 }
 
+static bool shard_try_pop_invalidate_job(WorkerQueue* q, std::size_t shard_idx,
+                                         L2InvalidateJob* job_out) {
+    if (q == nullptr || shard_idx >= kRuntimeShardCount || job_out == nullptr) {
+        return false;
+    }
+    RuntimeShard& shard = q->shards[shard_idx];
+    std::lock_guard<std::mutex> lock(shard.mu);
+
+    if (shard.invalidate_count > 0) {
+        *job_out = shard.invalidate_slots[shard.invalidate_head];
+        shard.invalidate_head = (shard.invalidate_head + 1) % kRuntimeQueueSlotsPerShard;
+        shard.invalidate_count--;
+
+        if (q->resources.runtime_metrics != nullptr) {
+            q->resources.runtime_metrics->worker_queue_depth.fetch_sub(1,
+                                                                       std::memory_order_relaxed);
+        }
+        return true;
+    }
+
+    return false;
+}
+
 static void shard_requeue_or_clear(WorkerQueue* q, std::size_t shard_idx) {
     if (q == nullptr || shard_idx >= kRuntimeShardCount) {
         return;
@@ -557,6 +619,10 @@ const char* worker_queue_init(WorkerQueue* q, const WorkerQueueConfig& config) {
         return "worker_queue: store_lane_quota must be >= 1";
     }
 
+    if (config.invalidate_lane_quota == 0) {
+        return "worker_queue: invalidate_lane_quota must be >= 1";
+    }
+
     std::size_t async_store_max_body_size = config.async_store_max_body_size;
     if (async_store_max_body_size == 0) {
         async_store_max_body_size = kAsyncL2StoreDefaultMaxBodySize;
@@ -572,6 +638,7 @@ const char* worker_queue_init(WorkerQueue* q, const WorkerQueueConfig& config) {
     q->effective_worker_count = config.worker_count;
     q->effective_lookup_lane_quota = config.lookup_lane_quota;
     q->effective_store_lane_quota = config.store_lane_quota;
+    q->effective_invalidate_lane_quota = config.invalidate_lane_quota;
     q->effective_async_store_max_body_size = async_store_max_body_size;
     release_body_pools(q);
 
@@ -603,6 +670,9 @@ const char* worker_queue_init(WorkerQueue* q, const WorkerQueueConfig& config) {
         q->shards[i].store_head = 0;
         q->shards[i].store_tail = 0;
         q->shards[i].store_count = 0;
+        q->shards[i].invalidate_head = 0;
+        q->shards[i].invalidate_tail = 0;
+        q->shards[i].invalidate_count = 0;
         q->shards[i].pending_count = 0;
         for (std::size_t j = 0; j < kRuntimePendingSlotsPerShard; j++) {
             q->shards[i].pending_occupied[j] = false;
@@ -653,6 +723,8 @@ const char* worker_queue_start(WorkerQueue* q, const WorkerQueueResources& res) 
             q->effective_lookup_lane_quota, std::memory_order_relaxed);
         res.runtime_metrics->worker_store_lane_quota_effective.store(q->effective_store_lane_quota,
                                                                      std::memory_order_relaxed);
+        res.runtime_metrics->worker_invalidate_lane_quota_effective.store(
+            q->effective_invalidate_lane_quota, std::memory_order_relaxed);
         res.runtime_metrics->worker_async_store_max_body_size_effective.store(
             q->effective_async_store_max_body_size, std::memory_order_relaxed);
     }
@@ -807,6 +879,54 @@ bool worker_queue_try_enqueue_store(WorkerQueue* q, const L2StoreJob& job) {
     return true;
 }
 
+bool worker_queue_enqueue_l2_invalidate(WorkerQueue* q, const char* key, std::uint64_t now_ms) {
+    if (q == nullptr || key == nullptr || key[0] == '\0' ||
+        !q->running.load(std::memory_order_acquire)) {
+        return false;
+    }
+
+    std::uint32_t shard_idx = hash_key_to_shard(key);
+    RuntimeShard& shard = q->shards[shard_idx];
+
+    bool should_push_ready = false;
+    {
+        std::lock_guard<std::mutex> lock(shard.mu);
+        if (shard.invalidate_count >= kRuntimeQueueSlotsPerShard) {
+            ::bytetaper::metrics::record_runtime_event(
+                q->resources.runtime_metrics,
+                ::bytetaper::metrics::RuntimeMetricEvent::EnqueueDropped);
+            return false;
+        }
+
+        ::bytetaper::metrics::record_runtime_event(
+            q->resources.runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::Enqueue);
+        if (q->resources.runtime_metrics != nullptr) {
+            q->resources.runtime_metrics->worker_queue_depth.fetch_add(1,
+                                                                       std::memory_order_relaxed);
+        }
+
+        L2InvalidateJob job{};
+        std::strncpy(job.key, key, cache::kCacheKeyMaxLen - 1);
+        job.enqueued_at_ms = now_ms > 0 ? now_ms : current_time_ms();
+
+        shard.invalidate_slots[shard.invalidate_tail] = job;
+        shard.invalidate_tail = (shard.invalidate_tail + 1) % kRuntimeQueueSlotsPerShard;
+        shard.invalidate_count++;
+
+        if (!shard.ready_enqueued) {
+            shard.ready_enqueued = true;
+            should_push_ready = true;
+        }
+    }
+
+    if (should_push_ready) {
+        std::size_t owner_w = shard_idx % q->worker_count;
+        worker_ready_try_push(q, owner_w, shard_idx);
+    }
+
+    return true;
+}
+
 void worker_queue_shutdown(WorkerQueue* q) {
     if (q == nullptr) {
         return;
@@ -843,6 +963,12 @@ bool worker_queue_execute_one_for_test(WorkerQueue* q) {
         if (shard_try_pop_lookup_job(q, i, &lookup_job)) {
             execute_lookup_job(q, &shard, lookup_job, q->worker_scratch[0].l2_lookup_body,
                                kAsyncL2LookupScratchSize);
+            return true;
+        }
+
+        L2InvalidateJob invalidate_job{};
+        if (shard_try_pop_invalidate_job(q, i, &invalidate_job)) {
+            execute_invalidate_job(q, &shard, invalidate_job);
             return true;
         }
 
@@ -888,6 +1014,17 @@ bool worker_drain_owned_once(WorkerQueue* q, std::size_t worker_id) {
                 execute_lookup_job(q, &q->shards[s_idx], lookup_job,
                                    q->worker_scratch[worker_id].l2_lookup_body,
                                    kAsyncL2MaxBodySize);
+            } else {
+                break;
+            }
+        }
+
+        // Process up to effective invalidate lane quota invalidate jobs
+        for (std::size_t j = 0; j < q->effective_invalidate_lane_quota; ++j) {
+            L2InvalidateJob invalidate_job{};
+            if (shard_try_pop_invalidate_job(q, s_idx, &invalidate_job)) {
+                worked = true;
+                execute_invalidate_job(q, &q->shards[s_idx], invalidate_job);
             } else {
                 break;
             }

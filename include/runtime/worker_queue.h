@@ -89,6 +89,12 @@ struct L2StoreJob {
     std::uint64_t enqueued_at_ms = 0;
 };
 
+struct L2InvalidateJob {
+    char key[cache::kCacheKeyMaxLen] = {};
+    std::uint32_t key_hash = 0;
+    std::uint64_t enqueued_at_ms = 0;
+};
+
 struct StoreBodyPool {
     char* slab = nullptr;
     char* bodies[kRuntimeQueueSlotsPerShard] = {};
@@ -117,8 +123,9 @@ struct WorkerQueueConfig {
     // 0 means use kAsyncL2StoreDefaultMaxBodySize. Server startup sets this from route
     // max_response_bytes when configured.
     std::size_t async_store_max_body_size = 0;
-    std::size_t lookup_lane_quota = 4; // >= 1
-    std::size_t store_lane_quota = 1;  // >= 1
+    std::size_t lookup_lane_quota = 4;     // >= 1
+    std::size_t store_lane_quota = 1;      // >= 1
+    std::size_t invalidate_lane_quota = 1; // >= 1
 };
 
 struct WorkerQueueResources {
@@ -152,6 +159,12 @@ struct RuntimeShard {
     std::size_t store_tail = 0;
     std::size_t store_count = 0;
 
+    // Invalidate ring.
+    L2InvalidateJob invalidate_slots[kRuntimeQueueSlotsPerShard] = {};
+    std::size_t invalidate_head = 0;
+    std::size_t invalidate_tail = 0;
+    std::size_t invalidate_count = 0;
+
     // Shard-local store body pool.
     StoreBodyPool body_pool = {};
 
@@ -175,6 +188,7 @@ struct WorkerQueue {
     std::size_t effective_worker_count = 0;
     std::size_t effective_lookup_lane_quota = 4;
     std::size_t effective_store_lane_quota = 1;
+    std::size_t effective_invalidate_lane_quota = 1;
     std::size_t effective_async_store_max_body_size = 0;
 };
 
@@ -191,6 +205,9 @@ bool worker_queue_try_enqueue_lookup(WorkerQueue* q, const L2LookupJob& job);
 
 // Non-blocking enqueue for store jobs.
 bool worker_queue_try_enqueue_store(WorkerQueue* q, const L2StoreJob& job);
+
+// Non-blocking enqueue for L2 invalidate jobs.
+bool worker_queue_enqueue_l2_invalidate(WorkerQueue* q, const char* key, std::uint64_t now_ms);
 
 // Signals workers to stop and joins all threads.
 // Caller must keep any L2DiskCache alive until this returns.

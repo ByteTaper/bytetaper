@@ -197,6 +197,25 @@ if(BUILD_TESTING)
       COMMAND bytetaper_l1_cache_invalidation_test
     )
 
+    add_executable(l2_cache_invalidation_test
+      tests/l2_cache_invalidation_test.cpp
+    )
+    target_include_directories(l2_cache_invalidation_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(l2_cache_invalidation_test
+      PRIVATE
+        gtest_main
+        bytetaper_cache
+        bytetaper_prometheus_registry
+        RocksDB::RocksDB
+    )
+    add_test(
+      NAME l2_cache_invalidation_test
+      COMMAND l2_cache_invalidation_test
+    )
+
     add_executable(runtime_worker_queue_test
       tests/runtime_worker_queue_test.cpp
     )
@@ -217,6 +236,27 @@ if(BUILD_TESTING)
     add_test(
       NAME runtime_worker_queue_test
       COMMAND runtime_worker_queue_test
+    )
+
+    add_executable(runtime_worker_queue_l2_invalidate_test
+      tests/runtime_worker_queue_l2_invalidate_test.cpp
+    )
+    target_include_directories(runtime_worker_queue_l2_invalidate_test
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(runtime_worker_queue_l2_invalidate_test
+      PRIVATE
+        gtest_main
+        bytetaper_runtime
+        bytetaper_cache
+        bytetaper_prometheus_registry
+        Threads::Threads
+        RocksDB::RocksDB
+    )
+    add_test(
+      NAME runtime_worker_queue_l2_invalidate_test
+      COMMAND runtime_worker_queue_l2_invalidate_test
     )
 
     add_executable(route_cache_epoch_store_test

@@ -160,6 +160,12 @@ bool l2_remove(L2DiskCache* cache, const char* key) {
     if (!cache || !cache->db || !key)
         return false;
 
+    std::string value;
+    rocksdb::Status s = cache->db->Get(cache->read_options, key, &value);
+    if (s.IsNotFound()) {
+        return false;
+    }
+
     rocksdb::Status status = cache->db->Delete(cache->write_options, key);
     return status.ok();
 }

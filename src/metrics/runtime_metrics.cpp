@@ -101,6 +101,12 @@ void record_runtime_event(RuntimeMetrics* metrics, RuntimeMetricEvent event) {
     case RuntimeMetricEvent::RouteMatchNoMatch:
         metrics->route_match_no_match_total.fetch_add(1, std::memory_order_relaxed);
         break;
+    case RuntimeMetricEvent::L2InvalidateSuccess:
+        metrics->l2_async_invalidate_success_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case RuntimeMetricEvent::L2InvalidateError:
+        metrics->l2_async_invalidate_error_total.fetch_add(1, std::memory_order_relaxed);
+        break;
     default:
         break;
     }
@@ -119,6 +125,10 @@ void record_runtime_wait_ms(RuntimeMetrics* metrics, RuntimeMetricEvent event,
     case RuntimeMetricEvent::L2StoreLaneWait:
         metrics->worker_store_lane_wait_ms_total.fetch_add(wait_ms, std::memory_order_relaxed);
         metrics->worker_store_lane_wait_count_total.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case RuntimeMetricEvent::L2InvalidateLaneWait:
+        metrics->worker_invalidate_lane_wait_ms_total.fetch_add(wait_ms, std::memory_order_relaxed);
+        metrics->worker_invalidate_lane_wait_count_total.fetch_add(1, std::memory_order_relaxed);
         break;
     default:
         break;
@@ -144,6 +154,15 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         metrics.worker_store_lane_wait_count_total.load(std::memory_order_relaxed);
     const double store_wait_avg =
         store_wait_count > 0 ? static_cast<double>(store_wait_total) / store_wait_count : 0.0;
+
+    const std::uint64_t invalidate_wait_total =
+        metrics.worker_invalidate_lane_wait_ms_total.load(std::memory_order_relaxed);
+    const std::uint64_t invalidate_wait_count =
+        metrics.worker_invalidate_lane_wait_count_total.load(std::memory_order_relaxed);
+    const double invalidate_wait_avg =
+        invalidate_wait_count > 0
+            ? static_cast<double>(invalidate_wait_total) / invalidate_wait_count
+            : 0.0;
 
     int n = std::snprintf(
         buf, buf_size,
@@ -180,6 +199,9 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         "# HELP bytetaper_worker_store_lane_quota_effective Effective store lane quota.\n"
         "# TYPE bytetaper_worker_store_lane_quota_effective gauge\n"
         "bytetaper_worker_store_lane_quota_effective %lu\n"
+        "# HELP bytetaper_worker_invalidate_lane_quota_effective Effective invalidate lane quota.\n"
+        "# TYPE bytetaper_worker_invalidate_lane_quota_effective gauge\n"
+        "bytetaper_worker_invalidate_lane_quota_effective %lu\n"
         "# HELP bytetaper_worker_async_store_max_body_size_effective Effective async store max "
         "body size in bytes (0 = unset/not started).\n"
         "# TYPE bytetaper_worker_async_store_max_body_size_effective gauge\n"
@@ -228,6 +250,14 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         "failed during persistence.\n"
         "# TYPE bytetaper_runtime_l2_async_store_error_total counter\n"
         "bytetaper_runtime_l2_async_store_error_total %lu\n"
+        "# HELP bytetaper_runtime_l2_async_invalidate_success_total Number of background L2 "
+        "invalidates that completed successfully.\n"
+        "# TYPE bytetaper_runtime_l2_async_invalidate_success_total counter\n"
+        "bytetaper_runtime_l2_async_invalidate_success_total %lu\n"
+        "# HELP bytetaper_runtime_l2_async_invalidate_error_total Number of background L2 "
+        "invalidates that failed.\n"
+        "# TYPE bytetaper_runtime_l2_async_invalidate_error_total counter\n"
+        "bytetaper_runtime_l2_async_invalidate_error_total %lu\n"
         "# HELP bytetaper_runtime_l2_async_store_dropped_total Number of L2 stores dropped due to "
         "queue saturation.\n"
         "# TYPE bytetaper_runtime_l2_async_store_dropped_total counter\n"
@@ -286,6 +316,10 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         "wait time for L2 stores.\n"
         "# TYPE bytetaper_worker_store_lane_wait_ms_avg gauge\n"
         "bytetaper_worker_store_lane_wait_ms_avg %.3f\n"
+        "# HELP bytetaper_worker_invalidate_lane_wait_ms_avg Average background worker queue "
+        "wait time for L2 invalidates.\n"
+        "# TYPE bytetaper_worker_invalidate_lane_wait_ms_avg gauge\n"
+        "bytetaper_worker_invalidate_lane_wait_ms_avg %.3f\n"
         "# HELP bytetaper_worker_store_lane_starvation_total Total number of cycles where "
         "pending stores were starved of execution due to lookup lane quota.\n"
         "# TYPE bytetaper_worker_store_lane_starvation_total counter\n"
@@ -318,6 +352,7 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         metrics.worker_count_effective.load(std::memory_order_relaxed),
         metrics.worker_lookup_lane_quota_effective.load(std::memory_order_relaxed),
         metrics.worker_store_lane_quota_effective.load(std::memory_order_relaxed),
+        metrics.worker_invalidate_lane_quota_effective.load(std::memory_order_relaxed),
         metrics.worker_async_store_max_body_size_effective.load(std::memory_order_relaxed),
         metrics.l2_block_cache_mb_effective.load(std::memory_order_relaxed),
         metrics.l2_write_buffer_mb_effective.load(std::memory_order_relaxed),
@@ -330,6 +365,8 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         metrics.l2_async_store_total.load(std::memory_order_relaxed),
         metrics.l2_async_store_success_total.load(std::memory_order_relaxed),
         metrics.l2_async_store_error_total.load(std::memory_order_relaxed),
+        metrics.l2_async_invalidate_success_total.load(std::memory_order_relaxed),
+        metrics.l2_async_invalidate_error_total.load(std::memory_order_relaxed),
         metrics.l2_async_store_dropped_total.load(std::memory_order_relaxed),
         metrics.l2_async_store_oversized_skipped_total.load(std::memory_order_relaxed),
         metrics.l2_async_store_encode_error_total.load(std::memory_order_relaxed),
@@ -342,7 +379,8 @@ std::size_t render_runtime_metrics_prometheus(const RuntimeMetrics& metrics, cha
         metrics.l2_lookup_decode_error_total.load(std::memory_order_relaxed),
         metrics.l2_lookup_rocksdb_error_total.load(std::memory_order_relaxed),
         metrics.worker_store_body_pool_full_total.load(std::memory_order_relaxed), lookup_wait_avg,
-        store_wait_avg, metrics.worker_store_lane_starvation_total.load(std::memory_order_relaxed),
+        store_wait_avg, invalidate_wait_avg,
+        metrics.worker_store_lane_starvation_total.load(std::memory_order_relaxed),
         metrics.worker_store_body_pool_bytes_in_use.load(std::memory_order_relaxed),
         metrics.route_match_exact_scan_total.load(std::memory_order_relaxed),
         metrics.route_match_prefix_scan_total.load(std::memory_order_relaxed),

@@ -44,7 +44,11 @@ enum class RuntimeMetricEvent : std::uint8_t {
     L2AsyncStoreBodyPoolFull,
     L2LookupLaneWait,
     L2StoreLaneWait,
+    L2InvalidateLaneWait,
     WorkerStoreLaneStarvation,
+    // Async L2 invalidate (worker)
+    L2InvalidateSuccess,
+    L2InvalidateError,
     // Route matching metrics
     RouteMatchExactScan,
     RouteMatchPrefixScan,
@@ -64,6 +68,7 @@ struct RuntimeMetrics {
     std::atomic<std::uint64_t> worker_count_effective{ 0 };
     std::atomic<std::uint64_t> worker_lookup_lane_quota_effective{ 0 };
     std::atomic<std::uint64_t> worker_store_lane_quota_effective{ 0 };
+    std::atomic<std::uint64_t> worker_invalidate_lane_quota_effective{ 0 };
     std::atomic<std::uint64_t> worker_async_store_max_body_size_effective{ 0 };
     std::atomic<std::uint64_t> l2_block_cache_mb_effective{ 0 };
     std::atomic<std::uint64_t> l2_write_buffer_mb_effective{ 0 };
@@ -102,6 +107,10 @@ struct RuntimeMetrics {
     std::atomic<std::uint64_t> worker_store_lane_wait_ms_total{ 0 };
     std::atomic<std::uint64_t> worker_store_lane_wait_count_total{ 0 };
     std::atomic<std::uint64_t> worker_store_lane_starvation_total{ 0 };
+    std::atomic<std::uint64_t> worker_invalidate_lane_wait_ms_total{ 0 };
+    std::atomic<std::uint64_t> worker_invalidate_lane_wait_count_total{ 0 };
+    std::atomic<std::uint64_t> l2_async_invalidate_success_total{ 0 };
+    std::atomic<std::uint64_t> l2_async_invalidate_error_total{ 0 };
     std::atomic<std::uint64_t> worker_store_body_pool_bytes_in_use{ 0 };
 
     std::atomic<std::uint64_t> route_match_exact_scan_total{ 0 };

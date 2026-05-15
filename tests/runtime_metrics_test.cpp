@@ -58,6 +58,14 @@ TEST_F(RuntimeMetricsTest, L2StoreEvents) {
     EXPECT_EQ(metrics.l2_async_store_body_too_large_total.load(), 1);
 }
 
+TEST_F(RuntimeMetricsTest, L2InvalidateEvents) {
+    record_runtime_event(&metrics, RuntimeMetricEvent::L2InvalidateSuccess);
+    record_runtime_event(&metrics, RuntimeMetricEvent::L2InvalidateError);
+
+    EXPECT_EQ(metrics.l2_async_invalidate_success_total.load(), 1);
+    EXPECT_EQ(metrics.l2_async_invalidate_error_total.load(), 1);
+}
+
 TEST_F(RuntimeMetricsTest, PromotionEvents) {
     record_runtime_event(&metrics, RuntimeMetricEvent::L2ToL1Promotion);
     record_runtime_event(&metrics, RuntimeMetricEvent::L2ToL1StaleRejected);
@@ -82,6 +90,12 @@ TEST_F(RuntimeMetricsTest, RenderPrometheusFormat) {
     metrics.worker_store_body_pool_bytes_in_use.store(4096);
 
     metrics.worker_async_store_max_body_size_effective.store(65536);
+    metrics.worker_invalidate_lane_quota_effective.store(1);
+    metrics.l2_async_invalidate_success_total.store(42);
+    metrics.l2_async_invalidate_error_total.store(1);
+    metrics.worker_invalidate_lane_wait_ms_total.store(50);
+    metrics.worker_invalidate_lane_wait_count_total.store(2);
+
     metrics.l2_block_cache_mb_effective.store(64);
     metrics.l2_write_buffer_mb_effective.store(16);
     metrics.l2_max_background_jobs_effective.store(2);
@@ -105,6 +119,11 @@ TEST_F(RuntimeMetricsTest, RenderPrometheusFormat) {
 
     EXPECT_NE(std::strstr(buf, "bytetaper_worker_async_store_max_body_size_effective 65536"),
               nullptr);
+    EXPECT_NE(std::strstr(buf, "bytetaper_worker_invalidate_lane_quota_effective 1"), nullptr);
+    EXPECT_NE(std::strstr(buf, "bytetaper_runtime_l2_async_invalidate_success_total 42"), nullptr);
+    EXPECT_NE(std::strstr(buf, "bytetaper_runtime_l2_async_invalidate_error_total 1"), nullptr);
+    EXPECT_NE(std::strstr(buf, "bytetaper_worker_invalidate_lane_wait_ms_avg 25.000"), nullptr);
+
     EXPECT_NE(std::strstr(buf, "bytetaper_l2_block_cache_mb_effective 64"), nullptr);
     EXPECT_NE(std::strstr(buf, "bytetaper_l2_write_buffer_mb_effective 16"), nullptr);
     EXPECT_NE(std::strstr(buf, "bytetaper_l2_max_background_jobs_effective 2"), nullptr);
