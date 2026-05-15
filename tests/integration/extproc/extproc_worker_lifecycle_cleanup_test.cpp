@@ -26,6 +26,25 @@ struct ReservedPort {
     ReservedPort(const ReservedPort&) = delete;
     ReservedPort& operator=(const ReservedPort&) = delete;
 
+    ReservedPort(ReservedPort&& other) noexcept : fd(other.fd), port(other.port) {
+        other.fd = -1;
+        other.port = 0;
+    }
+
+    ReservedPort& operator=(ReservedPort&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+        if (fd >= 0) {
+            close(fd);
+        }
+        fd = other.fd;
+        port = other.port;
+        other.fd = -1;
+        other.port = 0;
+        return *this;
+    }
+
     ~ReservedPort() {
         if (fd >= 0) {
             close(fd);
