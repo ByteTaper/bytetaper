@@ -48,7 +48,7 @@ trivy image --format cyclonedx --output "$OUT_DIR/bytetaper-runtime-sbom.cdx.jso
 trivy image --format spdx-json --output "$OUT_DIR/bytetaper-runtime-sbom.spdx.json" "$IMAGE"
 
 echo "[4/5] Scan vulnerabilities"
-tools/supply_chain/validate_cve_allowlist.py "$ALLOWLIST" "$OUT_DIR/.trivyignore"
+python3 tools/supply_chain/validate_cve_allowlist.py "$ALLOWLIST" "$OUT_DIR/.trivyignore"
 
 trivy image \
   --format json \
