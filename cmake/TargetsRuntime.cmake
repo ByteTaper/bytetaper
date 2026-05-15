@@ -65,6 +65,8 @@ add_library(bytetaper_stages STATIC
   src/stages/field_variant_admission_stage.cpp
   src/stages/l1_variant_lookup_stage.cpp
   src/stages/l1_variant_store_stage.cpp
+  src/stages/mutation_invalidation_prepare_stage.cpp
+  src/stages/mutation_invalidation_apply_stage.cpp
 )
 target_include_directories(bytetaper_stages PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(bytetaper_stages PUBLIC

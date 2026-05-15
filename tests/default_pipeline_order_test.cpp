@@ -9,9 +9,17 @@
 #include "policy/route_policy.h"
 #include "runtime/route_cache_epoch_store.h"
 #include "runtime/worker_queue.h"
+#include "stages/cache_key_prepare_stage.h"
 #include "stages/coalescing_decision_stage.h"
+#include "stages/coalescing_follower_wait_stage.h"
+#include "stages/compression_decision_stage.h"
+#include "stages/field_variant_admission_stage.h"
 #include "stages/l1_cache_lookup_stage.h"
+#include "stages/l1_variant_lookup_stage.h"
 #include "stages/l2_cache_async_lookup_enqueue_stage.h"
+#include "stages/mutation_invalidation_apply_stage.h"
+#include "stages/mutation_invalidation_prepare_stage.h"
+#include "stages/pagination_request_mutation_stage.h"
 
 #include <cstring>
 #include <gtest/gtest.h>
@@ -126,28 +134,21 @@ TEST_F(DefaultPipelineOrderTest, L1MissEvaluatesCoalescing) {
 }
 
 TEST_F(DefaultPipelineOrderTest, DefaultPipelineContainsNoSyncRocksDB) {
-    // This is a static/runtime check of the stage pointers
-    // We compare with the stage addresses.
-    // In our project, we don't have a "l2_cache_lookup_stage" that is synchronous
-    // anymore in the hot path.
+    // This is a static/runtime check of the stage pointers to enforce the documented phase order.
+    ASSERT_EQ(kLookupStageCount, 9u);
+    EXPECT_EQ(kLookupStages[0], stages::mutation_invalidation_prepare_stage);
+    EXPECT_EQ(kLookupStages[1], stages::cache_key_prepare_stage);
+    EXPECT_EQ(kLookupStages[2], stages::field_variant_admission_stage);
+    EXPECT_EQ(kLookupStages[3], stages::l1_cache_lookup_stage);
+    EXPECT_EQ(kLookupStages[4], stages::l1_variant_lookup_stage);
+    EXPECT_EQ(kLookupStages[5], stages::coalescing_decision_stage);
+    EXPECT_EQ(kLookupStages[6], stages::coalescing_follower_wait_stage);
+    EXPECT_EQ(kLookupStages[7], stages::l2_cache_async_lookup_enqueue_stage);
+    EXPECT_EQ(kLookupStages[8], stages::pagination_request_mutation_stage);
 
-    // We can't easily check for "no sync RocksDB" by address if we don't know the address,
-    // but we can check it's NOT the async enqueue stage (which is at index 3).
-    // The requirement is that no SYNCHRONOUS L2 lookup stage exists in the array.
-
-    // Since we only have one kLookupStages definition, we'll just check for our known stages.
-    EXPECT_EQ(kLookupStageCount, 8u);
-    // stages[0] = cache_key_prepare_stage
-    // stages[1] = field_variant_admission_stage
-    // stages[2] = l1_cache_lookup_stage
-    // stages[3] = l1_variant_lookup_stage
-    // stages[4] = coalescing_decision_stage
-    // stages[5] = coalescing_follower_wait_stage
-    // stages[6] = l2_cache_async_lookup_enqueue_stage
-    // stages[7] = pagination_request_mutation_stage
-
-    // Check that none of these are a synchronous L2 lookup.
-    // We don't even have a stages/l2_cache_lookup_stage.h anymore probably.
+    ASSERT_EQ(kResponseStageCount, 2u);
+    EXPECT_EQ(kResponseStages[0], stages::mutation_invalidation_apply_stage);
+    EXPECT_EQ(kResponseStages[1], stages::compression_decision_stage);
 }
 
 } // namespace bytetaper::extproc

@@ -15,6 +15,8 @@
 #include "stages/l1_variant_store_stage.h"
 #include "stages/l2_cache_async_lookup_enqueue_stage.h"
 #include "stages/l2_cache_async_store_enqueue_stage.h"
+#include "stages/mutation_invalidation_apply_stage.h"
+#include "stages/mutation_invalidation_prepare_stage.h"
 #include "stages/pagination_request_mutation_stage.h"
 
 #include <iterator>
@@ -31,6 +33,7 @@ namespace bytetaper::extproc {
  * See docs/runtime/RUNTIME_BOUNDARIES.md for the enforcement contract.
  */
 const apg::ApgStage kLookupStages[] = {
+    stages::mutation_invalidation_prepare_stage,
     stages::cache_key_prepare_stage,
     stages::field_variant_admission_stage,
     stages::l1_cache_lookup_stage,
@@ -41,6 +44,12 @@ const apg::ApgStage kLookupStages[] = {
     stages::pagination_request_mutation_stage,
 };
 const std::size_t kLookupStageCount = std::size(kLookupStages);
+
+const apg::ApgStage kResponseStages[] = {
+    stages::mutation_invalidation_apply_stage,
+    stages::compression_decision_stage,
+};
+const std::size_t kResponseStageCount = std::size(kResponseStages);
 
 /**
  * HOT-PATH: response-body pipeline.
@@ -71,6 +80,10 @@ void compile_route_runtime(const policy::RoutePolicy& policy, CompiledRouteRunti
     runtime->policy = &policy;
 
     // 1. Lookup stages (preserving default relative ordering)
+    if (policy.cache.invalidation.enabled) {
+        runtime->lookup_stages[runtime->lookup_count++] =
+            stages::mutation_invalidation_prepare_stage;
+    }
     if (policy.cache.behavior == policy::CacheBehavior::Store) {
         runtime->lookup_stages[runtime->lookup_count++] = stages::cache_key_prepare_stage;
         if (policy.cache.field_variant.enabled) {
@@ -106,6 +119,10 @@ void compile_route_runtime(const policy::RoutePolicy& policy, CompiledRouteRunti
     }
 
     // 3. Response stages
+    if (policy.cache.invalidation.enabled) {
+        runtime->response_stages[runtime->response_count++] =
+            stages::mutation_invalidation_apply_stage;
+    }
     runtime->response_stages[runtime->response_count++] = stages::compression_decision_stage;
 }
 

@@ -14,6 +14,8 @@
 #include "stages/l1_variant_store_stage.h"
 #include "stages/l2_cache_async_lookup_enqueue_stage.h"
 #include "stages/l2_cache_async_store_enqueue_stage.h"
+#include "stages/mutation_invalidation_apply_stage.h"
+#include "stages/mutation_invalidation_prepare_stage.h"
 #include "stages/pagination_request_mutation_stage.h"
 
 #include <gtest/gtest.h>
@@ -323,6 +325,22 @@ TEST(CompiledRouteRuntimeTest, AllFeaturesWithFieldVariants_HasExpectedStages) {
 
     ASSERT_EQ(runtime.response_count, 1);
     EXPECT_EQ(runtime.response_stages[0], stages::compression_decision_stage);
+}
+
+TEST(CompiledRouteRuntimeTest, CacheInvalidationEnabled_HasExpectedStages) {
+    policy::RoutePolicy policy{};
+    policy.route_id = "test-route";
+    policy.cache.invalidation.enabled = true;
+
+    CompiledRouteRuntime runtime{};
+    compile_route_runtime(policy, &runtime);
+
+    ASSERT_EQ(runtime.lookup_count, 1);
+    EXPECT_EQ(runtime.lookup_stages[0], stages::mutation_invalidation_prepare_stage);
+
+    ASSERT_EQ(runtime.response_count, 2);
+    EXPECT_EQ(runtime.response_stages[0], stages::mutation_invalidation_apply_stage);
+    EXPECT_EQ(runtime.response_stages[1], stages::compression_decision_stage);
 }
 
 } // namespace bytetaper::extproc

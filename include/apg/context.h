@@ -44,6 +44,38 @@ struct CompressionDecisionOutput {
     policy::CompressionAlgorithm algorithm_hint = policy::CompressionAlgorithm::None;
 };
 
+static constexpr std::size_t kMaxPendingInvalidationTargets = 8;
+static constexpr std::size_t kInvalidationRouteIdMaxLen = 64;
+
+enum class MutationInvalidationDecision : std::uint8_t {
+    None,
+    Prepared,
+    Applied,
+    SkippedNoPolicy,
+    SkippedNonMutationMethod,
+    SkippedMethodNotEnabled,
+    SkippedStatusNotSuccessful,
+    FailedEpochStoreMissing,
+    FailedEpochBump,
+};
+
+struct PendingMutationInvalidationTarget {
+    char route_id[kInvalidationRouteIdMaxLen] = {};
+};
+
+struct PendingMutationInvalidationPlan {
+    bool prepared = false;
+    bool applied = false;
+    bool skipped = false;
+    bool failed = false;
+    MutationInvalidationDecision decision = MutationInvalidationDecision::None;
+    std::uint16_t success_status_min = 200;
+    std::uint16_t success_status_max = 299;
+    PendingMutationInvalidationTarget targets[kMaxPendingInvalidationTargets] = {};
+    std::size_t target_count = 0;
+    const char* reason = nullptr;
+};
+
 struct ApgTransformContext {
     static constexpr std::size_t kRawPathBufferSize = 1024;
     static constexpr std::size_t kRawQueryBufferSize = 1024;
@@ -154,6 +186,8 @@ struct ApgTransformContext {
     bool variant_admission_passed = false;
     char sanitized_query[kRawQueryBufferSize] = {};
     bool sanitized_query_ready = false;
+
+    PendingMutationInvalidationPlan mutation_invalidation = {};
 
     // --- Metrics (optional pointers to central registry counters) ---
     metrics::PaginationMetrics* pagination_metrics = nullptr;

@@ -232,6 +232,12 @@ apply_request_headers_selection(const envoy::service::ext_proc::v3::ProcessingRe
             state->context.request_method = policy::HttpMethod::Get;
         } else if (method == "POST" || method == "post") {
             state->context.request_method = policy::HttpMethod::Post;
+        } else if (method == "PUT" || method == "put") {
+            state->context.request_method = policy::HttpMethod::Put;
+        } else if (method == "DELETE" || method == "delete") {
+            state->context.request_method = policy::HttpMethod::Delete;
+        } else if (method == "PATCH" || method == "patch") {
+            state->context.request_method = policy::HttpMethod::Patch;
         }
     }
 

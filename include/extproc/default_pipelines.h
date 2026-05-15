@@ -12,9 +12,9 @@
 
 namespace bytetaper::extproc {
 
-constexpr std::size_t kMaxLookupStages = 8;
+constexpr std::size_t kMaxLookupStages = 12;
 constexpr std::size_t kMaxStoreStages = 8;
-constexpr std::size_t kMaxResponseStages = 8;
+constexpr std::size_t kMaxResponseStages = 12;
 
 struct CompiledRouteRuntime {
     apg::ApgStage lookup_stages[kMaxLookupStages] = {};
@@ -69,6 +69,9 @@ extern const std::size_t kLookupStageCount;
  */
 extern const apg::ApgStage kStoreStages[];
 extern const std::size_t kStoreStageCount;
+
+extern const apg::ApgStage kResponseStages[];
+extern const std::size_t kResponseStageCount;
 
 } // namespace bytetaper::extproc
 

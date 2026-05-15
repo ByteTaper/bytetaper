@@ -249,6 +249,26 @@ if(BUILD_TESTING)
     )
     add_test(NAME cache_key_prepare_route_epoch_test COMMAND cache_key_prepare_route_epoch_test)
 
+    add_executable(mutation_invalidation_prepare_stage_test
+      tests/mutation_invalidation_prepare_stage_test.cpp
+    )
+    target_link_libraries(mutation_invalidation_prepare_stage_test
+      PRIVATE
+        gtest_main
+        bytetaper_stages
+    )
+    add_test(NAME mutation_invalidation_prepare_stage_test COMMAND mutation_invalidation_prepare_stage_test)
+
+    add_executable(mutation_invalidation_apply_stage_test
+      tests/mutation_invalidation_apply_stage_test.cpp
+    )
+    target_link_libraries(mutation_invalidation_apply_stage_test
+      PRIVATE
+        gtest_main
+        bytetaper_stages
+    )
+    add_test(NAME mutation_invalidation_apply_stage_test COMMAND mutation_invalidation_apply_stage_test)
+
     add_executable(l1_cache_lookup_stage_test
       tests/l1_cache_lookup_stage_test.cpp
     )
