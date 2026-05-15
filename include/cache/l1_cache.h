@@ -39,6 +39,12 @@ struct CacheMetrics;
 
 namespace bytetaper::cache {
 
+enum class L1RemoveResult : std::uint8_t {
+    Removed,
+    Miss,
+    InvalidArgument,
+};
+
 void l1_init(L1Cache* cache);
 
 // Stores a copy of entry in the appropriate shard.
@@ -59,6 +65,14 @@ bool l1_put_if_newer(L1Cache* cache, const CacheEntry& entry,
 bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEntry* out,
             char* body_out, std::size_t body_out_capacity,
             bytetaper::metrics::CacheMetrics* metrics = nullptr);
+
+// Explicitly removes an entry by key.
+L1RemoveResult l1_remove(L1Cache* cache, const char* key,
+                         bytetaper::metrics::CacheMetrics* metrics = nullptr);
+
+// Convenience wrapper for l1_remove; returns true only if the key was found and removed.
+bool l1_remove_key(L1Cache* cache, const char* key,
+                   bytetaper::metrics::CacheMetrics* metrics = nullptr);
 
 // Returns true only if entry is safe to store in L1 (body present and within capacity).
 bool l1_can_store_entry(const CacheEntry& entry);

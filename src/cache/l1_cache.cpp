@@ -26,6 +26,13 @@ void copy_body_to_slot(L1CacheShard* shard, std::size_t slot_idx, const CacheEnt
     shard->slots[slot_idx].body_len = copy_len;
 }
 
+void clear_slot(L1CacheShard* shard, std::size_t slot_idx) {
+    shard->slots[slot_idx] = {};
+    std::memset(shard->bodies[slot_idx], 0, kL1MaxBodySize);
+    shard->generations[slot_idx] = 0;
+    shard->key_hashes[slot_idx] = 0;
+}
+
 } // namespace
 
 bool l1_can_store_entry(const CacheEntry& entry) {
@@ -223,6 +230,40 @@ bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEnt
         return true;
     }
     return false;
+}
+
+L1RemoveResult l1_remove(L1Cache* cache, const char* key,
+                         bytetaper::metrics::CacheMetrics* metrics) {
+    if (cache == nullptr || key == nullptr) {
+        return L1RemoveResult::InvalidArgument;
+    }
+
+    const std::uint64_t h = bytetaper::hash::hash_cstr_runtime(key);
+    const std::size_t shard_idx = h % kL1ShardCount;
+    auto& shard = cache->shards[shard_idx];
+
+    std::scoped_lock lock(shard.mutex);
+
+    for (std::size_t i = 0; i < kL1SlotsPerShard; ++i) {
+        if (shard.generations[i] == 0) {
+            continue;
+        }
+        if (shard.key_hashes[i] != h) {
+            continue;
+        }
+        if (std::strncmp(shard.slots[i].key, key, kCacheKeyMaxLen) != 0) {
+            continue;
+        }
+
+        clear_slot(&shard, i);
+        return L1RemoveResult::Removed;
+    }
+
+    return L1RemoveResult::Miss;
+}
+
+bool l1_remove_key(L1Cache* cache, const char* key, bytetaper::metrics::CacheMetrics* metrics) {
+    return l1_remove(cache, key, metrics) == L1RemoveResult::Removed;
 }
 
 } // namespace bytetaper::cache
