@@ -46,6 +46,9 @@ RUN groupadd -f -o -g "${LOCAL_GID}" bytetaper \
     && mkdir -p /home/bytetaper/.cache/ccache \
     && mkdir -p /var/cache/bytetaper \
     && mkdir -p /workspace/build \
+                /workspace/build-asan \
+                /workspace/build-ubsan \
+                /workspace/build-tsan \
     && chown -R bytetaper:bytetaper /home/bytetaper/.cache \
     && chown bytetaper:bytetaper /var/cache/bytetaper \
     && chown -R bytetaper:bytetaper /workspace
