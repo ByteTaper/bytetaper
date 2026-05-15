@@ -6,6 +6,7 @@
 #include "taperquery/policy_ir_version.h"
 
 #include <algorithm>
+#include <cctype>
 #include <set>
 #include <string>
 
@@ -172,6 +173,33 @@ bool compile_cache(const TqAstCacheStmt& ast, TqRoutePolicy* out_rp,
     out_rp->cache.field_variant.max_field_count = ast.field_variant.max_field_count;
     out_rp->cache.field_variant.admission_threshold = ast.field_variant.admission_threshold;
     out_rp->cache.field_variant.ttl_max_ms = ast.field_variant.ttl_max_ms;
+
+    // Invalidation
+    if (ast.invalidation.enabled) {
+        out_rp->cache.invalidation.enabled = true;
+        for (const auto& method : ast.invalidation.on_methods) {
+            std::string upper_m = method;
+            for (char& c : upper_m) {
+                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            }
+            out_rp->cache.invalidation.on_methods.push_back(upper_m);
+        }
+        out_rp->cache.invalidation.timing = ast.invalidation.timing;
+        out_rp->cache.invalidation.success_status_min = ast.invalidation.success_status_min;
+        out_rp->cache.invalidation.success_status_max = ast.invalidation.success_status_max;
+        for (const auto& t : ast.invalidation.targets) {
+            TqCacheInvalidationTarget target{};
+            target.route_id = t.route_id;
+            if (t.strategy == "route_epoch") {
+                target.strategy = TqCacheInvalidationStrategy::RouteEpoch;
+            } else if (t.strategy == "exact_key") {
+                target.strategy = TqCacheInvalidationStrategy::ExactKey;
+            } else if (t.strategy == "prefix") {
+                target.strategy = TqCacheInvalidationStrategy::Prefix;
+            }
+            out_rp->cache.invalidation.targets.push_back(target);
+        }
+    }
 
     if (out_rp->cache.behavior == TqCacheBehavior::Store) {
         bool has_ttl = ast.ttl_specified;

@@ -53,6 +53,29 @@ TqRoutePolicy from_runtime_route_policy(const policy::RoutePolicy& route) {
         result.cache.vary_headers.names.push_back(route.cache.vary_headers.names[i]);
     }
 
+    result.cache.invalidation.enabled = route.cache.invalidation.enabled;
+    result.cache.invalidation.on_methods.clear();
+    if (route.cache.invalidation.on_patch)
+        result.cache.invalidation.on_methods.push_back("PATCH");
+    if (route.cache.invalidation.on_put)
+        result.cache.invalidation.on_methods.push_back("PUT");
+    if (route.cache.invalidation.on_delete)
+        result.cache.invalidation.on_methods.push_back("DELETE");
+    if (route.cache.invalidation.timing ==
+        policy::CacheInvalidationTiming::AfterSuccessfulUpstreamResponse) {
+        result.cache.invalidation.timing = "after_successful_upstream_response";
+    }
+    result.cache.invalidation.success_status_min = route.cache.invalidation.success_status_min;
+    result.cache.invalidation.success_status_max = route.cache.invalidation.success_status_max;
+    result.cache.invalidation.targets.clear();
+    for (std::size_t i = 0; i < route.cache.invalidation.target_count; ++i) {
+        TqCacheInvalidationTarget tgt;
+        tgt.route_id = route.cache.invalidation.targets[i].route_id;
+        tgt.strategy =
+            static_cast<TqCacheInvalidationStrategy>(route.cache.invalidation.targets[i].strategy);
+        result.cache.invalidation.targets.push_back(tgt);
+    }
+
     result.failure_mode = static_cast<TqFailureMode>(route.failure_mode);
 
     // pagination

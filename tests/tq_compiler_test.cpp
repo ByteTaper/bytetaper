@@ -434,8 +434,29 @@ TEST(TqCompilerTest, RejectsDuplicateFieldNamesInStrictMode) {
 }
 
 // ==========================================
-// 4. Cache (10)
+// 4. Cache (11)
 // ==========================================
+
+TEST(TqCompilerTest, CompilesCacheInvalidationWithQuotes) {
+    const char* src = "policy \"pid\" { route \"r1\" when method patch and path prefix \"/\" { "
+                      "cache { invalidation { enabled true on_methods [\"PATCH\"] timing "
+                      "\"after_successful_upstream_response\" success_status min 200 max 299 "
+                      "target \"get_user\" { strategy \"route_epoch\" } } } } }";
+    TqParseResult parse_res = parse_src(src);
+    ASSERT_TRUE(parse_res.ok);
+
+    TqPolicyDocument doc{};
+    TqDiagnosticBag diags{};
+    TqCompileOptions opts{};
+    ASSERT_TRUE(compile_taperquery_ast_to_policy_ir(parse_res.document, opts, &doc, &diags));
+    ASSERT_EQ(doc.routes.size(), 1u);
+    EXPECT_TRUE(doc.routes[0].cache.invalidation.enabled);
+    EXPECT_EQ(doc.routes[0].cache.invalidation.timing, "after_successful_upstream_response");
+    ASSERT_EQ(doc.routes[0].cache.invalidation.targets.size(), 1u);
+    EXPECT_EQ(doc.routes[0].cache.invalidation.targets[0].route_id, "get_user");
+    EXPECT_EQ(doc.routes[0].cache.invalidation.targets[0].strategy,
+              TqCacheInvalidationStrategy::RouteEpoch);
+}
 
 TEST(TqCompilerTest, CompilesCacheStoreTtl) {
     const char* src =

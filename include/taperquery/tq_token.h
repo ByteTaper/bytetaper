@@ -117,6 +117,18 @@ enum class TqTokenKind : std::uint8_t {
     KeywordBrotli,
     KeywordZstd,
     KeywordObserve,
+    KeywordInvalidation,
+    KeywordOnMethods,
+    KeywordTiming,
+    KeywordAfterSuccessfulUpstreamResponse,
+    KeywordSuccessStatus,
+    KeywordMin,
+    KeywordMax,
+    KeywordTarget,
+    KeywordRouteId,
+    KeywordStrategy,
+    KeywordRouteEpoch,
+    KeywordExactKey,
 };
 
 struct TqToken {

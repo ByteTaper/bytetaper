@@ -4,6 +4,7 @@
 #include "runtime/policy_snapshot.h"
 
 #include "policy/policy_identity.h"
+#include "policy/yaml_loader.h"
 #include "taperquery/policy_ir_identity.h"
 
 #include <algorithm>
@@ -56,6 +57,32 @@ taperquery::TqRoutePolicy convert_runtime_route_policy_to_tq(const policy::Route
     result.cache.vary_headers.names.clear();
     for (std::size_t i = 0; i < route.cache.vary_headers.count; ++i) {
         result.cache.vary_headers.names.push_back(route.cache.vary_headers.names[i]);
+    }
+
+    result.cache.invalidation.enabled = route.cache.invalidation.enabled;
+    result.cache.invalidation.on_methods.clear();
+    if (route.cache.invalidation.on_patch) {
+        result.cache.invalidation.on_methods.push_back("PATCH");
+    }
+    if (route.cache.invalidation.on_put) {
+        result.cache.invalidation.on_methods.push_back("PUT");
+    }
+    if (route.cache.invalidation.on_delete) {
+        result.cache.invalidation.on_methods.push_back("DELETE");
+    }
+    if (route.cache.invalidation.timing ==
+        policy::CacheInvalidationTiming::AfterSuccessfulUpstreamResponse) {
+        result.cache.invalidation.timing = "after_successful_upstream_response";
+    }
+    result.cache.invalidation.success_status_min = route.cache.invalidation.success_status_min;
+    result.cache.invalidation.success_status_max = route.cache.invalidation.success_status_max;
+    result.cache.invalidation.targets.clear();
+    for (std::size_t i = 0; i < route.cache.invalidation.target_count; ++i) {
+        taperquery::TqCacheInvalidationTarget tgt;
+        tgt.route_id = route.cache.invalidation.targets[i].route_id;
+        tgt.strategy = static_cast<taperquery::TqCacheInvalidationStrategy>(
+            route.cache.invalidation.targets[i].strategy);
+        result.cache.invalidation.targets.push_back(tgt);
     }
 
     result.failure_mode = static_cast<taperquery::TqFailureMode>(route.failure_mode);
@@ -144,6 +171,34 @@ policy::RoutePolicy convert_tq_route_policy_to_runtime(const taperquery::TqRoute
     for (std::size_t i = 0; i < res.cache.vary_headers.count; ++i) {
         std::strncpy(res.cache.vary_headers.names[i], ir.cache.vary_headers.names[i].c_str(),
                      policy::kMaxCacheVaryHeaderNameLen - 1);
+    }
+
+    res.cache.invalidation.enabled = ir.cache.invalidation.enabled;
+    res.cache.invalidation.on_patch = false;
+    res.cache.invalidation.on_put = false;
+    res.cache.invalidation.on_delete = false;
+    for (const auto& method : ir.cache.invalidation.on_methods) {
+        if (method == "PATCH") {
+            res.cache.invalidation.on_patch = true;
+        } else if (method == "PUT") {
+            res.cache.invalidation.on_put = true;
+        } else if (method == "DELETE") {
+            res.cache.invalidation.on_delete = true;
+        }
+    }
+    if (ir.cache.invalidation.timing == "after_successful_upstream_response") {
+        res.cache.invalidation.timing =
+            policy::CacheInvalidationTiming::AfterSuccessfulUpstreamResponse;
+    }
+    res.cache.invalidation.success_status_min = ir.cache.invalidation.success_status_min;
+    res.cache.invalidation.success_status_max = ir.cache.invalidation.success_status_max;
+    res.cache.invalidation.target_count =
+        std::min(ir.cache.invalidation.targets.size(), policy::kMaxCacheInvalidationTargets);
+    for (std::size_t i = 0; i < res.cache.invalidation.target_count; ++i) {
+        std::strncpy(res.cache.invalidation.targets[i].route_id,
+                     ir.cache.invalidation.targets[i].route_id.c_str(), policy::kMaxRouteIdLen - 1);
+        res.cache.invalidation.targets[i].strategy = static_cast<policy::CacheInvalidationStrategy>(
+            ir.cache.invalidation.targets[i].strategy);
     }
 
     res.failure_mode = static_cast<policy::FailureMode>(ir.failure_mode);

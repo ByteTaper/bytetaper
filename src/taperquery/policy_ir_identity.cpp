@@ -103,6 +103,29 @@ std::string compute_route_policy_identity_impl(const TqRoutePolicy& route) {
 
     feed_string_vector(canonical, "cache.vary_headers.names", route.cache.vary_headers.names);
 
+    // cache.invalidation
+    if (route.cache.invalidation.enabled) {
+        feed_bool(canonical, "cache.invalidation.enabled", route.cache.invalidation.enabled);
+        feed_string_vector(canonical, "cache.invalidation.on_methods",
+                           route.cache.invalidation.on_methods);
+        feed_string(canonical, "cache.invalidation.timing", route.cache.invalidation.timing);
+        feed_uint32(canonical, "cache.invalidation.success_status_min",
+                    route.cache.invalidation.success_status_min);
+        feed_uint32(canonical, "cache.invalidation.success_status_max",
+                    route.cache.invalidation.success_status_max);
+        feed_uint32(canonical, "cache.invalidation.targets.size",
+                    route.cache.invalidation.targets.size());
+        for (std::size_t i = 0; i < route.cache.invalidation.targets.size(); ++i) {
+            const auto& t = route.cache.invalidation.targets[i];
+            feed_string(canonical,
+                        ("cache.invalidation.targets[" + std::to_string(i) + "].route_id").c_str(),
+                        t.route_id);
+            feed_enum(canonical,
+                      ("cache.invalidation.targets[" + std::to_string(i) + "].strategy").c_str(),
+                      t.strategy);
+        }
+    }
+
     feed_enum(canonical, "failure_mode", route.failure_mode);
 
     // pagination

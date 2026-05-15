@@ -2527,4 +2527,18 @@ if(BUILD_TESTING)
   target_include_directories(taperquery_hot_reload_integration_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(taperquery_hot_reload_integration_test PRIVATE gtest_main bytetaper_admin bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter Threads::Threads)
   add_test(NAME taperquery_hot_reload_integration_test COMMAND taperquery_hot_reload_integration_test)
+
+  add_executable(cache_invalidation_policy_test
+    tests/cache_invalidation_policy_test.cpp
+  )
+  target_include_directories(cache_invalidation_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(cache_invalidation_policy_test PRIVATE gtest_main bytetaper_policy)
+  add_test(NAME cache_invalidation_policy_test COMMAND cache_invalidation_policy_test)
+
+  add_executable(tq_invalidation_ir_test
+    tests/tq_invalidation_ir_test.cpp
+  )
+  target_include_directories(tq_invalidation_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(tq_invalidation_ir_test PRIVATE gtest_main bytetaper_taperquery)
+  add_test(NAME tq_invalidation_ir_test COMMAND tq_invalidation_ir_test)
 endif()

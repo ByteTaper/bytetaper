@@ -92,6 +92,22 @@ struct TqAstFieldVariantClause {
     TqSourceSpan span{};
 };
 
+struct TqAstCacheInvalidationTargetClause {
+    std::string route_id{};
+    std::string strategy{}; // "route_epoch", "exact_key", "prefix"
+    TqSourceSpan span{};
+};
+
+struct TqAstCacheInvalidationClause {
+    bool enabled = false;
+    std::vector<std::string> on_methods{};
+    std::string timing{};
+    std::uint16_t success_status_min = 200;
+    std::uint16_t success_status_max = 299;
+    std::vector<TqAstCacheInvalidationTargetClause> targets{};
+    TqSourceSpan span{};
+};
+
 struct TqAstCacheStmt {
     bool enabled = false;
     std::string behavior{}; // "store", "bypass"
@@ -103,6 +119,7 @@ struct TqAstCacheStmt {
     TqAstVaryHeadersClause vary_headers{};
     bool vary_specified = false;
     TqAstFieldVariantClause field_variant{};
+    TqAstCacheInvalidationClause invalidation{};
     TqSourceSpan span{};
 };
 

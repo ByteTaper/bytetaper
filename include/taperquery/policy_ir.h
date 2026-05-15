@@ -124,6 +124,22 @@ struct TqPrivateCachePolicy {
     std::string auth_scope_header;
 };
 
+enum class TqCacheInvalidationStrategy : std::uint8_t { RouteEpoch = 0, ExactKey = 1, Prefix = 2 };
+
+struct TqCacheInvalidationTarget {
+    std::string route_id;
+    TqCacheInvalidationStrategy strategy = TqCacheInvalidationStrategy::RouteEpoch;
+};
+
+struct TqCacheInvalidationPolicy {
+    bool enabled = false;
+    std::vector<std::string> on_methods; // "PATCH", "PUT", "DELETE"
+    std::string timing;                  // "after_successful_upstream_response"
+    std::uint16_t success_status_min = 200;
+    std::uint16_t success_status_max = 299;
+    std::vector<TqCacheInvalidationTarget> targets;
+};
+
 struct TqCachePolicy {
     TqCacheBehavior behavior = TqCacheBehavior::Default;
     TqDurationMs ttl_ms = 0;
@@ -133,6 +149,7 @@ struct TqCachePolicy {
     TqPrivateCachePolicy private_cache{};
     TqFieldVariantCachePolicy field_variant{};
     TqCacheVaryHeaderPolicy vary_headers{};
+    TqCacheInvalidationPolicy invalidation{};
 };
 
 struct TqPaginationPolicy {

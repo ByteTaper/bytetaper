@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
+#include "policy/yaml_loader.h"
 #include "runtime/policy_snapshot.h"
 
 #include <gtest/gtest.h>
@@ -138,6 +139,57 @@ TEST(RuntimePolicySnapshotTest, SnapshotGenerationPreserved) {
     auto res = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "gen.yaml", 999);
     ASSERT_TRUE(res.ok);
     EXPECT_EQ(res.snapshot->generation, 999u);
+}
+
+TEST(RuntimePolicySnapshotTest, ConvertsCacheInvalidationPolicy) {
+    policy::RoutePolicy raw_routes[1]{};
+    raw_routes[0].route_id = "inv-route";
+    raw_routes[0].match_prefix = "/inv";
+    raw_routes[0].cache.invalidation.enabled = true;
+    raw_routes[0].cache.invalidation.on_patch = true;
+    raw_routes[0].cache.invalidation.on_put = true;
+    raw_routes[0].cache.invalidation.timing =
+        policy::CacheInvalidationTiming::AfterSuccessfulUpstreamResponse;
+    raw_routes[0].cache.invalidation.success_status_min = 200;
+    raw_routes[0].cache.invalidation.success_status_max = 299;
+    raw_routes[0].cache.invalidation.target_count = 1;
+    std::strncpy(raw_routes[0].cache.invalidation.targets[0].route_id, "target",
+                 policy::kMaxRouteIdLen - 1);
+    raw_routes[0].cache.invalidation.targets[0].strategy =
+        policy::CacheInvalidationStrategy::RouteEpoch;
+
+    auto build_res = build_runtime_policy_snapshot_from_routes(raw_routes, 1, "inv.yaml", 100);
+    ASSERT_TRUE(build_res.ok);
+    const auto& snapshot = build_res.snapshot;
+
+    // Check runtime to TQ conversion (in policy_ir)
+    const auto& tq_route = snapshot->policy_ir.routes[0];
+    EXPECT_TRUE(tq_route.cache.invalidation.enabled);
+    EXPECT_EQ(tq_route.cache.invalidation.timing, "after_successful_upstream_response");
+    EXPECT_EQ(tq_route.cache.invalidation.success_status_min, 200);
+    EXPECT_EQ(tq_route.cache.invalidation.success_status_max, 299);
+    ASSERT_EQ(tq_route.cache.invalidation.on_methods.size(), 2u);
+    EXPECT_EQ(tq_route.cache.invalidation.on_methods[0], "PATCH");
+    EXPECT_EQ(tq_route.cache.invalidation.on_methods[1], "PUT");
+    ASSERT_EQ(tq_route.cache.invalidation.targets.size(), 1u);
+    EXPECT_EQ(tq_route.cache.invalidation.targets[0].route_id, "target");
+    EXPECT_EQ(tq_route.cache.invalidation.targets[0].strategy,
+              taperquery::TqCacheInvalidationStrategy::RouteEpoch);
+
+    // Check TQ to runtime conversion (in routes)
+    const auto& rt_route = snapshot->routes[0];
+    EXPECT_TRUE(rt_route.cache.invalidation.enabled);
+    EXPECT_TRUE(rt_route.cache.invalidation.on_patch);
+    EXPECT_TRUE(rt_route.cache.invalidation.on_put);
+    EXPECT_FALSE(rt_route.cache.invalidation.on_delete);
+    EXPECT_EQ(rt_route.cache.invalidation.timing,
+              policy::CacheInvalidationTiming::AfterSuccessfulUpstreamResponse);
+    EXPECT_EQ(rt_route.cache.invalidation.success_status_min, 200);
+    EXPECT_EQ(rt_route.cache.invalidation.success_status_max, 299);
+    EXPECT_EQ(rt_route.cache.invalidation.target_count, 1u);
+    EXPECT_STREQ(rt_route.cache.invalidation.targets[0].route_id, "target");
+    EXPECT_EQ(rt_route.cache.invalidation.targets[0].strategy,
+              policy::CacheInvalidationStrategy::RouteEpoch);
 }
 
 } // namespace bytetaper::runtime

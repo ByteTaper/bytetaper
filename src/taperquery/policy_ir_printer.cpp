@@ -132,6 +132,36 @@ std::string print_canonical_policy_ir(const TqPolicyDocument& policy) {
                     out += "      - " + name + "\n";
                 }
             }
+            if (route.cache.invalidation.enabled) {
+                out += "    invalidation:\n";
+                out += "      enabled: true\n";
+                if (!route.cache.invalidation.on_methods.empty()) {
+                    out += "      on_methods:\n";
+                    for (const auto& m : route.cache.invalidation.on_methods) {
+                        out += "        - " + m + "\n";
+                    }
+                }
+                out += "      timing: " + route.cache.invalidation.timing + "\n";
+                out += "      success_status:\n";
+                out +=
+                    "        min: " + std::to_string(route.cache.invalidation.success_status_min) +
+                    "\n";
+                out +=
+                    "        max: " + std::to_string(route.cache.invalidation.success_status_max) +
+                    "\n";
+                if (!route.cache.invalidation.targets.empty()) {
+                    out += "      targets:\n";
+                    for (const auto& t : route.cache.invalidation.targets) {
+                        out += "        - route_id: " + t.route_id + "\n";
+                        std::string strategy_str = "route_epoch";
+                        if (t.strategy == TqCacheInvalidationStrategy::ExactKey)
+                            strategy_str = "exact_key";
+                        else if (t.strategy == TqCacheInvalidationStrategy::Prefix)
+                            strategy_str = "prefix";
+                        out += "          strategy: " + strategy_str + "\n";
+                    }
+                }
+            }
         }
 
         // Field Filter

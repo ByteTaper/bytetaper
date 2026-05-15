@@ -100,6 +100,18 @@ static constexpr KeywordEntry kKeywords[] = {
     { "brotli", TqTokenKind::KeywordBrotli },
     { "zstd", TqTokenKind::KeywordZstd },
     { "observe", TqTokenKind::KeywordObserve },
+    { "invalidation", TqTokenKind::KeywordInvalidation },
+    { "on_methods", TqTokenKind::KeywordOnMethods },
+    { "timing", TqTokenKind::KeywordTiming },
+    { "after_successful_upstream_response", TqTokenKind::KeywordAfterSuccessfulUpstreamResponse },
+    { "success_status", TqTokenKind::KeywordSuccessStatus },
+    { "min", TqTokenKind::KeywordMin },
+    { "max", TqTokenKind::KeywordMax },
+    { "target", TqTokenKind::KeywordTarget },
+    { "route_id", TqTokenKind::KeywordRouteId },
+    { "strategy", TqTokenKind::KeywordStrategy },
+    { "route_epoch", TqTokenKind::KeywordRouteEpoch },
+    { "exact_key", TqTokenKind::KeywordExactKey },
 };
 
 static constexpr std::size_t kKeywordCount = sizeof(kKeywords) / sizeof(kKeywords[0]);

@@ -165,6 +165,30 @@ bool compute_route_policy_identity_v2(const RoutePolicy& route, PolicyIdentityV2
         writer.feed_string(route.cache.vary_headers.names[i]);
     }
 
+    // invalidation
+    writer.feed_tag("invalidation_enabled");
+    writer.feed_bool(route.cache.invalidation.enabled);
+    writer.feed_tag("invalidation_on_patch");
+    writer.feed_bool(route.cache.invalidation.on_patch);
+    writer.feed_tag("invalidation_on_put");
+    writer.feed_bool(route.cache.invalidation.on_put);
+    writer.feed_tag("invalidation_on_delete");
+    writer.feed_bool(route.cache.invalidation.on_delete);
+    writer.feed_tag("invalidation_timing");
+    writer.feed_u8(static_cast<uint8_t>(route.cache.invalidation.timing));
+    writer.feed_tag("invalidation_success_status_min");
+    writer.feed_u32(route.cache.invalidation.success_status_min);
+    writer.feed_tag("invalidation_success_status_max");
+    writer.feed_u32(route.cache.invalidation.success_status_max);
+    writer.feed_tag("invalidation_target_count");
+    writer.feed_u32(static_cast<uint32_t>(route.cache.invalidation.target_count));
+    for (std::size_t i = 0; i < route.cache.invalidation.target_count; ++i) {
+        writer.feed_tag("invalidation_target_route_id");
+        writer.feed_string(route.cache.invalidation.targets[i].route_id);
+        writer.feed_tag("invalidation_target_strategy");
+        writer.feed_u8(static_cast<uint8_t>(route.cache.invalidation.targets[i].strategy));
+    }
+
     // pagination
     writer.feed_section("pagination");
     writer.feed_tag("enabled");

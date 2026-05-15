@@ -155,4 +155,157 @@ routes:
     EXPECT_FALSE(load_policy_from_string(yaml, &result));
 }
 
+TEST(YamlLoaderCacheTest, InvalidatesCacheWithMinLt100) {
+    const char* yaml_data = R"(
+routes:
+  - id: "update_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "patch"
+    cache:
+      invalidation:
+        enabled: true
+        on_methods: ["PATCH"]
+        timing: "after_successful_upstream_response"
+        success_status:
+          min: 99
+          max: 299
+        targets:
+          - route_id: "get_user"
+            strategy: "route_epoch"
+)";
+
+    PolicyFileResult result;
+    bool ok = load_policy_from_string(yaml_data, &result);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(result.error, "cache.invalidation success_status min must be >= 100");
+}
+
+TEST(YamlLoaderCacheTest, InvalidatesCacheWithMaxGt599) {
+    const char* yaml_data = R"(
+routes:
+  - id: "update_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "patch"
+    cache:
+      invalidation:
+        enabled: true
+        on_methods: ["PATCH"]
+        timing: "after_successful_upstream_response"
+        success_status:
+          min: 200
+          max: 600
+        targets:
+          - route_id: "get_user"
+            strategy: "route_epoch"
+)";
+
+    PolicyFileResult result;
+    bool ok = load_policy_from_string(yaml_data, &result);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(result.error, "cache.invalidation success_status max must be <= 599");
+}
+
+TEST(YamlLoaderCacheTest, InvalidationTargetNotGetInvalid) {
+    const char* yaml_data = R"(
+routes:
+  - id: "get_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "any"
+    cache: { behavior: "store", enabled: true }
+  - id: "update_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "patch"
+    cache:
+      invalidation:
+        enabled: true
+        on_methods: ["PATCH"]
+        targets:
+          - route_id: "get_user"
+            strategy: "route_epoch"
+)";
+
+    PolicyFileResult result;
+    bool ok = load_policy_from_string(yaml_data, &result);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(result.error, "invalidation target route must be a cacheable GET route");
+}
+
+TEST(YamlLoaderCacheTest, HappyPathMutationInvalidation) {
+    const char* yaml_data = R"(
+routes:
+  - id: "get_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "get"
+    cache: { behavior: "store", enabled: true }
+  - id: "patch_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "patch"
+    cache:
+      invalidation:
+        enabled: true
+        on_methods: ["PATCH"]
+        targets: [{ route_id: "get_user", strategy: "route_epoch" }]
+  - id: "put_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "put"
+    cache:
+      invalidation:
+        enabled: true
+        on_methods: ["PUT"]
+        targets: [{ route_id: "get_user", strategy: "route_epoch" }]
+  - id: "delete_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "delete"
+    cache:
+      invalidation:
+        enabled: true
+        on_methods: ["DELETE"]
+        targets: [{ route_id: "get_user", strategy: "route_epoch" }]
+)";
+
+    PolicyFileResult result;
+    bool ok = load_policy_from_string(yaml_data, &result);
+    EXPECT_TRUE(ok) << result.error;
+    EXPECT_EQ(result.policies[1].cache.invalidation.enabled, true);
+    EXPECT_EQ(result.policies[1].cache.invalidation.on_patch, true);
+    EXPECT_EQ(result.policies[2].cache.invalidation.on_put, true);
+    EXPECT_EQ(result.policies[3].cache.invalidation.on_delete, true);
+}
+
+TEST(YamlLoaderCacheTest, RejectGetOrPostInvalidationTrigger) {
+    const char* yaml_data_get = R"(
+routes:
+  - id: "get_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "get"
+    cache:
+      invalidation:
+        enabled: true
+        on_methods: ["GET"]
+        targets: [{ route_id: "get_user", strategy: "route_epoch" }]
+)";
+    PolicyFileResult result_get;
+    EXPECT_FALSE(load_policy_from_string(yaml_data_get, &result_get));
+    EXPECT_EQ(result_get.error, "cache.invalidation on_methods cannot contain GET");
+
+    const char* yaml_data_post = R"(
+routes:
+  - id: "get_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "get"
+    cache: { behavior: "store", enabled: true }
+  - id: "post_user"
+    match: { kind: "exact", prefix: "/user" }
+    method: "post"
+    cache:
+      invalidation:
+        enabled: true
+        on_methods: ["POST"]
+        targets: [{ route_id: "get_user", strategy: "route_epoch" }]
+)";
+    PolicyFileResult result_post;
+    EXPECT_FALSE(load_policy_from_string(yaml_data_post, &result_post));
+    EXPECT_EQ(result_post.error, "cache.invalidation on_methods cannot contain POST");
+}
+
 } // namespace bytetaper::policy

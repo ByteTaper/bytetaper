@@ -62,6 +62,19 @@ std::string cache_behavior_to_string(TqCacheBehavior behavior) {
     }
 }
 
+std::string cache_invalidation_strategy_to_string(TqCacheInvalidationStrategy strategy) {
+    switch (strategy) {
+    case TqCacheInvalidationStrategy::RouteEpoch:
+        return "route_epoch";
+    case TqCacheInvalidationStrategy::ExactKey:
+        return "exact_key";
+    case TqCacheInvalidationStrategy::Prefix:
+        return "prefix";
+    default:
+        return "route_epoch";
+    }
+}
+
 std::string field_filter_mode_to_string(TqFieldFilterMode mode) {
     switch (mode) {
     case TqFieldFilterMode::Allowlist:
@@ -310,6 +323,56 @@ PolicyIrDiff compare_policy_ir(const TqPolicyDocument& expected, const TqPolicyD
             add_diff(diff, r_id, "cache.vary_headers.names",
                      list_to_string(exp_r.cache.vary_headers.names),
                      list_to_string(act_r.cache.vary_headers.names));
+        }
+
+        // Cache Invalidation
+        if (exp_r.cache.invalidation.enabled != act_r.cache.invalidation.enabled) {
+            add_diff(diff, r_id, "cache.invalidation.enabled",
+                     bool_to_string(exp_r.cache.invalidation.enabled),
+                     bool_to_string(act_r.cache.invalidation.enabled));
+        }
+        if (exp_r.cache.invalidation.enabled || act_r.cache.invalidation.enabled) {
+            if (exp_r.cache.invalidation.on_methods != act_r.cache.invalidation.on_methods) {
+                add_diff(diff, r_id, "cache.invalidation.on_methods",
+                         list_to_string(exp_r.cache.invalidation.on_methods),
+                         list_to_string(act_r.cache.invalidation.on_methods));
+            }
+            if (exp_r.cache.invalidation.timing != act_r.cache.invalidation.timing) {
+                add_diff(diff, r_id, "cache.invalidation.timing", exp_r.cache.invalidation.timing,
+                         act_r.cache.invalidation.timing);
+            }
+            if (exp_r.cache.invalidation.success_status_min !=
+                act_r.cache.invalidation.success_status_min) {
+                add_diff(diff, r_id, "cache.invalidation.success_status_min",
+                         std::to_string(exp_r.cache.invalidation.success_status_min),
+                         std::to_string(act_r.cache.invalidation.success_status_min));
+            }
+            if (exp_r.cache.invalidation.success_status_max !=
+                act_r.cache.invalidation.success_status_max) {
+                add_diff(diff, r_id, "cache.invalidation.success_status_max",
+                         std::to_string(exp_r.cache.invalidation.success_status_max),
+                         std::to_string(act_r.cache.invalidation.success_status_max));
+            }
+            if (exp_r.cache.invalidation.targets.size() !=
+                act_r.cache.invalidation.targets.size()) {
+                add_diff(diff, r_id, "cache.invalidation.targets",
+                         std::to_string(exp_r.cache.invalidation.targets.size()) + " elements",
+                         std::to_string(act_r.cache.invalidation.targets.size()) + " elements");
+            } else {
+                for (std::size_t j = 0; j < exp_r.cache.invalidation.targets.size(); ++j) {
+                    const auto& exp_t = exp_r.cache.invalidation.targets[j];
+                    const auto& act_t = act_r.cache.invalidation.targets[j];
+                    std::string prefix = "cache.invalidation.targets[" + std::to_string(j) + "].";
+                    if (exp_t.route_id != act_t.route_id) {
+                        add_diff(diff, r_id, prefix + "route_id", exp_t.route_id, act_t.route_id);
+                    }
+                    if (exp_t.strategy != act_t.strategy) {
+                        add_diff(diff, r_id, prefix + "strategy",
+                                 cache_invalidation_strategy_to_string(exp_t.strategy),
+                                 cache_invalidation_strategy_to_string(act_t.strategy));
+                    }
+                }
+            }
         }
 
         // Field Filter

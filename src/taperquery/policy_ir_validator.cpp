@@ -260,6 +260,117 @@ validate_taperquery_route_policy_ir(const TqRoutePolicy& route,
         }
     }
 
+    if (route.cache.invalidation.enabled) {
+        if (route.cache.invalidation.on_methods.empty()) {
+            if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                           TqPolicyValidationSubsystem::Cache, route.route_id,
+                           "cache.invalidation.on_methods", "INVALIDATION_MISSING_METHODS",
+                           "cache.invalidation requires at least one method in on_methods",
+                           "Specify a list of methods (e.g. [PATCH, PUT, DELETE]).", options)) {
+                return result;
+            }
+        } else {
+            for (const auto& m : route.cache.invalidation.on_methods) {
+                if (m != "PATCH" && m != "PUT" && m != "DELETE") {
+                    if (!add_issue(
+                            result, TqPolicyValidationSeverity::Error,
+                            TqPolicyValidationSubsystem::Cache, route.route_id,
+                            "cache.invalidation.on_methods", "INVALIDATION_INVALID_METHOD",
+                            "cache.invalidation on_methods can only contain PATCH, PUT, or DELETE",
+                            "Remove GET, POST, or other unsupported methods.", options)) {
+                        return result;
+                    }
+                }
+            }
+        }
+
+        if (route.cache.enabled && route.cache.behavior == TqCacheBehavior::Store) {
+            if (!add_issue(
+                    result, TqPolicyValidationSeverity::Error, TqPolicyValidationSubsystem::Cache,
+                    route.route_id, "cache.invalidation", "INVALIDATION_WITH_CACHE_STORE",
+                    "route cannot declare both cache store and cache invalidation",
+                    "Change cache.behavior to bypass or remove cache invalidation.", options)) {
+                return result;
+            }
+        }
+
+        if (route.allowed_method != TqHttpMethod::Patch &&
+            route.allowed_method != TqHttpMethod::Put &&
+            route.allowed_method != TqHttpMethod::Delete) {
+            if (!add_issue(
+                    result, TqPolicyValidationSeverity::Error, TqPolicyValidationSubsystem::Cache,
+                    route.route_id, "cache.invalidation", "INVALIDATION_ON_NON_MUTATION_ROUTE",
+                    "cache invalidation policy can only be defined on mutation routes (PATCH, PUT, "
+                    "or DELETE)",
+                    "Change allowed_method of this route to a mutation HTTP method.", options)) {
+                return result;
+            }
+        }
+
+        if (route.cache.invalidation.targets.empty()) {
+            if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                           TqPolicyValidationSubsystem::Cache, route.route_id,
+                           "cache.invalidation.targets", "INVALIDATION_MISSING_TARGETS",
+                           "cache.invalidation requires at least one target",
+                           "Add target route IDs to the targets list.", options)) {
+                return result;
+            }
+        }
+
+        if (route.cache.invalidation.targets.size() > 8) {
+            if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                           TqPolicyValidationSubsystem::Cache, route.route_id,
+                           "cache.invalidation.targets", "INVALIDATION_TOO_MANY_TARGETS",
+                           "cache.invalidation targets exceed maximum allowed (8)",
+                           "Reduce the number of targets.", options)) {
+                return result;
+            }
+        }
+
+        if (route.cache.invalidation.success_status_min < 100) {
+            if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                           TqPolicyValidationSubsystem::Cache, route.route_id,
+                           "cache.invalidation.success_status", "INVALIDATION_STATUS_MIN_LT_100",
+                           "success_status min must be >= 100",
+                           "Increase min success_status bound.", options)) {
+                return result;
+            }
+        }
+
+        if (route.cache.invalidation.success_status_max > 599) {
+            if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                           TqPolicyValidationSubsystem::Cache, route.route_id,
+                           "cache.invalidation.success_status", "INVALIDATION_STATUS_MAX_GT_599",
+                           "success_status max must be <= 599",
+                           "Decrease max success_status bound.", options)) {
+                return result;
+            }
+        }
+
+        if (route.cache.invalidation.success_status_min >
+            route.cache.invalidation.success_status_max) {
+            if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                           TqPolicyValidationSubsystem::Cache, route.route_id,
+                           "cache.invalidation.success_status", "INVALIDATION_STATUS_MIN_GT_MAX",
+                           "success_status min cannot be greater than max",
+                           "Ensure min <= max in success_status configuration.", options)) {
+                return result;
+            }
+        }
+
+        for (const auto& target : route.cache.invalidation.targets) {
+            if (target.route_id.empty()) {
+                if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                               TqPolicyValidationSubsystem::Cache, route.route_id,
+                               "cache.invalidation.targets", "INVALIDATION_TARGET_EMPTY_ID",
+                               "invalidation target route_id must not be empty",
+                               "Provide a valid route_id for each target.", options)) {
+                    return result;
+                }
+            }
+        }
+    }
+
     // 3. Field Filter Validation
     if (route.field_filter.mode == TqFieldFilterMode::None) {
         if (!route.field_filter.fields.empty()) {
@@ -872,6 +983,60 @@ TqPolicyValidationResult validate_taperquery_policy_ir(const TqPolicyDocument& p
                                "duplicate route id '" + r2.route_id + "' is rejected",
                                "Assign a unique route_id for each route.", options)) {
                     return result;
+                }
+            }
+        }
+    }
+
+    // Cross-route invalidation target checks
+    for (const auto& r1 : policy.routes) {
+        if (r1.cache.invalidation.enabled) {
+            for (const auto& target : r1.cache.invalidation.targets) {
+                if (target.route_id.empty()) {
+                    continue;
+                }
+                const TqRoutePolicy* target_route = nullptr;
+                for (const auto& r2 : policy.routes) {
+                    if (r2.route_id == target.route_id) {
+                        target_route = &r2;
+                        break;
+                    }
+                }
+                if (!target_route) {
+                    if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                                   TqPolicyValidationSubsystem::CrossRoute, r1.route_id,
+                                   "cache.invalidation.targets", "INVALIDATION_TARGET_NOT_FOUND",
+                                   "invalidation target route id '" + target.route_id +
+                                       "' does not exist in document",
+                                   "Ensure target route_id matches an existing route_id.",
+                                   options)) {
+                        return result;
+                    }
+                } else {
+                    if (!target_route->cache.enabled ||
+                        target_route->cache.behavior != TqCacheBehavior::Store) {
+                        if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                                       TqPolicyValidationSubsystem::CrossRoute, r1.route_id,
+                                       "cache.invalidation.targets",
+                                       "INVALIDATION_TARGET_NOT_CACHEABLE",
+                                       "invalidation target route '" + target.route_id +
+                                           "' must have cache.enabled=true and behavior=Store",
+                                       "Enable caching with store behavior on the target route.",
+                                       options)) {
+                            return result;
+                        }
+                    }
+                    if (target_route->allowed_method != TqHttpMethod::Get) {
+                        if (!add_issue(result, TqPolicyValidationSeverity::Error,
+                                       TqPolicyValidationSubsystem::CrossRoute, r1.route_id,
+                                       "cache.invalidation.targets", "INVALIDATION_TARGET_NOT_GET",
+                                       "invalidation target route '" + target.route_id +
+                                           "' must be a GET route",
+                                       "invalidation target route must be a cacheable GET route",
+                                       options)) {
+                            return result;
+                        }
+                    }
                 }
             }
         }

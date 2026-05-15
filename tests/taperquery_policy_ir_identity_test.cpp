@@ -193,6 +193,69 @@ TEST(TaperQueryPolicyIrIdentityTest, IdentitySensitivity) {
         modified.coalescing.backend_timeout_ms = 15000;
         EXPECT_NE(compute_route_policy_identity(modified), base_hash);
     }
+
+    // 14. Cache invalidation enabled changes route identity.
+    {
+        TqRoutePolicy modified = base;
+        modified.cache.invalidation.enabled = true;
+        EXPECT_NE(compute_route_policy_identity(modified), base_hash);
+    }
+
+    // 15. Cache invalidation methods changes route identity.
+    {
+        TqRoutePolicy modified = base;
+        modified.cache.invalidation.enabled = true;
+        modified.cache.invalidation.on_methods = { "DELETE" };
+
+        TqRoutePolicy modified2 = modified;
+        modified2.cache.invalidation.on_methods = { "PATCH" };
+        EXPECT_NE(compute_route_policy_identity(modified),
+                  compute_route_policy_identity(modified2));
+    }
+
+    // 16. Cache invalidation timing changes route identity.
+    {
+        TqRoutePolicy modified = base;
+        modified.cache.invalidation.enabled = true;
+        modified.cache.invalidation.timing = "after_successful_upstream_response";
+
+        TqRoutePolicy modified2 = modified;
+        modified2.cache.invalidation.timing = "before_upstream_request";
+        EXPECT_NE(compute_route_policy_identity(modified),
+                  compute_route_policy_identity(modified2));
+    }
+
+    // 17. Cache invalidation success_status changes route identity.
+    {
+        TqRoutePolicy modified = base;
+        modified.cache.invalidation.enabled = true;
+        modified.cache.invalidation.success_status_min = 200;
+        modified.cache.invalidation.success_status_max = 299;
+
+        TqRoutePolicy modified2 = modified;
+        modified2.cache.invalidation.success_status_min = 200;
+        modified2.cache.invalidation.success_status_max = 399;
+        EXPECT_NE(compute_route_policy_identity(modified),
+                  compute_route_policy_identity(modified2));
+    }
+
+    // 18. Cache invalidation targets changes route identity.
+    {
+        TqRoutePolicy modified = base;
+        modified.cache.invalidation.enabled = true;
+        modified.cache.invalidation.targets.push_back(
+            { "target1", TqCacheInvalidationStrategy::RouteEpoch });
+
+        TqRoutePolicy modified2 = modified;
+        modified2.cache.invalidation.targets[0].route_id = "target2";
+        EXPECT_NE(compute_route_policy_identity(modified),
+                  compute_route_policy_identity(modified2));
+
+        TqRoutePolicy modified3 = modified;
+        modified3.cache.invalidation.targets[0].strategy = TqCacheInvalidationStrategy::ExactKey;
+        EXPECT_NE(compute_route_policy_identity(modified),
+                  compute_route_policy_identity(modified3));
+    }
 }
 
 TEST(TaperQueryPolicyIrIdentityTest, VersionFieldsChangeIdentity) {

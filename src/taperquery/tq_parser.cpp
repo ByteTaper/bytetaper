@@ -68,6 +68,7 @@ struct CacheBlockSeen {
     bool private_ = false;
     bool vary_headers = false;
     bool field_variant = false;
+    bool invalidation = false;
 };
 
 struct CoalescingBlockSeen {
@@ -409,6 +410,22 @@ private:
                 } else if (curr_.kind == TqTokenKind::KeywordPatch) {
                     clause.match_expr.method = "patch";
                     consume();
+                } else if (curr_.kind == TqTokenKind::Identifier) {
+                    std::string m(curr_.text);
+                    for (char& c : m) {
+                        if (c >= 'A' && c <= 'Z')
+                            c += ('a' - 'A');
+                    }
+                    if (m == "get" || m == "post" || m == "put" || m == "delete" || m == "patch" ||
+                        m == "any") {
+                        clause.match_expr.method = m;
+                        consume();
+                    } else {
+                        report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
+                                     "Expected HTTP method after method keyword");
+                        result_.ok = false;
+                        consume();
+                    }
                 } else {
                     report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
                                  "Expected HTTP method after method keyword");
@@ -473,6 +490,130 @@ private:
         report_error(TqDiagnosticCode::UnexpectedToken, curr_.span, "Expected boolean true/false");
         result_.ok = false;
         return false;
+    }
+
+    void parse_cache_invalidation_clause(TqAstStatement& stmt) {
+        TqSourceSpan inv_start = curr_.span;
+        consume(); // invalidation
+        if (expect(TqTokenKind::LeftBrace, "{")) {
+            while (curr_.kind != TqTokenKind::RightBrace && curr_.kind != TqTokenKind::EndOfFile) {
+                if (curr_.kind == TqTokenKind::KeywordEnabled) {
+                    consume();
+                    stmt.cache.invalidation.enabled = parse_boolean();
+                } else if (curr_.kind == TqTokenKind::KeywordOnMethods) {
+                    consume();
+                    stmt.cache.invalidation.on_methods = parse_string_list();
+                } else if (curr_.kind == TqTokenKind::KeywordTiming) {
+                    consume();
+                    std::string timing_val;
+                    if (curr_.kind == TqTokenKind::StringLiteral) {
+                        timing_val = decode_string_literal(curr_.text);
+                    } else {
+                        timing_val = std::string(curr_.text);
+                    }
+                    if (timing_val == "after_successful_upstream_response" ||
+                        curr_.kind == TqTokenKind::KeywordAfterSuccessfulUpstreamResponse) {
+                        stmt.cache.invalidation.timing = "after_successful_upstream_response";
+                        consume();
+                    } else {
+                        report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
+                                     "Expected \"after_successful_upstream_response\" for timing");
+                        result_.ok = false;
+                        consume();
+                    }
+                } else if (curr_.kind == TqTokenKind::KeywordSuccessStatus) {
+                    consume();
+                    if (expect(TqTokenKind::KeywordMin, "min")) {
+                        if (curr_.kind == TqTokenKind::IntegerLiteral) {
+                            stmt.cache.invalidation.success_status_min =
+                                static_cast<std::uint16_t>(curr_.int_val);
+                            consume();
+                        } else {
+                            report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
+                                         "Expected integer for min");
+                            result_.ok = false;
+                        }
+                    }
+                    if (expect(TqTokenKind::KeywordMax, "max")) {
+                        if (curr_.kind == TqTokenKind::IntegerLiteral) {
+                            stmt.cache.invalidation.success_status_max =
+                                static_cast<std::uint16_t>(curr_.int_val);
+                            consume();
+                        } else {
+                            report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
+                                         "Expected integer for max");
+                            result_.ok = false;
+                        }
+                    }
+                } else if (curr_.kind == TqTokenKind::KeywordTarget) {
+                    consume();
+                    TqAstCacheInvalidationTargetClause target{};
+                    TqSourceSpan t_start = curr_.span;
+
+                    if (curr_.kind == TqTokenKind::StringLiteral) {
+                        target.route_id = decode_string_literal(consume().text);
+                    } else if (curr_.kind == TqTokenKind::Identifier) {
+                        target.route_id = std::string(consume().text);
+                    } else {
+                        report_error(TqDiagnosticCode::ExpectedString, curr_.span,
+                                     "Expected string literal or identifier for route_id");
+                        result_.ok = false;
+                        if (curr_.kind != TqTokenKind::LeftBrace &&
+                            curr_.kind != TqTokenKind::EndOfFile) {
+                            consume();
+                        }
+                    }
+
+                    if (expect(TqTokenKind::LeftBrace, "{")) {
+                        while (curr_.kind != TqTokenKind::RightBrace &&
+                               curr_.kind != TqTokenKind::EndOfFile) {
+                            if (curr_.kind == TqTokenKind::KeywordStrategy) {
+                                consume();
+                                std::string strategy_val;
+                                if (curr_.kind == TqTokenKind::StringLiteral) {
+                                    strategy_val = decode_string_literal(curr_.text);
+                                } else {
+                                    strategy_val = std::string(curr_.text);
+                                }
+                                if (strategy_val == "route_epoch" ||
+                                    curr_.kind == TqTokenKind::KeywordRouteEpoch) {
+                                    target.strategy = "route_epoch";
+                                    consume();
+                                } else if (strategy_val == "exact_key" ||
+                                           curr_.kind == TqTokenKind::KeywordExactKey) {
+                                    target.strategy = "exact_key";
+                                    consume();
+                                } else if (strategy_val == "prefix") {
+                                    target.strategy = "prefix";
+                                    consume();
+                                } else {
+                                    report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
+                                                 "Expected \"route_epoch\", \"exact_key\", "
+                                                 "or \"prefix\" strategy");
+                                    result_.ok = false;
+                                    consume();
+                                }
+                            } else {
+                                report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
+                                             "Unexpected key in target block");
+                                result_.ok = false;
+                                recover_to_statement();
+                            }
+                        }
+                        target.span = { t_start.start, curr_.span.end };
+                        stmt.cache.invalidation.targets.push_back(target);
+                        expect(TqTokenKind::RightBrace, "}");
+                    }
+                } else {
+                    report_error(TqDiagnosticCode::UnexpectedToken, curr_.span,
+                                 "Unexpected key in invalidation clause");
+                    result_.ok = false;
+                    recover_to_statement();
+                }
+            }
+            stmt.cache.invalidation.span = { inv_start.start, curr_.span.end };
+            expect(TqTokenKind::RightBrace, "}");
+        }
     }
 
     TqAstStatement parse_statement(TqAstStatementKind kind) {
@@ -543,6 +684,20 @@ private:
             } else if (curr_.kind == TqTokenKind::KeywordDefault) {
                 stmt.cache.behavior = "default";
                 consume();
+            } else if (curr_.kind == TqTokenKind::KeywordInvalidation) {
+                parse_cache_invalidation_clause(stmt);
+                stmt.cache.span = { stmt.span.start, curr_.span.end };
+                if (curr_.kind == TqTokenKind::Semicolon) {
+                    consume();
+                }
+                return stmt;
+            } else if (curr_.kind == TqTokenKind::KeywordInvalidation) {
+                parse_cache_invalidation_clause(stmt);
+                stmt.cache.span = { stmt.span.start, curr_.span.end };
+                if (curr_.kind == TqTokenKind::Semicolon) {
+                    consume();
+                }
+                return stmt;
             }
 
             if (curr_.kind == TqTokenKind::KeywordTtl) {
@@ -724,6 +879,14 @@ private:
                             }
                             expect(TqTokenKind::RightBrace, "}");
                         }
+                    } else if (curr_.kind == TqTokenKind::KeywordInvalidation) {
+                        if (seen.invalidation) {
+                            report_error(TqDiagnosticCode::DuplicateClause, curr_.span,
+                                         "Duplicate invalidation clause inside cache block");
+                            result_.ok = false;
+                        }
+                        seen.invalidation = true;
+                        parse_cache_invalidation_clause(stmt);
                     } else if (curr_.kind == TqTokenKind::KeywordEnabled) {
                         consume(); // enabled
                         stmt.cache.enabled = parse_boolean();

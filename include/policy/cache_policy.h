@@ -37,6 +37,35 @@ struct CacheVaryHeaderPolicy {
     std::size_t count = 0;
 };
 
+enum class CacheInvalidationStrategy : std::uint8_t {
+    RouteEpoch = 0, // recommended default
+    ExactKey = 1,
+    Prefix = 2,
+};
+
+enum class CacheInvalidationTiming : std::uint8_t {
+    AfterSuccessfulUpstreamResponse = 0,
+};
+
+static constexpr std::size_t kMaxCacheInvalidationTargets = 8;
+
+struct CacheInvalidationTargetPolicy {
+    char route_id[64] = {};
+    CacheInvalidationStrategy strategy = CacheInvalidationStrategy::RouteEpoch;
+};
+
+struct CacheInvalidationPolicy {
+    bool enabled = false;
+    bool on_patch = false;
+    bool on_put = false;
+    bool on_delete = false;
+    CacheInvalidationTiming timing = CacheInvalidationTiming::AfterSuccessfulUpstreamResponse;
+    std::uint16_t success_status_min = 200;
+    std::uint16_t success_status_max = 299;
+    CacheInvalidationTargetPolicy targets[kMaxCacheInvalidationTargets] = {};
+    std::size_t target_count = 0;
+};
+
 struct CachePolicy {
     CacheBehavior behavior = CacheBehavior::Default;
     std::uint32_t ttl_seconds = 0;
@@ -47,6 +76,7 @@ struct CachePolicy {
     char auth_scope_header[64] = {}; // required when private_cache=true; names the source header
     FieldVariantCachePolicy field_variant{};
     CacheVaryHeaderPolicy vary_headers{};
+    CacheInvalidationPolicy invalidation{};
 };
 
 // Returns nullptr on success, or a static error string on invalid configuration.

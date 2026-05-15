@@ -311,4 +311,70 @@ policy "complete_bytetaper_policy" schema "v2" against sha "abcdef" {
     EXPECT_EQ(r.statements.size(), 5u);
 }
 
+TEST(TqParserTest, ParsesCacheInvalidationCanonical) {
+    const char* src = R"(
+route "r1" {
+    cache invalidation {
+        enabled true
+        on_methods ["PATCH", "PUT"]
+        timing "after_successful_upstream_response"
+        success_status min 200 max 299
+        target "get_user" {
+            strategy "route_epoch"
+        }
+    }
+}
+)";
+    TqParseResult res = parse_taperquery_source(src, std::strlen(src));
+    ASSERT_TRUE(res.ok);
+    TqAstRouteDecl r = res.document.top_level_routes[0];
+    ASSERT_EQ(r.statements.size(), 1u);
+    EXPECT_EQ(r.statements[0].kind, TqAstStatementKind::Cache);
+    TqAstCacheStmt cache = r.statements[0].cache;
+    EXPECT_TRUE(cache.invalidation.enabled);
+    ASSERT_EQ(cache.invalidation.on_methods.size(), 2u);
+    EXPECT_EQ(cache.invalidation.on_methods[0], "PATCH");
+    EXPECT_EQ(cache.invalidation.on_methods[1], "PUT");
+    EXPECT_EQ(cache.invalidation.timing, "after_successful_upstream_response");
+    EXPECT_EQ(cache.invalidation.success_status_min, 200);
+    EXPECT_EQ(cache.invalidation.success_status_max, 299);
+    ASSERT_EQ(cache.invalidation.targets.size(), 1u);
+    EXPECT_EQ(cache.invalidation.targets[0].route_id, "get_user");
+    EXPECT_EQ(cache.invalidation.targets[0].strategy, "route_epoch");
+}
+
+TEST(TqParserTest, ParsesCaseInsensitiveMethods) {
+    const char* cases[] = { "route \"r1\" when method GET and path prefix \"/\" {}",
+                            "route \"r2\" when method Patch and path prefix \"/\" {}",
+                            "route \"r3\" when method deLEte and path prefix \"/\" {}",
+                            "route \"r4\" when method ANY and path prefix \"/\" {}" };
+    const char* expected[] = { "get", "patch", "delete", "any" };
+
+    for (int i = 0; i < 4; ++i) {
+        TqParseResult res = parse_taperquery_source(cases[i], std::strlen(cases[i]));
+        ASSERT_TRUE(res.ok) << "Failed on case: " << cases[i];
+        EXPECT_EQ(res.document.top_level_routes[0].when_clause.match_expr.method, expected[i]);
+    }
+}
+
+TEST(TqParserTest, ParsesCacheInvalidationLegacy) {
+    const char* src = R"(
+route "r1" {
+    cache {
+        invalidation {
+            enabled true
+            on_methods ["DELETE"]
+            target "get_user" { strategy "route_epoch" }
+        }
+    }
+}
+)";
+    TqParseResult res = parse_taperquery_source(src, std::strlen(src));
+    ASSERT_TRUE(res.ok);
+    TqAstRouteDecl r = res.document.top_level_routes[0];
+    TqAstCacheStmt cache = r.statements[0].cache;
+    EXPECT_TRUE(cache.invalidation.enabled);
+    EXPECT_EQ(cache.invalidation.on_methods[0], "DELETE");
+}
+
 } // namespace bytetaper::taperquery

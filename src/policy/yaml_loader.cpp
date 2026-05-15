@@ -371,6 +371,131 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
             }
             policy.cache.vary_headers.count = vh_count;
         }
+
+        if (cache_node["invalidation"]) {
+            const YAML::Node& inv_node = cache_node["invalidation"];
+            if (inv_node["enabled"]) {
+                policy.cache.invalidation.enabled = inv_node["enabled"].as<bool>();
+            }
+            if (inv_node["on_methods"]) {
+                if (!inv_node["on_methods"].IsSequence()) {
+                    result->error = "cache.invalidation on_methods must be a sequence";
+                    return false;
+                }
+                for (const auto& m_node : inv_node["on_methods"]) {
+                    std::string m = m_node.as<std::string>();
+                    for (char& c : m)
+                        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    if (m == "PATCH") {
+                        policy.cache.invalidation.on_patch = true;
+                    } else if (m == "PUT") {
+                        policy.cache.invalidation.on_put = true;
+                    } else if (m == "DELETE") {
+                        policy.cache.invalidation.on_delete = true;
+                    } else if (m == "GET") {
+                        result->error = "cache.invalidation on_methods cannot contain GET";
+                        return false;
+                    } else if (m == "POST") {
+                        result->error = "cache.invalidation on_methods cannot contain POST";
+                        return false;
+                    } else {
+                        result->error = "unknown method in cache.invalidation on_methods";
+                        return false;
+                    }
+                }
+            }
+            if (inv_node["timing"]) {
+                const std::string t = inv_node["timing"].as<std::string>();
+                if (t == "after_successful_upstream_response") {
+                    policy.cache.invalidation.timing =
+                        CacheInvalidationTiming::AfterSuccessfulUpstreamResponse;
+                } else {
+                    result->error = "unknown cache.invalidation timing";
+                    return false;
+                }
+            }
+            if (inv_node["success_status"]) {
+                const YAML::Node& ss_node = inv_node["success_status"];
+                if (ss_node["min"]) {
+                    policy.cache.invalidation.success_status_min =
+                        ss_node["min"].as<std::uint16_t>();
+                }
+                if (ss_node["max"]) {
+                    policy.cache.invalidation.success_status_max =
+                        ss_node["max"].as<std::uint16_t>();
+                }
+                if (policy.cache.invalidation.success_status_min < 100) {
+                    result->error = "cache.invalidation success_status min must be >= 100";
+                    return false;
+                }
+                if (policy.cache.invalidation.success_status_max > 599) {
+                    result->error = "cache.invalidation success_status max must be <= 599";
+                    return false;
+                }
+                if (policy.cache.invalidation.success_status_min >
+                    policy.cache.invalidation.success_status_max) {
+                    result->error =
+                        "cache.invalidation success_status min cannot be greater than max";
+                    return false;
+                }
+            }
+            if (inv_node["targets"]) {
+                const YAML::Node& targets_node = inv_node["targets"];
+                if (!targets_node.IsSequence()) {
+                    result->error = "cache.invalidation targets must be a sequence";
+                    return false;
+                }
+                if (targets_node.size() == 0) {
+                    result->error = "cache.invalidation targets sequence cannot be empty";
+                    return false;
+                }
+                if (targets_node.size() > kMaxCacheInvalidationTargets) {
+                    result->error = "cache.invalidation targets exceed maximum allowed";
+                    return false;
+                }
+                for (std::size_t i = 0; i < targets_node.size(); ++i) {
+                    const YAML::Node& target = targets_node[i];
+                    if (!target["route_id"] || !target["route_id"].IsScalar()) {
+                        result->error = "cache.invalidation target missing route_id";
+                        return false;
+                    }
+                    const std::string rid = target["route_id"].as<std::string>();
+                    if (rid.empty() ||
+                        rid.size() >= sizeof(CacheInvalidationTargetPolicy::route_id)) {
+                        result->error = "cache.invalidation target route_id invalid or too long";
+                        return false;
+                    }
+                    std::strncpy(policy.cache.invalidation.targets[i].route_id, rid.c_str(),
+                                 sizeof(CacheInvalidationTargetPolicy::route_id) - 1);
+                    policy.cache.invalidation.targets[i]
+                        .route_id[sizeof(CacheInvalidationTargetPolicy::route_id) - 1] = '\0';
+
+                    if (target["strategy"]) {
+                        const std::string st = target["strategy"].as<std::string>();
+                        if (st == "route_epoch") {
+                            policy.cache.invalidation.targets[i].strategy =
+                                CacheInvalidationStrategy::RouteEpoch;
+                        } else if (st == "exact_key") {
+                            policy.cache.invalidation.targets[i].strategy =
+                                CacheInvalidationStrategy::ExactKey;
+                        } else if (st == "prefix") {
+                            policy.cache.invalidation.targets[i].strategy =
+                                CacheInvalidationStrategy::Prefix;
+                        } else {
+                            result->error = "unknown cache.invalidation strategy";
+                            return false;
+                        }
+                    } else {
+                        policy.cache.invalidation.targets[i].strategy =
+                            CacheInvalidationStrategy::RouteEpoch;
+                    }
+                }
+                policy.cache.invalidation.target_count = targets_node.size();
+            } else if (policy.cache.invalidation.enabled) {
+                result->error = "cache.invalidation enabled requires targets";
+                return false;
+            }
+        }
     }
 
     if (node["failure_mode"]) {
@@ -605,6 +730,58 @@ bool parse_document(const YAML::Node& doc, PolicyFileResult* result) {
     for (std::size_t i = 0; i < routes.size(); ++i) {
         if (!parse_one_route(routes[i], result, i)) {
             return false;
+        }
+    }
+
+    // Semantic checks and Cross-route invalidation target checks
+    for (std::size_t i = 0; i < routes.size(); ++i) {
+        const auto& r1 = result->policies[i];
+        if (r1.cache.invalidation.enabled) {
+            if (r1.allowed_method == HttpMethod::Get || r1.allowed_method == HttpMethod::Post ||
+                r1.allowed_method == HttpMethod::Any) {
+                result->error = "cache invalidation policy can only be defined on mutation routes "
+                                "(PATCH, PUT, DELETE)";
+                return false;
+            }
+            if (r1.cache.enabled && r1.cache.behavior == CacheBehavior::Store) {
+                result->error = "route cannot declare both cache store and cache invalidation";
+                return false;
+            }
+
+            for (std::size_t t = 0; t < r1.cache.invalidation.target_count; ++t) {
+                const auto& target = r1.cache.invalidation.targets[t];
+                if (target.route_id[0] == '\0')
+                    continue;
+
+                if (target.strategy == CacheInvalidationStrategy::Prefix) {
+                    std::snprintf(
+                        result->warning, sizeof(result->warning),
+                        "route '%s' uses prefix invalidation strategy which may be expensive",
+                        r1.route_id);
+                }
+
+                const RoutePolicy* target_route = nullptr;
+                for (std::size_t j = 0; j < routes.size(); ++j) {
+                    if (std::strcmp(result->policies[j].route_id, target.route_id) == 0) {
+                        target_route = &result->policies[j];
+                        break;
+                    }
+                }
+                if (!target_route) {
+                    result->error = "invalidation target route not found in document";
+                    return false;
+                }
+                if (!target_route->cache.enabled ||
+                    target_route->cache.behavior != CacheBehavior::Store) {
+                    result->error =
+                        "invalidation target route must have cache.enabled=true and behavior=store";
+                    return false;
+                }
+                if (target_route->allowed_method != HttpMethod::Get) {
+                    result->error = "invalidation target route must be a cacheable GET route";
+                    return false;
+                }
+            }
         }
     }
 
