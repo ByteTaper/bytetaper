@@ -55,7 +55,24 @@ Operators can verify the integrity of the downloaded release bundle before deplo
 sha256sum -c bytetaper-checksums.txt
 ```
 
-### C. SBOM Consumption
+### C. Multi-Architecture Image Usage
+ByteTaper releases are published as multi-architecture OCI manifest lists supporting both `linux/amd64` and `linux/arm64`.
+
+**Inspect published manifest:**
+```bash
+docker buildx imagetools inspect ghcr.io/ByteTaper/bytetaper-runtime:v0.1.0
+```
+
+**Run release image locally:**
+```bash
+docker pull ghcr.io/ByteTaper/bytetaper-runtime:v0.1.0
+docker run --rm ghcr.io/ByteTaper/bytetaper-runtime:v0.1.0 --version
+```
+
+**Digest Pinning for Multi-Arch:**
+The `bytetaper-runtime-image-digest.txt` artifact contains the digest of the top-level manifest list. When pinning `image.digest` in Helm, use this manifest-list digest to ensure your cluster pulls the correct architecture for each node automatically.
+
+### D. SBOM Consumption
 The attached CycloneDX and SPDX JSON SBOMs can be directly imported into enterprise Dependency-Track or vulnerability management platforms to maintain continuous compliance tracking.
 
 ---

@@ -40,6 +40,9 @@ image:
   digest: "sha256:4c2759d9762b10723f1d4642f5419d6642131990b72f8bf30e68"
 ```
 
+> [!TIP]
+> **Multi-Arch Digest Pinning**: ByteTaper release images are multi-architecture manifest lists. The digest published in the release artifacts (`bytetaper-runtime-image-digest.txt`) is the **top-level manifest-list digest**. Pinning this digest allows your cluster to automatically pull the correct architecture (amd64 or arm64) for each node. Only pin a platform-specific child digest if you intentionally want to restrict architecture compatibility.
+
 ### 2. Policy Modes
 The chart enforces exactly 3 mutually exclusive policy loading mechanisms:
 

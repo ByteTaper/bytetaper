@@ -29,6 +29,12 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Cosign
+        uses: sigstore/cosign-installer@v3.8.1
+
       - name: Setup Helm
         uses: azure/setup-helm@v4
         with:
@@ -67,16 +73,24 @@ jobs:
       - name: Phase 1 — Verify release inputs
         run: tools/release/verify_release_inputs.sh
 
-      - name: Phase 2 — Build production image
+      - name: Phase 2 — Build production image (local validation)
         run: |
           docker buildx build --load --platform linux/amd64 -f docker/production.Dockerfile \
             --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
             --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
             --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
+            -t bytetaper-runtime:release .
+
+      - name: Phase 2 — Build and push multi-arch image
+        if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
+        run: |
+          docker buildx build --push --platform linux/amd64,linux/arm64 -f docker/production.Dockerfile \
+            --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
+            --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
+            --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
             -t ghcr.io/ByteTaper/bytetaper-runtime:${BYTETAPER_VERSION} \
             -t ghcr.io/ByteTaper/bytetaper-runtime:${BYTETAPER_VERSION#v} \
-            -t ghcr.io/ByteTaper/bytetaper-runtime:sha-${GITHUB_SHA:0:12} \
-            -t bytetaper-runtime:release .
+            -t ghcr.io/ByteTaper/bytetaper-runtime:sha-${GITHUB_SHA:0:12} .
 
       - name: Pre-publish validation — Binary version and info
         run: |
@@ -141,19 +155,14 @@ jobs:
           cp dist/supply-chain/bytetaper-runtime-vulnerability-report.json dist/release/bytetaper-vulnerability-report.json
           cp dist/supply-chain/bytetaper-runtime-vulnerability-report.sarif dist/release/bytetaper-vulnerability-report.sarif
 
-      - name: Phase 5 — Push image and capture digest
+      - name: Phase 5 — Capture multi-arch digest
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
         run: |
-          docker push ghcr.io/ByteTaper/bytetaper-runtime:${BYTETAPER_VERSION}
-          docker push ghcr.io/ByteTaper/bytetaper-runtime:${BYTETAPER_VERSION#v}
-          docker push ghcr.io/ByteTaper/bytetaper-runtime:sha-${GITHUB_SHA:0:12}
           IMAGE_REF="ghcr.io/ByteTaper/bytetaper-runtime:${BYTETAPER_VERSION}"
           INSPECT_OUT=$(docker buildx imagetools inspect "${IMAGE_REF}")
           DIGEST=$(printf "%s\n" "${INSPECT_OUT}" | awk '/^Digest:[[:space:]]*sha256:/ {print $2; exit}')
           if ! [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "ERROR: Failed to capture or validate remote OCI digest for ${IMAGE_REF}"
-            echo "Inspect output was:"
-            printf "%s\n" "${INSPECT_OUT}"
             exit 1
           fi
           REF="ghcr.io/ByteTaper/bytetaper-runtime@${DIGEST}"
@@ -164,6 +173,10 @@ jobs:
           reference=${REF}
           git_sha=${BYTETAPER_GIT_SHA}
           EOF
+
+      - name: Phase 5 — Verify multi-arch manifest
+        if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
+        run: bash tools/release/verify_multiarch_image.sh
 
       - name: Phase 5 (Dry Run) — Simulate digest capture
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH != 'true' }}
@@ -176,11 +189,11 @@ jobs:
           git_sha=${BYTETAPER_GIT_SHA}
           EOF
 
-      - name: Setup Cosign
-        uses: sigstore/cosign-installer@v3.8.1
-
       - name: Phase 6 — Generate build provenance
         run: bash tools/release/generate_release_provenance.sh
+      
+      - name: Phase 6 — Setup Cosign
+        uses: sigstore/cosign-installer@v3.8.1
 
       - name: Phase 6 — Sign image and attach attestations
         run: bash tools/release/sign_release_image.sh
@@ -207,9 +220,23 @@ jobs:
 
           ### Container Contracts & References
           * **OCI Runtime Reference:** \`${DIGEST_REF}\`
+          * **Supported Platforms:** \`linux/amd64\`, \`linux/arm64\`
           * **Helm Chart Package:** \`${CHART_PKG}\`
           * **Release Manifest:** \`bytetaper-release-manifest.json\`
           * **Supply Chain Manifest:** \`bytetaper-supply-chain-manifest.json\`
+
+          ### Supported Platforms
+          - `linux/amd64`
+          - `linux/arm64`
+
+          The image reference resolves to a multi-architecture OCI manifest list. For reproducible deployments, pin by the manifest-list digest using the reference above.
+
+          **Pinning in Helm:**
+          Use the manifest-list digest in your `values.yaml` to ensure the correct architecture is pulled automatically by your cluster nodes:
+          ```yaml
+          image:
+            digest: ${DIGEST_REF#*@}
+          ```
 
           ### Artifact Checksums
           \`\`\`text
@@ -260,4 +287,3 @@ jobs:
           name: ByteTaper ${{ env.BYTETAPER_VERSION }}
           files: dist/release/**
           body_path: dist/release/bytetaper-release-body.md
-ByteTaper/bytetaperByteTaper/bytetaperByteTaper/bytetaperByteTaper/bytetaper
