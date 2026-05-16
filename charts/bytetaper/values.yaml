@@ -10,7 +10,7 @@ strategy:
     maxUnavailable: 25%
 
 image:
-  repository: ghcr.io/ByteTaper/bytetaper-runtime
+  repository: ghcr.io/bytetaper/bytetaper-runtime
   pullPolicy: IfNotPresent
   tag: ""
   digest: ""
@@ -80,18 +80,11 @@ l2Cache:
 
 admin:
   enabled: false
-  address: "127.0.0.1"
-  port: 18082
+  listenAddress: "0.0.0.0:18082"
   service:
     enabled: false
     type: ClusterIP
-    annotations: {}
-
-service:
-  type: ClusterIP
-  extProcPort: 18080
-  metricsPort: 18081
-  annotations: {}
+    port: 18082
 
 metrics:
   enabled: true
@@ -99,63 +92,44 @@ metrics:
     enabled: false
     interval: 30s
     scrapeTimeout: 10s
-    namespace: ""
     labels: {}
+    annotations: {}
 
 probes:
   liveness:
     enabled: true
     path: /healthz
-    port: metrics
-    initialDelaySeconds: 10
-    periodSeconds: 10
-    timeoutSeconds: 2
-    failureThreshold: 6
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 3
   readiness:
     enabled: true
     path: /readyz
-    port: metrics
     initialDelaySeconds: 5
-    periodSeconds: 5
-    timeoutSeconds: 2
-    failureThreshold: 6
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
 
-resources:
-  limits:
-    cpu: 1000m
-    memory: 1Gi
-  requests:
-    cpu: 100m
-    memory: 256Mi
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
 
 autoscaling:
   enabled: false
-  minReplicas: 1
-  maxReplicas: 5
+  minReplicas: 2
+  maxReplicas: 10
   targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
 
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
-  maxUnavailable: ""
 
 networkPolicy:
   enabled: false
-  ingress: []
-  egress: []
-
-topologySpreadConstraints: []
-
-env: []
-
-extraArgs: []
-
-extraVolumes: []
-
-extraVolumeMounts: []
-
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}
+  ingress:
+    namespaceSelector: {}
+    podSelector: {}
