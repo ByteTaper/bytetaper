@@ -58,6 +58,15 @@ cat <<EOF > dist/release/bytetaper-release-manifest.json
     "third_party_notices": "THIRD_PARTY_NOTICES.md",
     "licenses_archive": "LICENSES.zip"
   },
+  "verification": {
+    "signing_mode": "$( [[ "${BYTETAPER_RELEASE_PUBLISH:-false}" == "true" ]] && echo "keyless-oidc" || echo "skipped" )",
+    "signing_skip_reason": "$( [[ "${BYTETAPER_RELEASE_PUBLISH:-false}" == "true" ]] && echo "" || echo "release publish mode is disabled" )",
+    "signature_tool": "cosign",
+    "image_reference": "${IMG_REF}",
+    "signing_summary": "bytetaper-signing-summary.json",
+    "provenance": "bytetaper-provenance.json",
+    "verify_doc": "VERIFY_RELEASE.md"
+  },
   "checksums": "bytetaper-checksums.txt"
 }
 EOF

@@ -176,8 +176,22 @@ jobs:
           git_sha=${BYTETAPER_GIT_SHA}
           EOF
 
+      - name: Setup Cosign
+        uses: sigstore/cosign-installer@v3.8.1
+
+      - name: Phase 6 — Generate build provenance
+        run: bash tools/release/generate_release_provenance.sh
+
+      - name: Phase 6 — Sign image and attach attestations
+        run: bash tools/release/sign_release_image.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Phase 7 — Build release manifest
         run: tools/release/build_release_manifest.sh
+
+      - name: Copy verification documentation
+        run: cp docs/release/VERIFY_RELEASE.md dist/release/VERIFY_RELEASE.md
 
       - name: Phase 8 — Generate checksums
         run: tools/release/generate_checksums.sh
@@ -201,6 +215,41 @@ jobs:
           \`\`\`text
           $(cat dist/release/bytetaper-checksums.txt)
           \`\`\`
+
+          ### Verification
+
+          This release image is signed with keyless Sigstore/Cosign using the ByteTaper GitHub Actions release workflow identity.
+
+          **Verify signature:**
+          \`\`\`bash
+          cosign verify \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+            --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
+            ${DIGEST_REF}
+          \`\`\`
+
+          **Verify attestations:**
+          \`\`\`bash
+          cosign verify-attestation \\
+            --type cyclonedx \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+            --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
+            ${DIGEST_REF}
+
+          cosign verify-attestation \\
+            --type spdx \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+            --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
+            ${DIGEST_REF}
+
+          cosign verify-attestation \\
+            --type slsaprovenance \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+            --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
+            ${DIGEST_REF}
+          \`\`\`
+
+          See [VERIFY_RELEASE.md] for full verification guide.
           EOF
 
       - name: Phase 9 — Create GitHub Release
