@@ -10,7 +10,7 @@ strategy:
     maxUnavailable: 25%
 
 image:
-  repository: ghcr.io/ByteTaper/bytetaper-runtime
+  repository: ghcr.io/bytetaper/bytetaper-runtime
   pullPolicy: IfNotPresent
   tag: ""
   digest: ""

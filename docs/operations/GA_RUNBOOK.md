@@ -53,7 +53,7 @@ curl -fsS http://localhost:18081/metrics | grep bytetaper
     ```
 2.  Set the target image digest in `.env`:
     ```bash
-    BYTETAPER_IMAGE=ghcr.io/ByteTaper/bytetaper-runtime@sha256:<digest>
+    BYTETAPER_IMAGE=ghcr.io/bytetaper/bytetaper-runtime@sha256:<digest>
     ```
 3.  Start the service:
     ```bash
@@ -411,7 +411,7 @@ module "bytetaper" {
   namespace    = "bytetaper"
   release_name = "bytetaper"
 
-  image_repository = "ghcr.io/ByteTaper/bytetaper-runtime"
+  image_repository = "ghcr.io/bytetaper/bytetaper-runtime"
   image_digest     = "sha256:REPLACE_WITH_RELEASE_DIGEST"
 
   chart_version = "1.0.0"
@@ -557,7 +557,7 @@ metadata:
   namespace: bytetaper
 spec:
   image:
-    repository: ghcr.io/ByteTaper/bytetaper-runtime
+    repository: ghcr.io/bytetaper/bytetaper-runtime
     digest: sha256:REPLACE_WITH_RELEASE_DIGEST
   replicas: 1
   policy:

@@ -46,7 +46,7 @@ To deploy ByteTaper with absolute immutability and high availability, use the pa
 ```bash
 # Recommended for initial production rollout
 helm upgrade --install bytetaper ./bytetaper-0.1.0.tgz \
-  --set image.repository=ghcr.io/ByteTaper/bytetaper-runtime \
+  --set image.repository=ghcr.io/bytetaper/bytetaper-runtime \
   --set image.digest="sha256:<manifest-list-digest>" \
   --set l2Cache.persistence.enabled=true \
   --set admin.enabled=false \
@@ -79,13 +79,13 @@ ByteTaper releases are published as multi-architecture OCI manifest lists suppor
 
 **Inspect published manifest:**
 ```bash
-docker buildx imagetools inspect ghcr.io/ByteTaper/bytetaper-runtime:v0.1.0
+docker buildx imagetools inspect ghcr.io/bytetaper/bytetaper-runtime:v0.1.0
 ```
 
 **Run release image locally:**
 ```bash
-docker pull ghcr.io/ByteTaper/bytetaper-runtime:v0.1.0
-docker run --rm ghcr.io/ByteTaper/bytetaper-runtime:v0.1.0 --version
+docker pull ghcr.io/bytetaper/bytetaper-runtime:v0.1.0
+docker run --rm ghcr.io/bytetaper/bytetaper-runtime:v0.1.0 --version
 ```
 
 **Digest Pinning for Multi-Arch:**

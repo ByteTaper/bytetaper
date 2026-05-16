@@ -719,7 +719,7 @@ func commonLabels(gw *bytetaperv1alpha1.ByteTaperGateway) map[string]string {
 func imageReference(spec bytetaperv1alpha1.ByteTaperImageSpec) string {
 	repo := spec.Repository
 	if repo == "" {
-		repo = "ghcr.io/ByteTaper/bytetaper-runtime"
+		repo = "ghcr.io/bytetaper/bytetaper-runtime"
 	}
 	if spec.Digest != "" {
 		return fmt.Sprintf("%s@%s", repo, spec.Digest)

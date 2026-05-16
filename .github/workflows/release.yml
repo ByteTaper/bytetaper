@@ -107,9 +107,9 @@ jobs:
             --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
             --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
             --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
-            -t ghcr.io/ByteTaper/bytetaper-runtime:${BYTETAPER_VERSION} \
-            -t ghcr.io/ByteTaper/bytetaper-runtime:${BYTETAPER_VERSION#v} \
-            -t ghcr.io/ByteTaper/bytetaper-runtime:sha-${GITHUB_SHA:0:12} .
+            -t ghcr.io/bytetaper/bytetaper-runtime:${BYTETAPER_VERSION} \
+            -t ghcr.io/bytetaper/bytetaper-runtime:${BYTETAPER_VERSION#v} \
+            -t ghcr.io/bytetaper/bytetaper-runtime:sha-${GITHUB_SHA:0:12} .
 
       - name: Pre-publish validation — Binary version and info
         run: |
@@ -179,16 +179,18 @@ jobs:
       - name: Phase 5 — Capture multi-arch digest
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
         run: |
-          IMAGE_REF="ghcr.io/ByteTaper/bytetaper-runtime:${BYTETAPER_VERSION}"
+          IMAGE_REF="ghcr.io/bytetaper/bytetaper-runtime:${BYTETAPER_VERSION}"
           INSPECT_OUT=$(docker buildx imagetools inspect "${IMAGE_REF}")
           DIGEST=$(printf "%s\n" "${INSPECT_OUT}" | awk '/^Digest:[[:space:]]*sha256:/ {print $2; exit}')
           if ! [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "ERROR: Failed to capture or validate remote OCI digest for ${IMAGE_REF}"
+            echo "Inspect output was:"
+            printf "%s\n" "${INSPECT_OUT}"
             exit 1
           fi
-          REF="ghcr.io/ByteTaper/bytetaper-runtime@${DIGEST}"
+          REF="ghcr.io/bytetaper/bytetaper-runtime@${DIGEST}"
           cat <<EOF > dist/release/bytetaper-runtime-image-digest.txt
-          image=ghcr.io/ByteTaper/bytetaper-runtime
+          image=ghcr.io/bytetaper/bytetaper-runtime
           tag=${BYTETAPER_VERSION}
           digest=${DIGEST}
           reference=${REF}
@@ -203,10 +205,10 @@ jobs:
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH != 'true' }}
         run: |
           cat <<EOF > dist/release/bytetaper-runtime-image-digest.txt
-          image=ghcr.io/ByteTaper/bytetaper-runtime
+          image=ghcr.io/bytetaper/bytetaper-runtime
           tag=${BYTETAPER_VERSION}
           digest=sha256:0000000000000000000000000000000000000000000000000000000000000000
-          reference=ghcr.io/ByteTaper/bytetaper-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          reference=ghcr.io/bytetaper/bytetaper-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000
           git_sha=${BYTETAPER_GIT_SHA}
           EOF
 

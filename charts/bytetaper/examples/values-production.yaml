@@ -4,7 +4,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/ByteTaper/bytetaper-runtime
+  repository: ghcr.io/bytetaper/bytetaper-runtime
   digest: "sha256:4c2759d9762b10723f1d4642f5419d6642131990b72f8bf30e68"
   pullPolicy: IfNotPresent
 

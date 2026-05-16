@@ -39,7 +39,7 @@ jobs:
             echo "ERROR: Invalid or missing image_digest input: '${DIGEST}'. Must be exactly 'sha256:' followed by 64 lowercase hex characters."
             exit 1
           fi
-          echo "Deploying image: ghcr.io/ByteTaper/bytetaper-runtime@${DIGEST}"
+          echo "Deploying image: ghcr.io/bytetaper/bytetaper-runtime@${DIGEST}"
 
       - name: Configure Kubernetes credentials
         run: |

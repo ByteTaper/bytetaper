@@ -8,7 +8,7 @@ metadata:
 spec:
   # -- Runtime Image --
   image:
-    repository: ghcr.io/ByteTaper/bytetaper-runtime
+    repository: ghcr.io/bytetaper/bytetaper-runtime
     digest: sha256:REPLACE_WITH_RELEASE_DIGEST
 
   # -- Scale --

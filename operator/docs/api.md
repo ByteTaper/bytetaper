@@ -7,7 +7,7 @@ The `ByteTaperGateway` Custom Resource Definition (`bytetaper.io/v1alpha1`) prov
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `replicas` | int32 | `1` | Desired number of gateway pods. |
-| `image.repository` | string | `ghcr.io/ByteTaper/bytetaper-runtime` | Container image repository. |
+| `image.repository` | string | `ghcr.io/bytetaper/bytetaper-runtime` | Container image repository. |
 | `image.tag` | string | `latest` | Container image tag. |
 | `image.digest` | string | `""` | SHA256 digest pinning. Overrides tag. |
 | `image.pullPolicy` | string | `IfNotPresent` | Image pull policy (`Always`, `IfNotPresent`, `Never`). |
