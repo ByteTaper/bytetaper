@@ -1,0 +1,45 @@
+# ByteTaper Production Terraform Variables Reference
+# =================================================
+
+# -- Required Overrides --
+# The digest-pinned runtime image is mandatory for production
+image_digest = "sha256:REPLACE_WITH_RELEASE_DIGEST"
+
+# -- Chart Source (Required) --
+# Specify either a version from the repository or a local path
+chart_version = "1.0.0"
+# chart_path   = "../../charts/bytetaper"
+
+# -- Deployment Configuration --
+namespace     = "bytetaper"
+release_name  = "bytetaper"
+
+# Use extra_values for chart-specific tuning not exposed as top-level variables
+extra_values = {
+  replicaCount = 1
+}
+
+# -- L2 Cache (RocksDB) --
+l2_cache_enabled = true
+l2_cache_size    = "20Gi"
+# l2_cache_storage_class_name = "standard"
+
+# -- Security --
+# Admin endpoint should remain disabled for public exposure
+admin_enabled = false
+
+# -- Observability --
+metrics_enabled = true
+
+# -- Resources --
+# Match these to your workload requirements
+resources = {
+  requests = {
+    cpu    = "500m"
+    memory = "512Mi"
+  }
+  limits = {
+    cpu    = "2000m"
+    memory = "2Gi"
+  }
+}

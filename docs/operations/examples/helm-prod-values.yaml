@@ -1,0 +1,43 @@
+# ByteTaper Single-Replica Production Values Reference
+# =================================================
+
+# Pinning to a specific digest is required for production
+image:
+  repository: ghcr.io/ByteTaper/bytetaper-runtime
+  digest: "sha256:REPLACE_WITH_RELEASE_DIGEST"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Persistent L2 cache is recommended for single-replica warmness
+l2Cache:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 20Gi
+    accessModes:
+      - ReadWriteOnce
+
+# Admin endpoint disabled for security
+admin:
+  enabled: false
+
+# Monitoring enabled
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+
+# Guard against voluntary disruptions
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Explicit resource requests and limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi

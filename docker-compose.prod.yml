@@ -18,6 +18,14 @@ services:
     ports:
       - "18080:18080"
       - "18081:18081"
+    environment:
+      - BYTETAPER_L2_BLOCK_CACHE_MB
+      - BYTETAPER_L2_WRITE_BUFFER_MB
+      - BYTETAPER_L2_MAX_BACKGROUND_JOBS
+      - BYTETAPER_WORKER_COUNT
+      - BYTETAPER_LOOKUP_LANE_QUOTA
+      - BYTETAPER_STORE_LANE_QUOTA
+      - BYTETAPER_ASYNC_STORE_MAX_BODY_SIZE
     healthcheck:
       test: ["CMD-SHELL",
              "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]

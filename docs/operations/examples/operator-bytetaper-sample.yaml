@@ -1,0 +1,47 @@
+# ByteTaper Operator Custom Resource Sample
+# ========================================
+apiVersion: bytetaper.io/v1alpha1
+kind: ByteTaperGateway
+metadata:
+  name: bytetaper
+  namespace: bytetaper
+spec:
+  # -- Runtime Image --
+  image:
+    repository: ghcr.io/ByteTaper/bytetaper-runtime
+    digest: sha256:REPLACE_WITH_RELEASE_DIGEST
+
+  # -- Scale --
+  replicas: 1
+
+  # -- Policy Source --
+  # Use an existing ConfigMap containing 'policy.yaml'
+  policy:
+    configMapRef:
+      name: bytetaper-policy
+    key: policy.yaml
+
+  # -- L2 Cache (RocksDB) --
+  l2Cache:
+    enabled: true
+    persistence:
+      enabled: true
+      size: 20Gi
+
+  # -- Security --
+  # Keep admin disabled for public production environments
+  admin:
+    enabled: false
+
+  # -- Observability --
+  metrics:
+    enabled: true
+
+  # -- Resources --
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
