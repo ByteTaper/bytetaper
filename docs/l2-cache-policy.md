@@ -81,3 +81,13 @@ services:
       - --l2-cache-path
       - /tmp/bytetaper-cache
 ```
+
+---
+
+## 5. Mutation Invalidation & Logical Deletion
+
+ByteTaper's mutation-aware invalidation primarily uses a **Route Cache Epoch** mechanism for correctness.
+
+> [!NOTE]
+> **Logical vs. Physical Deletion**
+> Mutation invalidation primarily uses the route cache epoch. Old RocksDB keys under the previous epoch may remain physically present until TTL expiry or background cleanup. The route epoch acts as the correctness mechanism — physical deletion from disk is performed asynchronously via a worker queue to avoid blocking the mutation response hot path.

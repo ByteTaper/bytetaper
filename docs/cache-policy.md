@@ -96,3 +96,9 @@ Every cache hit is validated against the `ttl_seconds` policy. If an entry is fo
 - **L1 Capacity**: Keep L1 capacity within reasonable memory limits. Each entry consumes approximately 64KB + metadata.
 - **L2 Disk I/O**: Use fast storage (NVMe/SSD) for the L2 path to ensure promotion latency remains negligible.
 - **Immediate Response**: On a cache hit, ByteTaper returns the response **immediately**, bypassing the expensive transformation pipeline.
+
+## Mutation-aware Invalidation
+
+ByteTaper supports explicit cache invalidation triggered by mutation requests (`PATCH`, `PUT`, `DELETE`). This ensures that cached `GET` responses are refreshed when the underlying data changes.
+
+For detailed configuration and behavior, see [Mutation-Aware Cache Invalidation](mutation-cache-invalidation.md).

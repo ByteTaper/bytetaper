@@ -172,6 +172,27 @@ If an operator submits a stale candidate:
 
 ---
 
+### 3. Applying Invalidation Policies
+
+The `PATCH /admin/taperquery/apply` (or POST in the current API) endpoint supports routes with `cache.invalidation` blocks.
+
+**Example Invalidation Payload:**
+```json
+{
+  "source_type": "taperquery",
+  "source": "policy \"patch-invalidation\" { route \"get_user\" when method GET path prefix \"/users/\" { cache { enabled true behavior store } } route \"update_user\" when method PATCH path prefix \"/users/\" { cache { invalidation { enabled true on_methods [\"PATCH\"] targets [ { route_id \"get_user\" strategy \"route_epoch\" } ] } } } }",
+  "expected_base_identity": "<current_sha>",
+  "mode": "apply"
+}
+```
+
+**Validation Notes:**
+- **Dry-Run Validation**: The TaperQuery service validates that all `targets` exist in the *new* candidate policy document (not just the old one) and that they are cacheable `GET` routes. In the example above, `get_user` must be present in the `source` string.
+- **CAS Protection**: Applying an invalidation policy uses the same Compare-And-Swap protection to ensure you aren't invalidating routes that have been modified or removed by another operator.
+- **Immediate Effect**: Once applied, the next matching mutation request will begin tracking invalidation plans and bumping epochs on success.
+
+---
+
 ## HTTP Status Codes
 
 | Status | Code | Description |

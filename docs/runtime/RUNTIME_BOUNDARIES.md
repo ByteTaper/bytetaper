@@ -28,6 +28,7 @@ Runs synchronously on the gRPC request thread per request.
 - Backend calls or network I/O
 - Unbounded computation or allocation
 - Blocking disk cleanup or warmup
+- Synchronous RocksDB scan or prefix deletion for mutation invalidation
 
 ### Exception: Coalescing Follower Sync L2 Probe
 
@@ -103,7 +104,7 @@ Background threads. Isolated from gRPC stream threads.
 - RocksDB L2 lookup (`L2LookupJob`) with L1 promotion on hit
 - RocksDB L2 store (`L2StoreJob`)
 - Coalescing L2Ready state publication after successful store
-- L2RemoveJob (future)
+- L2RemoveJob (async invalidation cleanup)
 - L2WarmupJob (future)
 - L2TtlCleanupJob (future)
 
@@ -137,6 +138,17 @@ During shutdown, the worker queue drains in-flight jobs before process exit.
 - CLI / diagnostic tooling that runs outside the hot-path pipeline
 
 These stages **must not appear** in `kLookupStages` or `kStoreStages`. The boundary tests in `tests/default_pipeline_boundaries_test.cpp` enforce this at build time.
+
+---
+
+## Mutation Invalidation Constraints
+
+Mutation invalidation must not perform synchronous RocksDB scan or delete on the Envoy ExtProc request or response processing threads.
+
+- **Immediate Action**: Use Route Epoch bump (atomic in-memory counter) for logical invalidation. This is the only mutation strategy supported in v1.
+- **Background Action**: Physical cleanup of L2 entries (`L2RemoveJob`) exists as an infrastructure primitive for background maintenance jobs, but is not currently enqueued by standard mutation policies.
+
+Correctness is guaranteed by the Route Epoch; physical cleanup is for long-term disk efficiency.
 
 ---
 
