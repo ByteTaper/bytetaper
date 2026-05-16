@@ -18,9 +18,25 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Build shared benchmark images
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+            docker compose build bytetaper-dev bytetaper-benchmark
+
       - name: Start Docker Compose Environment
         run: |
-          docker compose up -d --build
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+            docker compose up -d --build \
+              mock-api \
+              bytetaper-extproc envoy \
+              envoy-baseline \
+              bytetaper-extproc-observe envoy-bytetaper-observe \
+              bytetaper-extproc-field-filtering envoy-bytetaper-field-filtering \
+              bytetaper-extproc-cache-a envoy-bytetaper-cache-a \
+              bytetaper-extproc-header-variance envoy-bytetaper-header-variance \
+              bytetaper-extproc-pagination envoy-bytetaper-pagination \
+              bytetaper-extproc-compression envoy-compression \
+              bytetaper-extproc-coalescing envoy-bytetaper-coalescing
 
       - name: Wait for Envoy & Extproc Services to be Healthy
         run: |
@@ -30,7 +46,7 @@ jobs:
 
       - name: Run Performance Smoke Benchmark
         run: |
-          docker compose run --rm bytetaper-benchmark ./benchmarks/scenarios/performance_smoke.sh
+          docker compose run --rm --no-deps bytetaper-benchmark ./benchmarks/scenarios/performance_smoke.sh
 
       - name: Upload Performance Reports
         if: always()
