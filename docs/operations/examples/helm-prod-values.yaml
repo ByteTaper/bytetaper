@@ -3,7 +3,7 @@
 
 # Pinning to a specific digest is required for production
 image:
-  repository: ghcr.io/ByteTaper/bytetaper-runtime
+  repository: ghcr.io/bytetaper/bytetaper-runtime
   digest: "sha256:REPLACE_WITH_RELEASE_DIGEST"
   pullPolicy: IfNotPresent
 

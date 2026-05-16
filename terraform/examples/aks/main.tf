@@ -19,7 +19,7 @@ module "bytetaper" {
   chart_name       = "bytetaper"
   chart_version    = var.chart_version
 
-  image_repository = "ghcr.io/ByteTaper/bytetaper-runtime"
+  image_repository = "ghcr.io/bytetaper/bytetaper-runtime"
   image_digest     = var.image_digest
 
   policy_mode                    = "existingConfigMap"

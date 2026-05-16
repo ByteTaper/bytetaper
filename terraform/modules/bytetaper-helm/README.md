@@ -21,7 +21,7 @@ module "bytetaper" {
   chart_name       = "bytetaper"
   chart_version    = "0.1.0"
 
-  image_repository = "ghcr.io/ByteTaper/bytetaper-runtime"
+  image_repository = "ghcr.io/bytetaper/bytetaper-runtime"
   image_digest     = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 
   policy_mode = "inline"

@@ -49,7 +49,7 @@ func TestImageReference(t *testing.T) {
 				Repository: "",
 				Tag:        "",
 			},
-			expected: "ghcr.io/ByteTaper/bytetaper-runtime:latest",
+			expected: "ghcr.io/bytetaper/bytetaper-runtime:latest",
 		},
 		{
 			name: "custom tag",
