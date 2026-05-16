@@ -42,7 +42,7 @@ variable "chart_path" {
 
 variable "image_repository" {
   type        = string
-  default     = "ghcr.io/haluan/bytetaper-runtime"
+  default     = "ghcr.io/ByteTaper/bytetaper-runtime"
   description = "Container image repository for the ByteTaper runtime."
 }
 

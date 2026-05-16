@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	bytetaperv1alpha1 "github.com/haluan/bytetaper/operator/api/v1alpha1"
+	bytetaperv1alpha1 "github.com/ByteTaper/bytetaper/operator/api/v1alpha1"
 )
 
 const (
@@ -719,7 +719,7 @@ func commonLabels(gw *bytetaperv1alpha1.ByteTaperGateway) map[string]string {
 func imageReference(spec bytetaperv1alpha1.ByteTaperImageSpec) string {
 	repo := spec.Repository
 	if repo == "" {
-		repo = "ghcr.io/haluan/bytetaper-runtime"
+		repo = "ghcr.io/ByteTaper/bytetaper-runtime"
 	}
 	if spec.Digest != "" {
 		return fmt.Sprintf("%s@%s", repo, spec.Digest)

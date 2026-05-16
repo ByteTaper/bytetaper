@@ -30,7 +30,7 @@ metadata:
 spec:
   replicas: 3
   image:
-    repository: ghcr.io/haluan/bytetaper-runtime
+    repository: ghcr.io/ByteTaper/bytetaper-runtime
     digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   policy:
     configMapRef:

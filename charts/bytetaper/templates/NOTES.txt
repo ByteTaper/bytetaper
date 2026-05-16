@@ -13,4 +13,4 @@ ByteTaper API Performance Gateway has been successfully deployed!
    curl http://localhost:18081/metrics
 
 3. For comprehensive configuration options and production runbooks, visit:
-   https://github.com/haluan/bytetaper
+   https://github.com/ByteTaper/bytetaper

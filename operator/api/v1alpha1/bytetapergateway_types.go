@@ -38,7 +38,7 @@ type ByteTaperImageSpec struct {
 	// Repository is the container image repository.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:default="ghcr.io/haluan/bytetaper-runtime"
+	// +kubebuilder:default="ghcr.io/ByteTaper/bytetaper-runtime"
 	Repository string `json:"repository,omitempty"`
 
 	// Tag is the container image tag. Prefer Digest for production.

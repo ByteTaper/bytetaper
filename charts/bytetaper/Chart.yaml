@@ -4,9 +4,9 @@ description: A Helm chart for deploying the ByteTaper API Performance Gateway ru
 type: application
 version: 0.1.0
 appVersion: "v0.1.0"
-home: https://github.com/haluan/bytetaper
+home: https://github.com/ByteTaper/bytetaper
 sources:
-  - https://github.com/haluan/bytetaper
+  - https://github.com/ByteTaper/bytetaper
 keywords:
   - bytetaper
   - gateway

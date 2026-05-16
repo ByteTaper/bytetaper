@@ -1,6 +1,6 @@
 # ByteTaper: API response optimization without backend rewrites
 
-![CI](https://github.com/haluan/bytetaper/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/ByteTaper/bytetaper/actions/workflows/ci.yml/badge.svg)
 
 ByteTaper is an API Performance Gateway component designed to optimize API
 responses at the edge without requiring backend rewrites. The current runtime is

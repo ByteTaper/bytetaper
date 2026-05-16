@@ -11,7 +11,7 @@ This Terraform module provides an official, declarative wrapper around the ByteT
 
 ```hcl
 module "bytetaper" {
-  source = "github.com/haluan/bytetaper//terraform/modules/bytetaper-helm?ref=v0.1.0"
+  source = "github.com/ByteTaper/bytetaper//terraform/modules/bytetaper-helm?ref=v0.1.0"
 
   release_name     = "bytetaper-prod"
   namespace        = "gateway-system"
@@ -21,7 +21,7 @@ module "bytetaper" {
   chart_name       = "bytetaper"
   chart_version    = "0.1.0"
 
-  image_repository = "ghcr.io/haluan/bytetaper-runtime"
+  image_repository = "ghcr.io/ByteTaper/bytetaper-runtime"
   image_digest     = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 
   policy_mode = "inline"

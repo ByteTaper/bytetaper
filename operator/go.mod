@@ -1,4 +1,4 @@
-module github.com/haluan/bytetaper/operator
+module github.com/ByteTaper/bytetaper/operator
 
 go 1.23.0
 

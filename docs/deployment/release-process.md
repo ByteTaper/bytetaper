@@ -44,7 +44,7 @@ To deploy the gateway with absolute immutability, operators should reference the
 
 ```bash
 helm upgrade --install bytetaper ./bytetaper-0.1.0.tgz \
-  --set image.repository=ghcr.io/haluan/bytetaper-runtime \
+  --set image.repository=ghcr.io/ByteTaper/bytetaper-runtime \
   --set image.tag="0.1.0" \
   --namespace bytetaper --create-namespace
 ```

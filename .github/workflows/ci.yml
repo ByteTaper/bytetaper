@@ -162,7 +162,7 @@ jobs:
           echo "$LABELS" | jq .
           echo "$LABELS" | jq -e '.["org.opencontainers.image.title"] == "ByteTaper Runtime"' > /dev/null
           echo "$LABELS" | jq -e '.["org.opencontainers.image.description"] == "ByteTaper API Performance Gateway runtime image"' > /dev/null
-          echo "$LABELS" | jq -e '.["org.opencontainers.image.source"] == "https://github.com/haluan/bytetaper"' > /dev/null
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.source"] == "https://github.com/ByteTaper/bytetaper"' > /dev/null
           echo "$LABELS" | jq -e '.["org.opencontainers.image.revision"] == "'"${BYTETAPER_GIT_SHA}"'"' > /dev/null
           echo "$LABELS" | jq -e '.["org.opencontainers.image.version"] == "'"${BYTETAPER_VERSION}"'"' > /dev/null
           echo "$LABELS" | jq -e '.["org.opencontainers.image.created"] == "'"${BYTETAPER_BUILD_DATE}"'"' > /dev/null
