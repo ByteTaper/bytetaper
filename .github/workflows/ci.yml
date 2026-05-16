@@ -195,10 +195,12 @@ jobs:
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
             docker compose --profile runtime-test run --rm bytetaper-runtime-smoke-validator
 
-      - name: Install Trivy
+      - name: Setup Syft and Grype
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin
+          curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b /usr/local/bin
+          curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b /usr/local/bin
+          syft version
+          grype version
 
       - name: Check legal notice freshness
         run: |
