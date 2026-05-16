@@ -343,6 +343,74 @@ if(BUILD_TESTING)
     )
     add_test(NAME mutation_invalidation_apply_stage_test COMMAND mutation_invalidation_apply_stage_test)
 
+    # Mutation Invalidation Integration Tests
+    add_executable(mutation_cache_invalidation_test
+      tests/mutation_cache_invalidation_test.cpp
+    )
+    target_link_libraries(mutation_cache_invalidation_test
+      PRIVATE
+        gtest_main
+        bytetaper_stages
+        bytetaper_cache
+        bytetaper_runtime
+        bytetaper_prometheus_registry
+        RocksDB::RocksDB
+    )
+    add_test(NAME mutation_cache_invalidation_test COMMAND mutation_cache_invalidation_test)
+
+    add_executable(mutation_cache_invalidation_l2_test
+      tests/mutation_cache_invalidation_l2_test.cpp
+    )
+    target_link_libraries(mutation_cache_invalidation_l2_test
+      PRIVATE
+        gtest_main
+        bytetaper_stages
+        bytetaper_cache
+        bytetaper_runtime
+        bytetaper_prometheus_registry
+        RocksDB::RocksDB
+    )
+    add_test(NAME mutation_cache_invalidation_l2_test COMMAND mutation_cache_invalidation_l2_test)
+
+    add_executable(mutation_cache_invalidation_variant_test
+      tests/mutation_cache_invalidation_variant_test.cpp
+    )
+    target_link_libraries(mutation_cache_invalidation_variant_test
+      PRIVATE
+        gtest_main
+        bytetaper_stages
+        bytetaper_cache
+        bytetaper_runtime
+        bytetaper_prometheus_registry
+        RocksDB::RocksDB
+    )
+    add_test(NAME mutation_cache_invalidation_variant_test COMMAND mutation_cache_invalidation_variant_test)
+
+    add_executable(mutation_cache_invalidation_pipeline_test
+      tests/mutation_cache_invalidation_pipeline_test.cpp
+    )
+    target_link_libraries(mutation_cache_invalidation_pipeline_test
+      PRIVATE
+        gtest_main
+        bytetaper_stages
+        bytetaper_cache
+        bytetaper_runtime
+        bytetaper_prometheus_registry
+        bytetaper_extproc_grpc_server
+        RocksDB::RocksDB
+    )
+    add_test(NAME mutation_cache_invalidation_pipeline_test COMMAND mutation_cache_invalidation_pipeline_test)
+
+    add_executable(mutation_invalidation_method_test
+      tests/mutation_invalidation_method_test.cpp
+    )
+    target_link_libraries(mutation_invalidation_method_test
+      PRIVATE
+        gtest_main
+        bytetaper_stages
+    )
+    add_test(NAME mutation_invalidation_method_test COMMAND mutation_invalidation_method_test)
+
     add_executable(l1_cache_lookup_stage_test
       tests/l1_cache_lookup_stage_test.cpp
     )
@@ -1467,7 +1535,7 @@ if(BUILD_TESTING)
       NAME pagination_policy_validator_test
       COMMAND pagination_policy_validator_test
     )
- 
+
     add_executable(cache_policy_validator_test
       tests/cache_policy_validator_test.cpp
     )
@@ -1480,7 +1548,7 @@ if(BUILD_TESTING)
         gtest_main
         bytetaper_policy
     )
- 
+
     add_test(
       NAME cache_policy_validator_test
       COMMAND cache_policy_validator_test
@@ -1678,7 +1746,7 @@ if(BUILD_TESTING)
       NAME metrics_prometheus_registry_test
       COMMAND metrics_prometheus_registry_test
     )
- 
+
     add_executable(cache_metrics_test
       tests/cache_metrics_test.cpp
     )
@@ -1691,7 +1759,7 @@ if(BUILD_TESTING)
         gtest_main
         bytetaper_prometheus_registry
     )
- 
+
     add_test(
       NAME cache_metrics_test
       COMMAND cache_metrics_test
@@ -2503,7 +2571,7 @@ if(BUILD_TESTING)
       NAME extproc_compression_candidate_header_integration_test
       COMMAND extproc_compression_candidate_header_integration_test
     )
-    
+
     add_executable(extproc_worker_lifecycle_cleanup_test
       tests/integration/extproc/extproc_worker_lifecycle_cleanup_test.cpp
     )

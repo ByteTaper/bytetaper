@@ -59,6 +59,25 @@ struct RoutePolicy {
     CoalescingPolicy coalescing = {};
 };
 
+inline HttpMethod parse_http_method(const char* method, std::size_t len) {
+    if (method == nullptr || len == 0)
+        return HttpMethod::Any;
+    if ((len == 3 && (std::strncmp(method, "GET", 3) == 0 || std::strncmp(method, "get", 3) == 0)))
+        return HttpMethod::Get;
+    if ((len == 4 &&
+         (std::strncmp(method, "POST", 4) == 0 || std::strncmp(method, "post", 4) == 0)))
+        return HttpMethod::Post;
+    if ((len == 3 && (std::strncmp(method, "PUT", 3) == 0 || std::strncmp(method, "put", 3) == 0)))
+        return HttpMethod::Put;
+    if ((len == 6 &&
+         (std::strncmp(method, "DELETE", 6) == 0 || std::strncmp(method, "delete", 6) == 0)))
+        return HttpMethod::Delete;
+    if ((len == 5 &&
+         (std::strncmp(method, "PATCH", 5) == 0 || std::strncmp(method, "patch", 5) == 0)))
+        return HttpMethod::Patch;
+    return HttpMethod::Any;
+}
+
 bool validate_route_policy(const RoutePolicy& policy, const char** reason_out);
 
 // Returns true if the given response_size (in bytes) exceeds the policy limit.
