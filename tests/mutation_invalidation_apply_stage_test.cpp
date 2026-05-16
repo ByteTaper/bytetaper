@@ -13,13 +13,16 @@ class MutationInvalidationApplyStageTest : public ::testing::Test {
 protected:
     apg::ApgTransformContext context{};
     runtime::RouteCacheEpochStore store{};
+    metrics::CacheMetrics metrics{};
+    policy::RoutePolicy active_routes[2]{};
 
     void SetUp() override {
         context = apg::ApgTransformContext{};
-        // store is default initialized by GTest for each test instance.
-        // We just need to ensure count is 0 if we were reusing it,
-        // but since we aren't, it's fine.
         context.route_cache_epoch_store = &store;
+        context.cache_metrics = &metrics;
+
+        context.active_routes = active_routes;
+        context.active_route_count = 0;
     }
 };
 
@@ -28,6 +31,7 @@ TEST_F(MutationInvalidationApplyStageTest, SkipsWhenNoPlan) {
     auto output = stages::mutation_invalidation_apply_stage(context);
     EXPECT_EQ(output.result, apg::StageResult::Continue);
     EXPECT_EQ(context.mutation_invalidation.decision, apg::MutationInvalidationDecision::None);
+    EXPECT_EQ(metrics.invalidation_apply_attempt_total.load(), 0u);
 }
 
 TEST_F(MutationInvalidationApplyStageTest, SkipsWhenStatusNotSuccessful) {
@@ -40,6 +44,9 @@ TEST_F(MutationInvalidationApplyStageTest, SkipsWhenStatusNotSuccessful) {
     EXPECT_EQ(output.result, apg::StageResult::Continue);
     EXPECT_EQ(context.mutation_invalidation.decision,
               apg::MutationInvalidationDecision::SkippedStatusNotSuccessful);
+    EXPECT_EQ(metrics.invalidation_apply_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_skipped_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_status_not_successful_total.load(), 1u);
 }
 
 TEST_F(MutationInvalidationApplyStageTest, AppliesWhenStatusIs204) {
@@ -62,6 +69,11 @@ TEST_F(MutationInvalidationApplyStageTest, AppliesWhenStatusIs204) {
     std::uint64_t after = 0;
     runtime::route_cache_epoch_get(&store, "target-route", &after);
     EXPECT_EQ(after, before + 1);
+
+    EXPECT_EQ(metrics.invalidation_apply_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_applied_total.load(), 1u);
+    EXPECT_EQ(metrics.route_epoch_bump_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.route_epoch_bump_success_total.load(), 1u);
 }
 
 TEST_F(MutationInvalidationApplyStageTest, DoesNotApplyTwice) {
@@ -96,6 +108,8 @@ TEST_F(MutationInvalidationApplyStageTest, FailsWhenEpochStoreMissing) {
     EXPECT_EQ(context.mutation_invalidation.decision,
               apg::MutationInvalidationDecision::FailedEpochStoreMissing);
     EXPECT_TRUE(context.mutation_invalidation.failed);
+    EXPECT_EQ(metrics.invalidation_apply_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_failed_total.load(), 1u);
 }
 
 TEST_F(MutationInvalidationApplyStageTest, FailsWhenTargetRouteMissing) {
@@ -110,6 +124,10 @@ TEST_F(MutationInvalidationApplyStageTest, FailsWhenTargetRouteMissing) {
     EXPECT_EQ(context.mutation_invalidation.decision,
               apg::MutationInvalidationDecision::FailedEpochBump);
     EXPECT_TRUE(context.mutation_invalidation.failed);
+    EXPECT_EQ(metrics.invalidation_apply_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.route_epoch_bump_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.route_epoch_bump_failed_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_failed_total.load(), 1u);
 }
 
 TEST_F(MutationInvalidationApplyStageTest, AppliesMultipleTargets) {
@@ -139,4 +157,28 @@ TEST_F(MutationInvalidationApplyStageTest, AppliesMultipleTargets) {
     runtime::route_cache_epoch_get(&store, "r2", &a2);
     EXPECT_EQ(a1, b1 + 1);
     EXPECT_EQ(a2, b2 + 1);
+
+    EXPECT_EQ(metrics.invalidation_apply_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_applied_total.load(), 1u);
+    EXPECT_EQ(metrics.route_epoch_bump_attempt_total.load(), 2u);
+    EXPECT_EQ(metrics.route_epoch_bump_success_total.load(), 2u);
+}
+
+TEST_F(MutationInvalidationApplyStageTest, VariantsTracked) {
+    context.mutation_invalidation.prepared = true;
+    context.mutation_invalidation.success_status_min = 200;
+    context.mutation_invalidation.success_status_max = 299;
+    context.response_status_code = 200;
+    context.mutation_invalidation.target_count = 1;
+    std::strcpy(context.mutation_invalidation.targets[0].route_id, "v1");
+
+    runtime::route_cache_epoch_register(&store, "v1");
+
+    // Setup active route with variants enabled
+    active_routes[0].route_id = "v1";
+    active_routes[0].cache.field_variant.enabled = true;
+    context.active_route_count = 1;
+
+    stages::mutation_invalidation_apply_stage(context);
+    EXPECT_EQ(metrics.variant_invalidated_by_route_epoch_total.load(), 1u);
 }

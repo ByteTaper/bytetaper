@@ -14,12 +14,14 @@ protected:
     apg::ApgTransformContext context{};
     policy::RoutePolicy policy{};
     policy::RoutePolicy targets[4]{};
+    metrics::CacheMetrics metrics{};
 
     void SetUp() override {
         context = apg::ApgTransformContext{};
         policy = policy::RoutePolicy{};
         policy.route_id = "mutator";
         context.matched_policy = &policy;
+        context.cache_metrics = &metrics;
 
         // Setup active routes for resolver
         static const char* target_ids[] = { "t1", "t2", "t3", "t4" };
@@ -40,6 +42,8 @@ TEST_F(MutationInvalidationPrepareStageTest, SkipsWhenNoPolicy) {
     EXPECT_EQ(output.result, apg::StageResult::Continue);
     EXPECT_EQ(context.mutation_invalidation.decision,
               apg::MutationInvalidationDecision::SkippedNoPolicy);
+    EXPECT_EQ(metrics.invalidation_prepare_attempt_total.load(), 0u);
+    EXPECT_EQ(metrics.invalidation_no_policy_total.load(), 1u);
 }
 
 TEST_F(MutationInvalidationPrepareStageTest, SkipsWhenMethodIsGet) {
@@ -49,6 +53,8 @@ TEST_F(MutationInvalidationPrepareStageTest, SkipsWhenMethodIsGet) {
     EXPECT_EQ(output.result, apg::StageResult::Continue);
     EXPECT_EQ(context.mutation_invalidation.decision,
               apg::MutationInvalidationDecision::SkippedNonMutationMethod);
+    EXPECT_EQ(metrics.invalidation_prepare_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_prepare_skipped_total.load(), 1u);
 }
 
 TEST_F(MutationInvalidationPrepareStageTest, SkipsWhenInvalidationDisabled) {
@@ -59,6 +65,8 @@ TEST_F(MutationInvalidationPrepareStageTest, SkipsWhenInvalidationDisabled) {
     EXPECT_STREQ(output.note, "no-invalidation-policy");
     EXPECT_EQ(context.mutation_invalidation.decision,
               apg::MutationInvalidationDecision::SkippedNoPolicy);
+    EXPECT_EQ(metrics.invalidation_prepare_attempt_total.load(), 0u);
+    EXPECT_EQ(metrics.invalidation_no_policy_total.load(), 1u);
 }
 
 TEST_F(MutationInvalidationPrepareStageTest, SkipsWhenMethodIsPost) {
@@ -82,6 +90,8 @@ TEST_F(MutationInvalidationPrepareStageTest, PreparesForPatch) {
     EXPECT_EQ(output.result, apg::StageResult::Continue);
     EXPECT_EQ(context.mutation_invalidation.decision, apg::MutationInvalidationDecision::Prepared);
     EXPECT_STREQ(context.mutation_invalidation.targets[0].route_id, "t1");
+    EXPECT_EQ(metrics.invalidation_prepare_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_prepared_total.load(), 1u);
 }
 
 TEST_F(MutationInvalidationPrepareStageTest, PreparesForDelete) {
@@ -114,6 +124,9 @@ TEST_F(MutationInvalidationPrepareStageTest, SkipsWhenMethodNotEnabled) {
     auto output = stages::mutation_invalidation_prepare_stage(context);
     EXPECT_EQ(context.mutation_invalidation.decision,
               apg::MutationInvalidationDecision::SkippedMethodNotEnabled);
+    EXPECT_EQ(metrics.invalidation_prepare_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_prepare_skipped_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_method_not_enabled_total.load(), 1u);
 }
 
 TEST_F(MutationInvalidationPrepareStageTest, CopiesSuccessStatusRange) {
@@ -157,6 +170,9 @@ TEST_F(MutationInvalidationPrepareStageTest, RejectsTooManyTargetsStrictly) {
     EXPECT_EQ(context.mutation_invalidation.decision,
               apg::MutationInvalidationDecision::SkippedNoPolicy);
     EXPECT_STREQ(context.mutation_invalidation.reason, "too-many-targets");
+    EXPECT_EQ(metrics.invalidation_prepare_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_prepare_skipped_total.load(), 1u);
+    EXPECT_EQ(metrics.invalidation_target_resolve_failed_total.load(), 1u);
 }
 TEST_F(MutationInvalidationPrepareStageTest, RejectsTargetWithDisabledCache) {
     context.request_method = policy::HttpMethod::Patch;

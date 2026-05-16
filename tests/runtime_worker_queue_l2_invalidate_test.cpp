@@ -3,6 +3,7 @@
 
 #include "cache/l2_disk_cache.h"
 #include "hash/hash.h"
+#include "metrics/cache_metrics.h"
 #include "runtime/worker_queue.h"
 
 #include <cstring>
@@ -18,6 +19,7 @@ protected:
     std::string db_path = "test_wq_invalidate_db";
     L2DiskCache* l2 = nullptr;
     WorkerQueue queue{};
+    bytetaper::metrics::CacheMetrics metrics{};
 
     void SetUp() override {
         bytetaper::hash::set_process_hash_seed_for_test({ 0x1234, 0x5678 });
@@ -32,6 +34,7 @@ protected:
 
         // We do NOT call worker_queue_start because we want to execute jobs manually
         queue.resources.l2_cache = l2;
+        queue.resources.cache_metrics = &metrics;
         queue.running.store(true, std::memory_order_release);
     }
 
@@ -77,11 +80,15 @@ TEST_F(RuntimeWorkerQueueL2InvalidateTest, EnqueueInvalidationDeletesExistingL2K
     EXPECT_TRUE(worker_queue_execute_one_for_test(&queue));
 
     EXPECT_EQ(l2_get_result(l2, "k1", 1500, &hit, scratch, sizeof(scratch)), L2GetResult::Miss);
+    EXPECT_EQ(metrics.l2_remove_enqueued_total.load(), 1u);
+    EXPECT_EQ(metrics.l2_remove_success_total.load(), 1u);
 }
 
 TEST_F(RuntimeWorkerQueueL2InvalidateTest, EnqueueInvalidationMissingKeyDoesNotCrash) {
     EXPECT_TRUE(worker_queue_enqueue_l2_invalidate(&queue, "missing", 1500));
     EXPECT_TRUE(worker_queue_execute_one_for_test(&queue));
+    EXPECT_EQ(metrics.l2_remove_enqueued_total.load(), 1u);
+    EXPECT_EQ(metrics.l2_remove_miss_total.load(), 1u);
 }
 
 TEST_F(RuntimeWorkerQueueL2InvalidateTest, EnqueueInvalidationFailsWhenQueueNull) {
@@ -147,4 +154,34 @@ TEST_F(RuntimeWorkerQueueL2InvalidateTest, InvalidationDoesNotBlockLookupLane) {
     EXPECT_EQ(shard.invalidate_count, 0);
     EXPECT_EQ(l2_get_result(l2, key.c_str(), 1500, &hit, scratch, sizeof(scratch)),
               L2GetResult::Miss);
+}
+
+TEST_F(RuntimeWorkerQueueL2InvalidateTest, EnqueueFailsForInvalidKey) {
+    EXPECT_FALSE(worker_queue_enqueue_l2_invalidate(&queue, nullptr, 0));
+    EXPECT_EQ(metrics.l2_remove_failed_total.load(), 1u);
+
+    EXPECT_FALSE(worker_queue_enqueue_l2_invalidate(&queue, "", 0));
+    EXPECT_EQ(metrics.l2_remove_failed_total.load(), 2u);
+}
+
+TEST_F(RuntimeWorkerQueueL2InvalidateTest, EnqueueFailsWhenStopped) {
+    queue.running.store(false, std::memory_order_release);
+    EXPECT_FALSE(worker_queue_enqueue_l2_invalidate(&queue, "key", 0));
+    EXPECT_EQ(metrics.l2_remove_failed_total.load(), 1u);
+}
+
+TEST_F(RuntimeWorkerQueueL2InvalidateTest, EnqueueFailsWhenShardFull) {
+    // kRuntimeQueueSlotsPerShard is 16
+    for (int i = 0; i < 16; ++i) {
+        ASSERT_TRUE(worker_queue_enqueue_l2_invalidate(&queue, "key", 0));
+    }
+    EXPECT_FALSE(worker_queue_enqueue_l2_invalidate(&queue, "key", 0));
+    EXPECT_EQ(metrics.l2_remove_failed_total.load(), 1u);
+}
+
+TEST_F(RuntimeWorkerQueueL2InvalidateTest, ExecutionFailsWhenL2CacheNull) {
+    queue.resources.l2_cache = nullptr;
+    EXPECT_TRUE(worker_queue_enqueue_l2_invalidate(&queue, "key", 0));
+    EXPECT_TRUE(worker_queue_execute_one_for_test(&queue));
+    EXPECT_EQ(metrics.l2_remove_failed_total.load(), 1u);
 }

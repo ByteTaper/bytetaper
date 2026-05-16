@@ -4,6 +4,7 @@
 #include "cache/cache_entry.h"
 #include "cache/l1_cache.h"
 #include "hash/hash.h"
+#include "metrics/cache_metrics.h"
 
 #include <cstring>
 #include <gtest/gtest.h>
@@ -15,6 +16,7 @@ namespace bytetaper::cache {
 class L1CacheInvalidationTest : public ::testing::Test {
 protected:
     L1Cache cache;
+    metrics::CacheMetrics metrics{};
 
     void SetUp() override {
         l1_init(&cache);
@@ -53,14 +55,16 @@ TEST_F(L1CacheInvalidationTest, RemoveExistingKeyMakesLookupMiss) {
     EXPECT_TRUE(l1_get(&cache, "user:123", 1500, &out, body_out, sizeof(body_out)));
 
     // Act
-    EXPECT_EQ(l1_remove(&cache, "user:123"), L1RemoveResult::Removed);
+    EXPECT_EQ(l1_remove(&cache, "user:123", &metrics), L1RemoveResult::Removed);
 
     // Assert
-    EXPECT_FALSE(l1_get(&cache, "user:123", 1500, &out, body_out, sizeof(body_out)));
+    EXPECT_FALSE(l1_get(&cache, "user:123", 1500, &out, body_out, sizeof(body_out), &metrics));
+    EXPECT_EQ(metrics.l1_remove_hit_total.load(), 1u);
 }
 
 TEST_F(L1CacheInvalidationTest, RemoveMissingKeyReturnsMiss) {
-    EXPECT_EQ(l1_remove(&cache, "nonexistent"), L1RemoveResult::Miss);
+    EXPECT_EQ(l1_remove(&cache, "nonexistent", &metrics), L1RemoveResult::Miss);
+    EXPECT_EQ(metrics.l1_remove_miss_total.load(), 1u);
 }
 
 TEST_F(L1CacheInvalidationTest, RemoveNullCacheReturnsInvalidArgument) {
@@ -68,7 +72,8 @@ TEST_F(L1CacheInvalidationTest, RemoveNullCacheReturnsInvalidArgument) {
 }
 
 TEST_F(L1CacheInvalidationTest, RemoveNullKeyReturnsInvalidArgument) {
-    EXPECT_EQ(l1_remove(&cache, nullptr), L1RemoveResult::InvalidArgument);
+    EXPECT_EQ(l1_remove(&cache, nullptr, &metrics), L1RemoveResult::InvalidArgument);
+    EXPECT_EQ(metrics.l1_remove_failed_total.load(), 1u);
 }
 
 TEST_F(L1CacheInvalidationTest, RemoveOnlyAffectsMatchingKey) {
@@ -155,8 +160,23 @@ TEST_F(L1CacheInvalidationTest, ConvenienceWrapperReturnsTrueOnlyOnRemoved) {
     auto entry = make_entry("key", "body");
     l1_put(&cache, entry);
 
-    EXPECT_TRUE(l1_remove_key(&cache, "key"));
-    EXPECT_FALSE(l1_remove_key(&cache, "key")); // Second time is a miss
+    EXPECT_TRUE(l1_remove_key(&cache, "key", &metrics));
+    EXPECT_FALSE(l1_remove_key(&cache, "key", &metrics)); // Second time is a miss
+    EXPECT_EQ(metrics.l1_remove_hit_total.load(), 1u);
+    EXPECT_EQ(metrics.l1_remove_miss_total.load(), 1u);
+}
+
+TEST_F(L1CacheInvalidationTest, VariantExactRemoveMetrics) {
+    auto entry = make_entry("var:GET|r1|k1", "body");
+    l1_put(&cache, entry);
+
+    EXPECT_EQ(l1_remove(&cache, "var:GET|r1|k1", &metrics), L1RemoveResult::Removed);
+    EXPECT_EQ(metrics.variant_exact_remove_attempt_total.load(), 1u);
+    EXPECT_EQ(metrics.variant_exact_remove_success_total.load(), 1u);
+
+    EXPECT_EQ(l1_remove(&cache, "var:GET|r1|k1", &metrics), L1RemoveResult::Miss);
+    EXPECT_EQ(metrics.variant_exact_remove_attempt_total.load(), 2u);
+    EXPECT_EQ(metrics.variant_exact_remove_miss_total.load(), 1u);
 }
 
 } // namespace bytetaper::cache

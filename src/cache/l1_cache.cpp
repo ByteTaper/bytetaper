@@ -22,6 +22,9 @@ void copy_body_to_slot(L1CacheShard* shard, std::size_t slot_idx, const CacheEnt
 
     std::size_t copy_len = (entry.body_len > kL1MaxBodySize) ? kL1MaxBodySize : entry.body_len;
     std::memcpy(shard->bodies[slot_idx], entry.body, copy_len);
+    if (copy_len < kL1MaxBodySize) {
+        shard->bodies[slot_idx][copy_len] = '\0';
+    }
     shard->slots[slot_idx].body = shard->bodies[slot_idx];
     shard->slots[slot_idx].body_len = copy_len;
 }
@@ -221,6 +224,9 @@ bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEnt
             std::size_t copy_len =
                 (out->body_len > body_out_capacity) ? body_out_capacity : out->body_len;
             std::memcpy(body_out, shard.bodies[i], copy_len);
+            if (copy_len < body_out_capacity) {
+                body_out[copy_len] = '\0';
+            }
             out->body = body_out;
             out->body_len = copy_len;
         } else {
@@ -235,7 +241,15 @@ bool l1_get(const L1Cache* cache, const char* key, std::int64_t now_ms, CacheEnt
 L1RemoveResult l1_remove(L1Cache* cache, const char* key,
                          bytetaper::metrics::CacheMetrics* metrics) {
     if (cache == nullptr || key == nullptr) {
+        bytetaper::metrics::record_cache_event(
+            metrics, bytetaper::metrics::CacheMetricEvent::L1RemoveFailed);
         return L1RemoveResult::InvalidArgument;
+    }
+
+    const bool is_variant = (std::strncmp(key, "var:", 4) == 0);
+    if (is_variant) {
+        bytetaper::metrics::record_cache_event(
+            metrics, bytetaper::metrics::CacheMetricEvent::VariantExactRemoveAttempt);
     }
 
     const std::uint64_t h = bytetaper::hash::hash_cstr_runtime(key);
@@ -256,9 +270,21 @@ L1RemoveResult l1_remove(L1Cache* cache, const char* key,
         }
 
         clear_slot(&shard, i);
+        bytetaper::metrics::record_cache_event(metrics,
+                                               bytetaper::metrics::CacheMetricEvent::L1RemoveHit);
+        if (is_variant) {
+            bytetaper::metrics::record_cache_event(
+                metrics, bytetaper::metrics::CacheMetricEvent::VariantExactRemoveSuccess);
+        }
         return L1RemoveResult::Removed;
     }
 
+    bytetaper::metrics::record_cache_event(metrics,
+                                           bytetaper::metrics::CacheMetricEvent::L1RemoveMiss);
+    if (is_variant) {
+        bytetaper::metrics::record_cache_event(
+            metrics, bytetaper::metrics::CacheMetricEvent::VariantExactRemoveMiss);
+    }
     return L1RemoveResult::Miss;
 }
 

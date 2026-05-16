@@ -7,6 +7,7 @@
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
 #include "hash/hash.h"
+#include "metrics/cache_metrics.h"
 #include "metrics/coalescing_metrics.h"
 #include "metrics/runtime_metrics.h"
 
@@ -341,11 +342,19 @@ static void execute_invalidate_job(WorkerQueue* q, RuntimeShard* shard, L2Invali
 
     auto* l2 = q->resources.l2_cache;
     if (l2 != nullptr) {
-        cache::l2_remove(l2, job.key);
+        if (cache::l2_remove(l2, job.key)) {
+            ::bytetaper::metrics::record_cache_event(
+                q->resources.cache_metrics, bytetaper::metrics::CacheMetricEvent::L2RemoveSuccess);
+        } else {
+            ::bytetaper::metrics::record_cache_event(
+                q->resources.cache_metrics, bytetaper::metrics::CacheMetricEvent::L2RemoveMiss);
+        }
         ::bytetaper::metrics::record_runtime_event(
             resources_runtime_metrics,
             ::bytetaper::metrics::RuntimeMetricEvent::L2InvalidateSuccess);
     } else {
+        ::bytetaper::metrics::record_cache_event(
+            q->resources.cache_metrics, bytetaper::metrics::CacheMetricEvent::L2RemoveFailed);
         ::bytetaper::metrics::record_runtime_event(
             resources_runtime_metrics, ::bytetaper::metrics::RuntimeMetricEvent::L2InvalidateError);
         ::bytetaper::metrics::record_runtime_event(
@@ -880,8 +889,13 @@ bool worker_queue_try_enqueue_store(WorkerQueue* q, const L2StoreJob& job) {
 }
 
 bool worker_queue_enqueue_l2_invalidate(WorkerQueue* q, const char* key, std::uint64_t now_ms) {
-    if (q == nullptr || key == nullptr || key[0] == '\0' ||
-        !q->running.load(std::memory_order_acquire)) {
+    if (q == nullptr) {
+        return false;
+    }
+
+    if (key == nullptr || key[0] == '\0' || !q->running.load(std::memory_order_acquire)) {
+        ::bytetaper::metrics::record_cache_event(
+            q->resources.cache_metrics, bytetaper::metrics::CacheMetricEvent::L2RemoveFailed);
         return false;
     }
 
@@ -895,6 +909,8 @@ bool worker_queue_enqueue_l2_invalidate(WorkerQueue* q, const char* key, std::ui
             ::bytetaper::metrics::record_runtime_event(
                 q->resources.runtime_metrics,
                 ::bytetaper::metrics::RuntimeMetricEvent::EnqueueDropped);
+            ::bytetaper::metrics::record_cache_event(
+                q->resources.cache_metrics, bytetaper::metrics::CacheMetricEvent::L2RemoveFailed);
             return false;
         }
 
@@ -912,6 +928,9 @@ bool worker_queue_enqueue_l2_invalidate(WorkerQueue* q, const char* key, std::ui
         shard.invalidate_slots[shard.invalidate_tail] = job;
         shard.invalidate_tail = (shard.invalidate_tail + 1) % kRuntimeQueueSlotsPerShard;
         shard.invalidate_count++;
+
+        ::bytetaper::metrics::record_cache_event(
+            q->resources.cache_metrics, bytetaper::metrics::CacheMetricEvent::L2RemoveEnqueued);
 
         if (!shard.ready_enqueued) {
             shard.ready_enqueued = true;
