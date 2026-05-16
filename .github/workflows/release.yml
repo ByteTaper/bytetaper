@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - "v*.*.*"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/release.yml"
+      - "tools/release/**"
+      - "tools/supply_chain/**"
+      - "docker/production.Dockerfile"
+      - "charts/bytetaper/**"
+      - "docs/release/**"
+      - "tests/runtime/**"
   workflow_dispatch:
     inputs:
       publish:
@@ -61,6 +71,15 @@ jobs:
           echo "BYTETAPER_VERSION=${VERSION}" >> $GITHUB_ENV
           echo "BYTETAPER_GIT_SHA=${GITHUB_SHA}" >> $GITHUB_ENV
           echo "BYTETAPER_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+
+      - name: Enforce PR dry-run mode
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          if [[ "${BYTETAPER_RELEASE_PUBLISH}" == "true" ]]; then
+            echo "ERROR: pull_request release validation must never publish artifacts."
+            exit 1
+          fi
+          echo "PASS: pull_request release validation is running in dry-run mode."
 
       - name: Log in to GitHub Container Registry
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
@@ -135,10 +154,12 @@ jobs:
       - name: Phase 3a — Runtime smoke matrix
         run: tests/runtime/smoke_runtime_matrix.sh bytetaper-runtime:release
 
-      - name: Setup Trivy for supply-chain check
-        uses: aquasecurity/setup-trivy@v0.2.2
-        with:
-          version: v0.58.0
+      - name: Setup Syft and Grype for supply-chain check
+        run: |
+          curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b /usr/local/bin
+          curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b /usr/local/bin
+          syft version
+          grype version
 
       - name: Phase 3b — Supply-chain readiness
         run: tools/supply_chain/check_runtime_image.sh bytetaper-runtime:release
@@ -285,7 +306,7 @@ jobs:
           \`\`\`bash
           cosign verify \\
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
-            --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
+            --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
             ${DIGEST_REF}
           \`\`\`
 
@@ -294,24 +315,33 @@ jobs:
           cosign verify-attestation \\
             --type cyclonedx \\
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
-            --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
+            --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
             ${DIGEST_REF}
 
           cosign verify-attestation \\
             --type spdx \\
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
-            --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
+            --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
             ${DIGEST_REF}
 
           cosign verify-attestation \\
             --type slsaprovenance \\
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
-            --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
+            --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
             ${DIGEST_REF}
           \`\`\`
 
           See [VERIFY_RELEASE.md] for full verification guide.
           EOF
+
+      - name: Upload release dry-run artifacts
+        if: ${{ env.BYTETAPER_RELEASE_PUBLISH != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dry-run-${{ github.sha }}
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Phase 9 — Create GitHub Release
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}

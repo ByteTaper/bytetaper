@@ -13,7 +13,7 @@ It is a security best practice to reference images by their unique SHA256 digest
 ```json
 "runtime_image": {
   "digest": "sha256:...",
-  "reference": "ghcr.io/haluan/bytetaper-runtime@sha256:..."
+  "reference": "ghcr.io/ByteTaper/bytetaper-runtime@sha256:..."
 }
 ```
 
@@ -22,11 +22,11 @@ It is a security best practice to reference images by their unique SHA256 digest
 ByteTaper uses keyless signing via Sigstore. The signature is bound to the official GitHub Actions release workflow identity.
 
 ```bash
-IMAGE_REF="ghcr.io/haluan/bytetaper-runtime@sha256:<digest>"
+IMAGE_REF="ghcr.io/ByteTaper/bytetaper-runtime@sha256:<digest>"
 
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \
   "${IMAGE_REF}"
 ```
 
@@ -41,7 +41,7 @@ We attach both CycloneDX and SPDX SBOMs as attestations to the image.
 ```bash
 cosign verify-attestation --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \
   "${IMAGE_REF}"
 ```
 
@@ -49,7 +49,7 @@ cosign verify-attestation --type cyclonedx \
 ```bash
 cosign verify-attestation --type spdx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \
   "${IMAGE_REF}"
 ```
 
@@ -60,7 +60,7 @@ Build provenance proves that the image was built by the official ByteTaper relea
 ```bash
 cosign verify-attestation --type slsaprovenance \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp 'https://github.com/haluan/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \
   "${IMAGE_REF}"
 ```
 
@@ -71,7 +71,7 @@ When deploying with Helm, always use the `image.digest` value to ensure your clu
 ```yaml
 # values.yaml
 image:
-  repository: ghcr.io/haluan/bytetaper-runtime
+  repository: ghcr.io/ByteTaper/bytetaper-runtime
   tag: v0.1.0
   digest: sha256:8f...
 ```
