@@ -48,6 +48,14 @@ jobs:
         run: |
           docker compose run --rm --no-deps bytetaper-benchmark ./benchmarks/scenarios/performance_smoke.sh
 
+      - name: Normalize performance report permissions
+        if: always()
+        run: |
+          if [ -d reports/benchmarks ]; then
+            sudo chown -R "$(id -u):$(id -g)" reports/benchmarks
+            chmod -R u+rwX reports/benchmarks
+          fi
+
       - name: Upload Performance Reports
         if: always()
         uses: actions/upload-artifact@v4
