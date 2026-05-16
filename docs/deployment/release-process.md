@@ -39,15 +39,34 @@ Every GitHub Release contains the complete, cryptographically verifiable supply-
 
 ## 3. Operator Consumption
 
-### A. Digest-Based & Alias Helm Deployment
-To deploy the gateway with absolute immutability, operators should reference the exact SHA256 digest captured in `bytetaper-runtime-image-digest.txt`. Alternatively, operators can target any of the published SemVer aliases (`vX.Y.Z`, `X.Y.Z`) or commit SHAs (`sha-<12>`):
+### A. Production Helm Deployment
+To deploy ByteTaper with absolute immutability and high availability, use the packaged chart and pin the OCI image by its top-level manifest-list digest.
 
+**Standard Single-Replica (Persistent Cache):**
 ```bash
+# Recommended for initial production rollout
 helm upgrade --install bytetaper ./bytetaper-0.1.0.tgz \
   --set image.repository=ghcr.io/ByteTaper/bytetaper-runtime \
-  --set image.tag="0.1.0" \
+  --set image.digest="sha256:<manifest-list-digest>" \
+  --set l2Cache.persistence.enabled=true \
+  --set admin.enabled=false \
   --namespace bytetaper --create-namespace
 ```
+
+**Multi-Replica HA (Zero-Downtime):**
+```bash
+# Recommended for high-traffic environments
+helm upgrade --install bytetaper ./bytetaper-0.1.0.tgz \
+  --set replicaCount=3 \
+  --set image.digest="sha256:<manifest-list-digest>" \
+  --set l2Cache.persistence.enabled=false \
+  --set l2Cache.emptyDir.enabled=true \
+  --set podDisruptionBudget.enabled=true \
+  --namespace bytetaper
+```
+
+> [!IMPORTANT]
+> **HA Storage Caveat**: Because the current chart uses a `Deployment`, `replicaCount > 1` is only safe when using `emptyDir` storage for the L2 cache. Persistent L2 caching across multiple replicas requires a future StatefulSet implementation. See [helm-ha-production.md](./helm-ha-production.md) for details.
 
 ### B. Cryptographic Checksum Verification
 Operators can verify the integrity of the downloaded release bundle before deployment:

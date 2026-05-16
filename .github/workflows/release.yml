@@ -238,6 +238,40 @@ jobs:
             digest: ${DIGEST_REF#*@}
           ```
 
+          ### Production Helm Installation
+
+          **Standard Single-Replica (Persistent Cache):**
+          ```bash
+          helm upgrade --install bytetaper ./${CHART_PKG} \
+            --set image.digest="${DIGEST_REF#*@}" \
+            --set l2Cache.persistence.enabled=true \
+            --set admin.enabled=false \
+            --namespace bytetaper --create-namespace
+          ```
+
+          **Multi-Replica HA (Safe per-pod emptyDir):**
+          ```bash
+          helm upgrade --install bytetaper ./${CHART_PKG} \
+            --set replicaCount=3 \
+            --set image.digest="${DIGEST_REF#*@}" \
+            --set l2Cache.persistence.enabled=false \
+            --set l2Cache.emptyDir.enabled=true \
+            --set admin.enabled=false \
+            --namespace bytetaper
+          ```
+
+          > [!IMPORTANT]
+          > **HA Storage Caveat**: Because the current chart uses a `Deployment`, `replicaCount > 1` is only safe with `emptyDir` storage. Persistent L2 across multiple replicas is a future roadmap item. See `docs/deployment/helm-ha-production.md` for details.
+
+          **Verify health and metrics:**
+          ```bash
+          kubectl get pods -n bytetaper
+          kubectl port-forward svc/bytetaper 18081:18081 -n bytetaper
+          curl -f http://localhost:18081/healthz
+          curl -f http://localhost:18081/readyz
+          curl -f http://localhost:18081/metrics
+          ```
+
           ### Artifact Checksums
           \`\`\`text
           $(cat dist/release/bytetaper-checksums.txt)
