@@ -199,6 +199,7 @@ Exit codes:
 - [Compiled Route Runtime](docs/runtime/COMPILED_ROUTE_RUNTIME.md)
 - [Body Size Contract](docs/runtime/BODY_SIZE_CONTRACT.md)
 - [Runtime Configuration Reference](docs/runtime/CONFIGURATION.md)
+- [Mutation Cache Invalidation](docs/mutation-cache-invalidation.md)
 
 ## Contributing
 
