@@ -14,6 +14,8 @@ namespace bytetaper::cache {
 namespace {
 
 void copy_body_to_slot(L1CacheShard* shard, std::size_t slot_idx, const CacheEntry& entry) {
+    std::memset(shard->bodies[slot_idx], 0, kL1MaxBodySize);
+
     if (entry.body == nullptr || entry.body_len == 0) {
         shard->slots[slot_idx].body = nullptr;
         shard->slots[slot_idx].body_len = 0;

@@ -20,6 +20,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Build dev image
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose build bytetaper-dev
+
       - name: Build and Run Unit Tests
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-unit-test
@@ -47,6 +51,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Build dev image
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose build bytetaper-dev
+
       - name: Run ${{ matrix.sanitizer }} tests
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
@@ -60,6 +68,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Build dev image
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose build bytetaper-dev
+
       - name: Run TSAN concurrency tests
         run: |
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
@@ -71,6 +83,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Build dev image
+        run: |
+          LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose build bytetaper-dev
 
       - name: Run coalescing burst benchmark
         run: |

@@ -1,48 +1,14 @@
 # SPDX-FileCopyrightText: 2026 Haluan Irsad
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
-ARG ROCKSDB_VERSION=v11.1.1
-ARG ROCKSDB_COMMIT_SHA=6cdeb9d9d0630763327f512e6255cab33f6834e7
+ARG ROCKSPACK_IMAGE=haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d-devel
 
 ARG BYTETAPER_VERSION=dev
 ARG BYTETAPER_GIT_SHA=unknown
 ARG BYTETAPER_BUILD_DATE=unknown
 
-# --- Stage 1: RocksDB Builder ---
-FROM ubuntu:24.04 AS rocksdb-builder
-
-ARG ROCKSDB_VERSION
-ARG ROCKSDB_COMMIT_SHA
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    git \
-    libbz2-dev \
-    libgflags-dev \
-    liblz4-dev \
-    libsnappy-dev \
-    libzstd-dev \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /tmp/rocksdb-src
-RUN git clone --depth 1 --branch ${ROCKSDB_VERSION} https://github.com/facebook/rocksdb.git . \
-    && git checkout ${ROCKSDB_COMMIT_SHA} \
-    && ACTUAL=$(git rev-parse HEAD) \
-    && [ "$ACTUAL" = "${ROCKSDB_COMMIT_SHA}" ] \
-       || { echo "ERROR: RocksDB SHA mismatch: expected ${ROCKSDB_COMMIT_SHA}, got $ACTUAL"; exit 1; }
-
-# Build shared library with optimization and portability enabled
-RUN DEBUG_LEVEL=0 PORTABLE=1 make -j$(nproc) shared_lib
-
-# Install to standard path in the builder stage
-RUN make install-shared INSTALL_PATH=/usr/local
-
-# --- Stage 2: ByteTaper Builder Environment ---
-FROM ubuntu:24.04 AS builder
+# --- Stage 1: ByteTaper Builder Environment ---
+FROM ${ROCKSPACK_IMAGE} AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -50,7 +16,6 @@ ARG BYTETAPER_VERSION
 ARG BYTETAPER_GIT_SHA
 ARG BYTETAPER_BUILD_DATE
 
-# Install ByteTaper development dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -72,15 +37,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler-grpc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=rocksdb-builder /usr/local/lib/librocksdb.so* /usr/local/lib/
-COPY --from=rocksdb-builder /usr/local/include/rocksdb /usr/local/include/rocksdb
-
-RUN ldconfig
+RUN ldconfig \
+    && test -f /usr/local/include/rocksdb/db.h \
+    && ldconfig -p | grep -q librocksdb
 
 WORKDIR /workspace
 COPY . .
 
-# Pass build metadata args explicitly to CMake
 RUN cmake -S . -B /tmp/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
@@ -90,8 +53,8 @@ RUN cmake -S . -B /tmp/build -G Ninja \
       -DBYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
  && cmake --build /tmp/build --target bytetaper-extproc-server
 
-# --- Stage 3: Minimal Runtime Image ---
-FROM ubuntu:24.04 AS runtime
+# --- Stage 2: Minimal Runtime Image ---
+FROM ubuntu:26.04 AS runtime
 
 ARG BYTETAPER_VERSION=dev
 ARG BYTETAPER_GIT_SHA=unknown
@@ -119,17 +82,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libyaml-cpp0.8 \
  && rm -rf /var/lib/apt/lists/*
 
-# RocksDB built from source — copy the main library file and recreate symlinks
-COPY --from=builder /usr/local/lib/librocksdb.so.11.1.1 /usr/local/lib/
-RUN ln -s librocksdb.so.11.1.1 /usr/local/lib/librocksdb.so.11.1 \
- && ln -s librocksdb.so.11.1.1 /usr/local/lib/librocksdb.so.11 \
- && ln -s librocksdb.so.11.1.1 /usr/local/lib/librocksdb.so \
- && ldconfig
+COPY --from=builder /usr/local/lib/librocksdb.so* /usr/local/lib/
+RUN ldconfig && ldconfig -p | grep -q librocksdb
 
-# Server binary
 COPY --from=builder /tmp/build/bytetaper-extproc-server /usr/local/bin/bytetaper-extproc-server
 
-# License files (required by Apache-2.0 and AGPL-3.0)
 COPY LICENSES/ /opt/bytetaper/LICENSES/
 COPY THIRD_PARTY_NOTICES.md /opt/bytetaper/
 

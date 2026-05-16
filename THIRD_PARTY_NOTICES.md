@@ -17,7 +17,7 @@ license does not relicense third-party components.
 
 | Component | Use in ByteTaper | License | License text in this repo |
 | --- | --- | --- | --- |
-| RocksDB | L2 persistent cache backend | Apache-2.0 or GPL-2.0; ByteTaper selects the Apache-2.0 option for commercial-compatible builds | `LICENSES/Apache-2.0.txt` |
+| RocksDB | L2 persistent cache backend, provided to ByteTaper through the pinned `haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d` container foundation | Apache-2.0 or GPL-2.0; ByteTaper selects the Apache-2.0 option for commercial-compatible builds | `LICENSES/Apache-2.0.txt` |
 | Quill | C++ logging library, fetched by CMake at `v11.1.0` | MIT | `LICENSES/MIT-quill.txt` |
 | yaml-cpp | YAML policy loading and validation | MIT | `LICENSES/MIT-yaml-cpp.txt` |
 | gRPC C++ | Envoy ExternalProcessor gRPC service implementation | Apache-2.0 | `LICENSES/Apache-2.0.txt` |
@@ -36,11 +36,12 @@ license does not relicense third-party components.
 
 | Component | Use in ByteTaper | License | Notes |
 | --- | --- | --- | --- |
+| Rockspack image | Pinned development and production RocksDB foundation image: `haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d` | Mixed image/package licenses plus bundled RocksDB license | Commercial distribution should include an SBOM or image-layer license report for the final ByteTaper image. |
 | GoogleTest | Unit and integration tests, fetched by CMake when tests are enabled | BSD-3-Clause | Test dependency only unless test binaries are distributed. |
-| Ubuntu base image | Development/build image | Mixed Ubuntu package licenses | Commercial distribution should include an SBOM or image-layer license report. |
+| Ubuntu base image | Production runtime image base | Mixed Ubuntu package licenses | Commercial distribution should include an SBOM or image-layer license report. |
 | Alpine base image | Benchmark image | Mixed Alpine package licenses | Commercial distribution should include an SBOM or image-layer license report. |
 | ccache, CMake, Ninja, clang-format, pkg-config, make, curl, bash, Python, jq, wrk | Build/test/dev tooling from container packages | Mixed licenses | Development/test dependencies unless included in a distributed image. |
-| Compression/system libraries: zlib, bzip2, lz4, snappy, zstd, gflags | RocksDB build/runtime dependencies in the development image | Mixed permissive licenses | Preserve package license notices if distributed in a ByteTaper image or appliance. |
+| Compression/system libraries: zlib, bzip2, lz4, snappy, zstd, gflags | RocksDB runtime/transitive link dependencies used by ByteTaper images | Mixed permissive licenses | Preserve package license notices if distributed in a ByteTaper image or appliance. |
 
 ## Release packaging expectations
 

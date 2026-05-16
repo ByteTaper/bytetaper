@@ -4,7 +4,8 @@ The ByteTaper production runtime container image is engineered to be highly secu
 
 ## Architectural Standards
 
-- **Minimal Attack Surface**: Built on a stripped-down Ubuntu LTS runtime environment with zero development tooling (`cmake`, `ninja`, compilers, and debuggers are entirely omitted).
+- **Pinned RocksDB foundation**: RocksDB is sourced from the pinned Rockspack image `haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d`; ByteTaper no longer clones or compiles RocksDB inside its own Dockerfiles.
+- **Minimal Attack Surface**: The final runtime image keeps development tooling (`cmake`, `ninja`, compilers, and debuggers) out of the production execution environment.
 - **Least Privilege**: All processes execute under the dedicated, non-root `bytetaper` user (`UID 1001`, `GID 1001`).
 - **Build Provenance**: Embedded OCI image labels and `/opt/bytetaper/build-info.json` provide explicit git revision, semantic version, and build timestamp tracing.
 
@@ -30,12 +31,23 @@ The `docker/production.Dockerfile` supports parameterized builds via OCI standar
 ```bash
 docker build \
   -f docker/production.Dockerfile \
+  --build-arg ROCKSPACK_IMAGE="haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d" \
   --build-arg BYTETAPER_VERSION="1.2.0" \
   --build-arg BYTETAPER_GIT_SHA="a1b2c3d4e5f6..." \
   --build-arg BYTETAPER_BUILD_DATE="2026-05-14T00:00:00Z" \
   -t bytetaper-runtime:production \
   .
 ```
+
+### Rockspack Integration Contract
+
+The ByteTaper production Dockerfile expects the selected Rockspack image to provide:
+
+- `/usr/local/include/rocksdb/db.h`
+- `librocksdb.so` discoverable by `ldconfig`
+- RocksDB built from the pinned `11.1.1` family used by ByteTaper's L2 cache implementation
+
+The Docker build fails early if the Rockspack-provided RocksDB header or shared library is not available.
 
 ### OCI Image Specification Labels
 Inspect embedded OCI metadata using Docker CLI:

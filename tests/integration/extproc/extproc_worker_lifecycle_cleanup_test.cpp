@@ -4,63 +4,156 @@
 #include "extproc/grpc_server.h"
 #include "metrics/prometheus_registry.h"
 
+#include <arpa/inet.h>
 #include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <gtest/gtest.h>
+#include <string>
+#include <sys/socket.h>
 #include <thread>
+#include <unistd.h>
 
 namespace bytetaper::extproc {
+namespace {
+
+struct ReservedPort {
+    int fd = -1;
+    std::uint16_t port = 0;
+
+    ReservedPort() = default;
+    ReservedPort(const ReservedPort&) = delete;
+    ReservedPort& operator=(const ReservedPort&) = delete;
+
+    ReservedPort(ReservedPort&& other) noexcept : fd(other.fd), port(other.port) {
+        other.fd = -1;
+        other.port = 0;
+    }
+
+    ReservedPort& operator=(ReservedPort&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+        if (fd >= 0) {
+            close(fd);
+        }
+        fd = other.fd;
+        port = other.port;
+        other.fd = -1;
+        other.port = 0;
+        return *this;
+    }
+
+    ~ReservedPort() {
+        if (fd >= 0) {
+            close(fd);
+        }
+    }
+};
+
+ReservedPort reserve_loopback_port() {
+    ReservedPort reserved{};
+    reserved.fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (reserved.fd < 0) {
+        return reserved;
+    }
+
+    int reuse = 1;
+    (void) setsockopt(reserved.fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+
+    if (bind(reserved.fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        close(reserved.fd);
+        reserved.fd = -1;
+        return reserved;
+    }
+
+    if (listen(reserved.fd, 1) != 0) {
+        close(reserved.fd);
+        reserved.fd = -1;
+        return reserved;
+    }
+
+    sockaddr_in bound{};
+    socklen_t bound_len = sizeof(bound);
+    if (getsockname(reserved.fd, reinterpret_cast<sockaddr*>(&bound), &bound_len) != 0) {
+        close(reserved.fd);
+        reserved.fd = -1;
+        return reserved;
+    }
+
+    reserved.port = ntohs(bound.sin_port);
+    return reserved;
+}
+
+std::string listen_address_for_reserved_port(std::uint16_t port) {
+    char buf[64] = {};
+    std::snprintf(buf, sizeof(buf), "127.0.0.1:%u", static_cast<unsigned>(port));
+    return std::string(buf);
+}
+
+} // namespace
 
 TEST(WorkerLifecycleCleanupTest, ShutsDownWorkersOnServerStartFailure) {
-    GrpcServerConfig config{};
-    // Use an invalid address or an address that will likely fail to bind
-    // (e.g. 0.0.0.0:1 which is privileged and usually taken)
-    config.listen_address = "0.0.0.0:1";
+    ReservedPort reserved = reserve_loopback_port();
+    ASSERT_GE(reserved.fd, 0);
+    ASSERT_NE(reserved.port, 0);
 
-    // We need some minimal resources
+    const std::string listen_address = listen_address_for_reserved_port(reserved.port);
+
+    GrpcServerConfig config{};
+    config.listen_address = listen_address.c_str();
+
     metrics::MetricsRegistry metrics_reg{};
     config.metrics_registry = &metrics_reg;
 
     GrpcServerHandle handle{};
 
-    // This should fail to start because port 1 is privileged
-    // (In some environments this might succeed if run as root,
-    // but in docker it should usually fail or we can use an already bound port)
-    bool started = start_grpc_server(config, &handle);
+    const bool started = start_grpc_server(config, &handle);
+    EXPECT_FALSE(started);
 
     if (started) {
-        // If it accidentally started (e.g. running as root), stop it and skip
         stop_grpc_server(&handle);
-        GTEST_SKIP() << "Server started unexpectedly on port 1";
+        GTEST_FAIL() << "Server started unexpectedly on an already reserved port";
     }
 
-    // Now, even though it failed, we want to be sure no worker threads are left.
-    // We can't easily check thread count in a portable way, but we can verify
-    // that starting another server doesn't hit limits or that we can clean up
-    // the handle safely.
-
-    // Actually, the best way to verify is to check if WorkerQueue::running is false.
-    // But WorkerQueue is private in ExternalProcessorSkeletonService.
-
-    // However, if we can call start/stop multiple times without hanging,
-    // it's a good sign.
+    EXPECT_EQ(handle.impl, nullptr);
+    EXPECT_EQ(handle.bound_port, 0);
 }
 
 TEST(WorkerLifecycleCleanupTest, RepeatedStartFailureNoLeak) {
-    GrpcServerConfig config{};
-    config.listen_address = "0.0.0.0:1";
-    metrics::MetricsRegistry metrics_reg{};
-    config.metrics_registry = &metrics_reg;
-
     for (int i = 0; i < 50; ++i) {
+        ReservedPort reserved = reserve_loopback_port();
+        ASSERT_GE(reserved.fd, 0);
+        ASSERT_NE(reserved.port, 0);
+
+        const std::string listen_address = listen_address_for_reserved_port(reserved.port);
+
+        GrpcServerConfig config{};
+        config.listen_address = listen_address.c_str();
+        metrics::MetricsRegistry metrics_reg{};
+        config.metrics_registry = &metrics_reg;
+
         GrpcServerHandle handle{};
-        (void) start_grpc_server(config, &handle);
-        // handle.impl should be null if started is false
+        const bool started = start_grpc_server(config, &handle);
+        EXPECT_FALSE(started);
+
+        if (started) {
+            stop_grpc_server(&handle);
+            GTEST_FAIL() << "Server started unexpectedly on an already reserved port";
+        }
+
         EXPECT_EQ(handle.impl, nullptr);
         EXPECT_EQ(handle.bound_port, 0);
     }
 
-    // If threads were leaking, 50 * 2 = 100 threads would be alive.
-    // While 100 is not a lot, it verifies the path.
+    // If worker resources were leaking on failed starts, repeated attempts would
+    // eventually hang or exhaust available runtime resources.
 }
 
 } // namespace bytetaper::extproc

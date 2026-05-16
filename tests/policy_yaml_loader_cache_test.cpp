@@ -177,7 +177,7 @@ routes:
     PolicyFileResult result;
     bool ok = load_policy_from_string(yaml_data, &result);
     EXPECT_FALSE(ok);
-    EXPECT_EQ(result.error, "cache.invalidation success_status min must be >= 100");
+    EXPECT_STREQ(result.error, "cache.invalidation success_status min must be >= 100");
 }
 
 TEST(YamlLoaderCacheTest, InvalidatesCacheWithMaxGt599) {
@@ -202,7 +202,7 @@ routes:
     PolicyFileResult result;
     bool ok = load_policy_from_string(yaml_data, &result);
     EXPECT_FALSE(ok);
-    EXPECT_EQ(result.error, "cache.invalidation success_status max must be <= 599");
+    EXPECT_STREQ(result.error, "cache.invalidation success_status max must be <= 599");
 }
 
 TEST(YamlLoaderCacheTest, InvalidationTargetNotGetInvalid) {
@@ -227,7 +227,7 @@ routes:
     PolicyFileResult result;
     bool ok = load_policy_from_string(yaml_data, &result);
     EXPECT_FALSE(ok);
-    EXPECT_EQ(result.error, "invalidation target route must be a cacheable GET route");
+    EXPECT_STREQ(result.error, "invalidation target route must be a cacheable GET route");
 }
 
 TEST(YamlLoaderCacheTest, HappyPathMutationInvalidation) {
@@ -286,7 +286,7 @@ routes:
 )";
     PolicyFileResult result_get;
     EXPECT_FALSE(load_policy_from_string(yaml_data_get, &result_get));
-    EXPECT_EQ(result_get.error, "cache.invalidation on_methods cannot contain GET");
+    EXPECT_STREQ(result_get.error, "cache.invalidation on_methods cannot contain GET");
 
     const char* yaml_data_post = R"(
 routes:
@@ -305,7 +305,7 @@ routes:
 )";
     PolicyFileResult result_post;
     EXPECT_FALSE(load_policy_from_string(yaml_data_post, &result_post));
-    EXPECT_EQ(result_post.error, "cache.invalidation on_methods cannot contain POST");
+    EXPECT_STREQ(result_post.error, "cache.invalidation on_methods cannot contain POST");
 }
 
 } // namespace bytetaper::policy
