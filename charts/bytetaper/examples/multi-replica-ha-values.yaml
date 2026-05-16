@@ -1,0 +1,46 @@
+# Safe Multi-Replica HA Configuration for Deployment mode.
+# Because the current chart uses a Deployment, multiple replicas cannot safely
+# share a persistent PVC for RocksDB. This example uses per-pod emptyDir
+# storage, ensuring each replica has a private, safe, but ephemeral L2 cache.
+replicaCount: 3
+
+image:
+  repository: ghcr.io/ByteTaper/bytetaper-runtime
+  digest: "sha256:REPLACE_WITH_RELEASE_DIGEST"
+  pullPolicy: IfNotPresent
+
+l2Cache:
+  enabled: true
+  persistence:
+    enabled: false
+  emptyDir:
+    enabled: true
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: bytetaper
+
+admin:
+  enabled: false
+
+metrics:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi

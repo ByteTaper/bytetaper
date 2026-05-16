@@ -1,0 +1,24 @@
+admin:
+  enabled: true
+  address: "0.0.0.0"
+  port: 18082
+  service:
+    enabled: true
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 18081
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: admin-console
+      ports:
+        - protocol: TCP
+          port: 18082

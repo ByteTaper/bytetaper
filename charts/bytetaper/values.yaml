@@ -1,3 +1,6 @@
+# replicaCount > 1: each pod owns its own L1 memory cache and L2 RocksDB cache.
+# The L2 cache is NOT shared across replicas. Do not mount the same RocksDB
+# PVC path into multiple ByteTaper pods. See docs/deployment/helm-ha-production.md.
 replicaCount: 1
 
 strategy:
@@ -60,6 +63,8 @@ policy:
 
 l2Cache:
   enabled: true
+  # persistence.enabled: recommended when cache warmness matters across pod restarts.
+  # Each replica must have its own PVC (not a shared ReadWriteMany volume).
   persistence:
     enabled: true
     storageClassName: ""
@@ -67,6 +72,8 @@ l2Cache:
       - ReadWriteOnce
     size: 10Gi
     existingClaim: ""
+  # emptyDir: cache is lost on pod restart or rescheduling. Acceptable for
+  # cache-only workloads where cold-cache is tolerable.
   emptyDir:
     enabled: false
     sizeLimit: ""

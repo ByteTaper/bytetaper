@@ -268,6 +268,16 @@ jobs:
         run: helm template bytetaper charts/bytetaper --set networkPolicy.enabled=true --set runtime.extProcPort=19080 --set runtime.metricsPort=19081 --set service.extProcPort=19080 --set service.metricsPort=19081
       - name: Template — invalid policy mode should fail
         run: helm template bytetaper charts/bytetaper --set policy.mode=invalid && exit 1 || exit 0
+      - name: Template Example — single-replica-prod
+        run: helm template bytetaper charts/bytetaper --values charts/bytetaper/examples/single-replica-prod-values.yaml
+      - name: Template Example — multi-replica-ha
+        run: helm template bytetaper charts/bytetaper --values charts/bytetaper/examples/multi-replica-ha-values.yaml
+      - name: Template Example — multi-replica-emptydir
+        run: helm template bytetaper charts/bytetaper --values charts/bytetaper/examples/multi-replica-emptydir-values.yaml
+      - name: Template Example — values-production
+        run: helm template bytetaper charts/bytetaper --values charts/bytetaper/examples/values-production.yaml
+      - name: Template Example — network-policy
+        run: helm template bytetaper charts/bytetaper --values charts/bytetaper/examples/network-policy-values.yaml
 
   infra-templates:
     runs-on: ubuntu-24.04
