@@ -155,9 +155,14 @@ jobs:
         run: tests/runtime/smoke_runtime_matrix.sh bytetaper-runtime:release
 
       - name: Setup Trivy for supply-chain check
-        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514
-        with:
-          version: v0.58.0
+        run: |
+          TRIVY_VERSION="0.58.0"
+          TRIVY_ARCHIVE="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          TRIVY_URL="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${TRIVY_ARCHIVE}"
+          curl -fL "${TRIVY_URL}" -o "/tmp/${TRIVY_ARCHIVE}"
+          tar -xzf "/tmp/${TRIVY_ARCHIVE}" -C /tmp trivy
+          sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
+          trivy --version
 
       - name: Phase 3b — Supply-chain readiness
         run: tools/supply_chain/check_runtime_image.sh bytetaper-runtime:release
