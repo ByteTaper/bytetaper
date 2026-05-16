@@ -62,7 +62,7 @@ ARG BYTETAPER_BUILD_DATE=unknown
 
 LABEL org.opencontainers.image.title="ByteTaper Runtime"
 LABEL org.opencontainers.image.description="ByteTaper API Performance Gateway runtime image"
-LABEL org.opencontainers.image.source="https://github.com/haluan/bytetaper"
+LABEL org.opencontainers.image.source="https://github.com/ByteTaper/bytetaper"
 LABEL org.opencontainers.image.revision="${BYTETAPER_GIT_SHA}"
 LABEL org.opencontainers.image.version="${BYTETAPER_VERSION}"
 LABEL org.opencontainers.image.created="${BYTETAPER_BUILD_DATE}"

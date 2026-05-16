@@ -32,8 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	bytetaperv1alpha1 "github.com/haluan/bytetaper/operator/api/v1alpha1"
-	"github.com/haluan/bytetaper/operator/internal/controller"
+	bytetaperv1alpha1 "github.com/ByteTaper/bytetaper/operator/api/v1alpha1"
+	"github.com/ByteTaper/bytetaper/operator/internal/controller"
 )
 
 var (

@@ -4,7 +4,7 @@ Official Helm chart for deploying the hardened ByteTaper API Performance Gateway
 
 ## Architecture & Container Contracts
 
-This chart is built specifically around the hardened container contracts established in `ghcr.io/haluan/bytetaper-runtime`:
+This chart is built specifically around the hardened container contracts established in `ghcr.io/ByteTaper/bytetaper-runtime`:
 * Writable mounts restricted strictly to `/var/lib/bytetaper/l2-cache` and `/var/run/bytetaper`.
 * Total read-only root filesystem enforcement (`readOnlyRootFilesystem: true`).
 * Execution pinned to non-root UID `1001` (`bytetaper`).
@@ -36,7 +36,7 @@ helm uninstall bytetaper --namespace bytetaper
 When `image.tag` and `image.digest` are omitted, the chart automatically falls back to `.Chart.AppVersion`. To guarantee absolute production immutability, supply the exact SHA256 digest:
 ```yaml
 image:
-  repository: ghcr.io/haluan/bytetaper-runtime
+  repository: ghcr.io/ByteTaper/bytetaper-runtime
   digest: "sha256:4c2759d9762b10723f1d4642f5419d6642131990b72f8bf30e68"
 ```
 

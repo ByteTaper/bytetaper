@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/haluan/bytetaper-runtime
+  repository: ghcr.io/ByteTaper/bytetaper-runtime
   tag: ci
 
 policy:

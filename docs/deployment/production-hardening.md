@@ -16,7 +16,7 @@ Never deploy production instances using mutable tags (`latest`, `v0.1.0`). Deplo
 
 ```yaml
 image:
-  repository: ghcr.io/haluan/bytetaper-runtime
+  repository: ghcr.io/ByteTaper/bytetaper-runtime
   digest: "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 ```
 

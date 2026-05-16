@@ -2,5 +2,5 @@ domain: bytetaper.io
 layout:
 - go.kubebuilder.io/v4
 projectName: operator
-repo: github.com/haluan/bytetaper/operator
+repo: github.com/ByteTaper/bytetaper/operator
 version: "3"

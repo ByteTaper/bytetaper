@@ -8,7 +8,7 @@ The `bytetaper-helm` Terraform module provides a declarative HCL wrapper over th
 
 ```hcl
 module "bytetaper" {
-  source = "github.com/haluan/bytetaper//terraform/modules/bytetaper-helm?ref=v0.1.0"
+  source = "github.com/ByteTaper/bytetaper//terraform/modules/bytetaper-helm?ref=v0.1.0"
   # ... configuration attributes
 }
 ```

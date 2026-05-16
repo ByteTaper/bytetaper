@@ -61,7 +61,7 @@ docker image inspect bytetaper-runtime:production --format '{{json .Config.Label
   "org.opencontainers.image.description": "ByteTaper API Performance Gateway runtime image",
   "org.opencontainers.image.licenses": "AGPL-3.0-only OR LicenseRef-Commercial",
   "org.opencontainers.image.revision": "a1b2c3d4e5f6...",
-  "org.opencontainers.image.source": "https://github.com/haluan/bytetaper",
+  "org.opencontainers.image.source": "https://github.com/ByteTaper/bytetaper",
   "org.opencontainers.image.title": "ByteTaper Runtime",
   "org.opencontainers.image.version": "1.2.0"
 }

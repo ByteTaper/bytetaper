@@ -34,7 +34,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	bytetaperv1alpha1 "github.com/haluan/bytetaper/operator/api/v1alpha1"
+	bytetaperv1alpha1 "github.com/ByteTaper/bytetaper/operator/api/v1alpha1"
 )
 
 func TestImageReference(t *testing.T) {
@@ -49,7 +49,7 @@ func TestImageReference(t *testing.T) {
 				Repository: "",
 				Tag:        "",
 			},
-			expected: "ghcr.io/haluan/bytetaper-runtime:latest",
+			expected: "ghcr.io/ByteTaper/bytetaper-runtime:latest",
 		},
 		{
 			name: "custom tag",

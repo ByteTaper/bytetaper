@@ -1032,7 +1032,7 @@ spec:
                       x-kubernetes-map-type: atomic
                     type: array
                   repository:
-                    default: ghcr.io/haluan/bytetaper-runtime
+                    default: ghcr.io/ByteTaper/bytetaper-runtime
                     description: Repository is the container image repository.
                     minLength: 1
                     type: string

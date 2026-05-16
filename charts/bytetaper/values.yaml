@@ -7,7 +7,7 @@ strategy:
     maxUnavailable: 25%
 
 image:
-  repository: ghcr.io/haluan/bytetaper-runtime
+  repository: ghcr.io/ByteTaper/bytetaper-runtime
   pullPolicy: IfNotPresent
   tag: ""
   digest: ""
