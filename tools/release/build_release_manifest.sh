@@ -40,7 +40,8 @@ cat <<EOF > dist/release/bytetaper-release-manifest.json
     "repository": "${IMG_REPO}",
     "tag": "${IMG_TAG}",
     "digest": "${IMG_DIGEST}",
-    "reference": "${IMG_REF}"
+    "reference": "${IMG_REF}",
+    "platforms": ["linux/amd64", "linux/arm64"]
   },
   "helm_chart": {
     "name": "bytetaper",
