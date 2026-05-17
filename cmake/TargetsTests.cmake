@@ -2752,4 +2752,47 @@ if(BUILD_TESTING)
   target_include_directories(tq_invalidation_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(tq_invalidation_ir_test PRIVATE gtest_main bytetaper_taperquery)
   add_test(NAME tq_invalidation_ir_test COMMAND tq_invalidation_ir_test)
+
+  # Concurrency and Race Harness tests (BT-RACE-001)
+  add_executable(inflight_registry_generation_concurrency_test
+    tests/concurrency/inflight_registry_generation_concurrency_test.cpp
+  )
+  target_include_directories(inflight_registry_generation_concurrency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(inflight_registry_generation_concurrency_test PRIVATE gtest_main bytetaper_extproc_grpc_server Threads::Threads)
+  add_test(NAME inflight_registry_generation_concurrency_test COMMAND inflight_registry_generation_concurrency_test)
+
+  add_executable(inflight_registry_waiter_accounting_concurrency_test
+    tests/concurrency/inflight_registry_waiter_accounting_concurrency_test.cpp
+  )
+  target_include_directories(inflight_registry_waiter_accounting_concurrency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(inflight_registry_waiter_accounting_concurrency_test PRIVATE gtest_main bytetaper_extproc_grpc_server Threads::Threads)
+  add_test(NAME inflight_registry_waiter_accounting_concurrency_test COMMAND inflight_registry_waiter_accounting_concurrency_test)
+
+  add_executable(l1_cache_concurrency_harness_test
+    tests/concurrency/l1_cache_concurrency_harness_test.cpp
+  )
+  target_include_directories(l1_cache_concurrency_harness_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(l1_cache_concurrency_harness_test PRIVATE gtest_main bytetaper_extproc_grpc_server Threads::Threads)
+  add_test(NAME l1_cache_concurrency_harness_test COMMAND l1_cache_concurrency_harness_test)
+
+  add_executable(worker_queue_concurrency_harness_test
+    tests/concurrency/worker_queue_concurrency_harness_test.cpp
+  )
+  target_include_directories(worker_queue_concurrency_harness_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(worker_queue_concurrency_harness_test PRIVATE gtest_main bytetaper_extproc_grpc_server RocksDB::RocksDB Threads::Threads)
+  add_test(NAME worker_queue_concurrency_harness_test COMMAND worker_queue_concurrency_harness_test)
+
+  add_executable(runtime_policy_store_concurrency_test
+    tests/concurrency/runtime_policy_store_concurrency_test.cpp
+  )
+  target_include_directories(runtime_policy_store_concurrency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(runtime_policy_store_concurrency_test PRIVATE gtest_main bytetaper_runtime bytetaper_extproc_adapter policy_yaml_loader Threads::Threads)
+  add_test(NAME runtime_policy_store_concurrency_test COMMAND runtime_policy_store_concurrency_test)
+
+  add_executable(route_cache_epoch_store_concurrency_test
+    tests/concurrency/route_cache_epoch_store_concurrency_test.cpp
+  )
+  target_include_directories(route_cache_epoch_store_concurrency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(route_cache_epoch_store_concurrency_test PRIVATE gtest_main bytetaper_extproc_grpc_server Threads::Threads)
+  add_test(NAME route_cache_epoch_store_concurrency_test COMMAND route_cache_epoch_store_concurrency_test)
 endif()
