@@ -13,7 +13,7 @@ It is a security best practice to reference images by their unique SHA256 digest
 ```json
 "runtime_image": {
   "digest": "sha256:...",
-  "reference": "ghcr.io/bytetaper/bytetaper-runtime@sha256:..."
+  "reference": "docker.io/bytetaper/bytetaper-runtime@sha256:..."
 }
 ```
 
@@ -22,7 +22,7 @@ It is a security best practice to reference images by their unique SHA256 digest
 ByteTaper uses keyless signing via Sigstore. The signature is bound to the official GitHub Actions release workflow identity.
 
 ```bash
-IMAGE_REF="ghcr.io/bytetaper/bytetaper-runtime@sha256:<digest>"
+IMAGE_REF="docker.io/bytetaper/bytetaper-runtime@sha256:<digest>"
 
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
@@ -71,7 +71,7 @@ When deploying with Helm, always use the `image.digest` value to ensure your clu
 ```yaml
 # values.yaml
 image:
-  repository: ghcr.io/bytetaper/bytetaper-runtime
+  repository: docker.io/bytetaper/bytetaper-runtime
   tag: v0.1.0
   digest: sha256:8f...
 ```
