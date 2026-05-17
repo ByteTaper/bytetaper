@@ -25,6 +25,10 @@ target_include_directories(policy_yaml_loader
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${YAML_CPP_INCLUDE_DIRS}
 )
+target_link_directories(policy_yaml_loader
+  PUBLIC
+    ${YAML_CPP_LIBRARY_DIRS}
+)
 target_link_libraries(policy_yaml_loader
   PUBLIC
     bytetaper_policy

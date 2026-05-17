@@ -13,6 +13,7 @@
 #include "metrics/prometheus_registry.h"
 #include "observability/logger.h"
 #include "policy/yaml_loader.h"
+#include "taperquery/policy_persistence.h"
 #include "taperquery/tq_apply_audit.h"
 
 #include <atomic>
@@ -42,6 +43,11 @@ struct ServerArgs {
     const char* admin_address = "127.0.0.1";
     std::uint16_t admin_port = 18082;
     bool admin_enable_taperquery = false;
+    const char* admin_taperquery_state_dir = nullptr;
+    const char* admin_taperquery_active_policy_file = "active-policy.yaml";
+    const char* admin_taperquery_metadata_file = "active-policy.meta.json";
+    const char* policy_state_dir = nullptr;
+    bool disable_policy_persistence = false;
     bool help = false;
     bool error = false;
 };
@@ -145,6 +151,55 @@ ServerArgs parse_args(int argc, char** argv) {
             continue;
         }
 
+        if (std::strcmp(arg, "--admin-taperquery-state-dir") == 0) {
+            if (i + 1 >= argc || argv[i + 1] == nullptr || argv[i + 1][0] == '\0') {
+                std::fprintf(stderr, "missing value for --admin-taperquery-state-dir\n");
+                args.error = true;
+                return args;
+            }
+            args.admin_taperquery_state_dir = argv[i + 1];
+            i += 1;
+            continue;
+        }
+
+        if (std::strcmp(arg, "--admin-taperquery-active-policy-file") == 0) {
+            if (i + 1 >= argc || argv[i + 1] == nullptr || argv[i + 1][0] == '\0') {
+                std::fprintf(stderr, "missing value for --admin-taperquery-active-policy-file\n");
+                args.error = true;
+                return args;
+            }
+            args.admin_taperquery_active_policy_file = argv[i + 1];
+            i += 1;
+            continue;
+        }
+
+        if (std::strcmp(arg, "--admin-taperquery-metadata-file") == 0) {
+            if (i + 1 >= argc || argv[i + 1] == nullptr || argv[i + 1][0] == '\0') {
+                std::fprintf(stderr, "missing value for --admin-taperquery-metadata-file\n");
+                args.error = true;
+                return args;
+            }
+            args.admin_taperquery_metadata_file = argv[i + 1];
+            i += 1;
+            continue;
+        }
+
+        if (std::strcmp(arg, "--policy-state-dir") == 0) {
+            if (i + 1 >= argc || argv[i + 1] == nullptr || argv[i + 1][0] == '\0') {
+                std::fprintf(stderr, "missing value for --policy-state-dir\n");
+                args.error = true;
+                return args;
+            }
+            args.policy_state_dir = argv[i + 1];
+            i += 1;
+            continue;
+        }
+
+        if (std::strcmp(arg, "--disable-policy-persistence") == 0) {
+            args.disable_policy_persistence = true;
+            continue;
+        }
+
         if (std::strcmp(arg, "--help") == 0) {
             args.help = true;
             return args;
@@ -195,9 +250,12 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (args.help) {
-        std::puts("usage: bytetaper-extproc-server [--listen-address HOST:PORT] [--policy-file "
-                  "PATH] [--l2-cache-path PATH] [--metrics-address ADDR] [--metrics-port PORT] "
-                  "[--admin-address ADDR] [--admin-port PORT] [--admin-enable-taperquery]");
+        std::puts(
+            "usage: bytetaper-extproc-server [--listen-address HOST:PORT] [--policy-file "
+            "PATH] [--l2-cache-path PATH] [--metrics-address ADDR] [--metrics-port PORT] "
+            "[--admin-address ADDR] [--admin-port PORT] [--admin-enable-taperquery] "
+            "[--admin-taperquery-state-dir PATH] [--admin-taperquery-active-policy-file FILENAME] "
+            "[--admin-taperquery-metadata-file FILENAME]");
         bytetaper::observability::logger_shutdown();
         return 0;
     }
@@ -218,25 +276,6 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "failed to start metrics http server on %s:%u\n",
                      args.metrics_listen_address, args.metrics_port);
         // non-fatal, but good to know
-    }
-
-    bytetaper::policy::PolicyFileResult policy_result{};
-    if (args.policy_file != nullptr) {
-        if (!bytetaper::policy::load_policy_from_file(args.policy_file, &policy_result)) {
-            std::fprintf(stderr, "failed to load policy file %s: %s\n", args.policy_file,
-                         policy_result.error ? policy_result.error : "unknown error");
-            health_state.not_ready_reason.store("policy loading error", std::memory_order_release);
-            bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
-            bytetaper::observability::logger_shutdown();
-            return 3;
-        }
-        if (policy_result.warning[0] != '\0') {
-            std::fprintf(stderr, "policy warning: %s\n", policy_result.warning);
-        }
-        char buf[512];
-        std::snprintf(buf, sizeof(buf), "loaded %zu routes from %s", policy_result.count,
-                      args.policy_file);
-        bytetaper::observability::log_info(buf);
     }
 
     auto l1_cache = std::make_unique<bytetaper::cache::L1Cache>();
@@ -309,39 +348,168 @@ int main(int argc, char** argv) {
     }
 
     auto policy_store = std::make_unique<bytetaper::runtime::RuntimePolicyStore>();
-    if (policy_result.ok) {
-        auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_routes(
-            policy_result.policies, policy_result.count, args.policy_file,
-            policy_store->next_generation());
-        if (!build_res.ok) {
-            std::fprintf(stderr, "failed to build initial policy snapshot: %s\n",
-                         build_res.error.c_str());
-            health_state.not_ready_reason.store("initial policy snapshot build error",
-                                                std::memory_order_release);
-            bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
-            if (l2_cache != nullptr) {
-                bytetaper::cache::l2_close(&l2_cache);
-            }
-            bytetaper::observability::logger_shutdown();
-            return 5;
+
+    bytetaper::taperquery::LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+    persistence_config.state_dir = "";
+
+    // 1. Read environment variables
+    const char* env_state_dir = std::getenv("BYTETAPER_POLICY_STATE_DIR");
+    if (env_state_dir != nullptr) {
+        persistence_config.state_dir = env_state_dir;
+        persistence_config.enabled = true; // Enabled by default if state_dir is set in env
+    }
+    const char* env_enabled = std::getenv("BYTETAPER_POLICY_PERSISTENCE_ENABLED");
+    if (env_enabled != nullptr) {
+        std::string val(env_enabled);
+        if (val == "1" || val == "true" || val == "yes" || val == "ON") {
+            persistence_config.enabled = true;
+        } else if (val == "0" || val == "false" || val == "no" || val == "OFF") {
+            persistence_config.enabled = false;
         }
-        std::string err;
-        if (!policy_store->install_initial(build_res.snapshot, &err)) {
-            std::fprintf(stderr, "failed to install initial policy snapshot: %s\n", err.c_str());
-            health_state.not_ready_reason.store("initial policy snapshot install error",
-                                                std::memory_order_release);
-            bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
-            if (l2_cache != nullptr) {
-                bytetaper::cache::l2_close(&l2_cache);
-            }
+    }
+
+    // 2. Override with CLI arguments
+    if (args.policy_state_dir != nullptr) {
+        persistence_config.enabled = true;
+        persistence_config.state_dir = args.policy_state_dir;
+    }
+    if (args.admin_taperquery_state_dir != nullptr) {
+        persistence_config.enabled = true;
+        persistence_config.state_dir = args.admin_taperquery_state_dir;
+    }
+
+    // 3. Explicitly disable if --disable-policy-persistence is set
+    if (args.disable_policy_persistence) {
+        persistence_config.enabled = false;
+        persistence_config.state_dir = "";
+    }
+
+    if (persistence_config.enabled) {
+        persistence_config.active_policy_filename = args.admin_taperquery_active_policy_file;
+        persistence_config.metadata_filename = args.admin_taperquery_metadata_file;
+
+        if (persistence_config.state_dir.empty()) {
+            std::fprintf(
+                stderr,
+                "error: taperquery active policy persistence is enabled, but no state directory is "
+                "configured (use BYTETAPER_POLICY_STATE_DIR or --policy-state-dir)\n");
             bytetaper::observability::logger_shutdown();
-            return 6;
+            return 1;
         }
-    } else {
-        auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_routes(
-            nullptr, 0, "none", policy_store->next_generation());
-        std::string err;
-        policy_store->install_initial(build_res.snapshot, &err);
+    }
+
+    bool loaded_from_persistence = false;
+    std::shared_ptr<const bytetaper::runtime::RuntimePolicySnapshot> initial_snapshot;
+
+    if (persistence_config.enabled) {
+        bytetaper::observability::log_info("checking for persisted active policy...");
+
+        bytetaper::taperquery::StartupPolicyLoadConfig startup_cfg;
+        startup_cfg.bootstrap_policy_file = args.policy_file ? args.policy_file : "";
+        startup_cfg.policy_state_dir = persistence_config.state_dir;
+        startup_cfg.active_policy_filename = persistence_config.active_policy_filename;
+        startup_cfg.metadata_filename = persistence_config.metadata_filename;
+        startup_cfg.policy_persistence_enabled = persistence_config.enabled;
+        startup_cfg.fallback_to_bootstrap_on_persisted_policy_error = false;
+
+        auto startup_res = bytetaper::taperquery::load_startup_policy_with_persistence(startup_cfg);
+        if (!startup_res.ok) {
+            std::fprintf(stderr,
+                         "error: persisted active policy recovery failed due to corruption or "
+                         "invalid configuration: %s\n",
+                         startup_res.error.c_str());
+            bytetaper::observability::logger_shutdown();
+            return 1;
+        }
+
+        if (startup_res.loaded_source == "persisted") {
+            char log_msg[512];
+            std::snprintf(log_msg, sizeof(log_msg),
+                          "restored active policy from disk: identity=%s, generation=%zu",
+                          startup_res.policy_identity.c_str(),
+                          static_cast<std::size_t>(startup_res.generation));
+            bytetaper::observability::log_info(log_msg);
+
+            auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_ir(
+                startup_res.policy_ir, startup_res.generation);
+            if (build_res.ok) {
+                initial_snapshot = build_res.snapshot;
+                loaded_from_persistence = true;
+            } else {
+                std::fprintf(stderr, "error: failed to build snapshot from recovered policy: %s\n",
+                             build_res.error.c_str());
+                bytetaper::observability::logger_shutdown();
+                return 1;
+            }
+        } else {
+            char log_msg[512];
+            std::snprintf(log_msg, sizeof(log_msg),
+                          "no persisted active policy found (will fall back to bootstrap policy)");
+            bytetaper::observability::log_info(log_msg);
+        }
+    }
+
+    if (!loaded_from_persistence) {
+        bytetaper::policy::PolicyFileResult policy_result{};
+        if (args.policy_file != nullptr) {
+            if (!bytetaper::policy::load_policy_from_file(args.policy_file, &policy_result)) {
+                std::fprintf(stderr, "failed to load policy file %s: %s\n", args.policy_file,
+                             policy_result.error ? policy_result.error : "unknown error");
+                health_state.not_ready_reason.store("policy loading error",
+                                                    std::memory_order_release);
+                bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
+                if (l2_cache != nullptr) {
+                    bytetaper::cache::l2_close(&l2_cache);
+                }
+                bytetaper::observability::logger_shutdown();
+                return 3;
+            }
+            if (policy_result.warning[0] != '\0') {
+                std::fprintf(stderr, "policy warning: %s\n", policy_result.warning);
+            }
+            char buf[512];
+            std::snprintf(buf, sizeof(buf), "loaded %zu routes from %s", policy_result.count,
+                          args.policy_file);
+            bytetaper::observability::log_info(buf);
+        }
+
+        if (policy_result.ok) {
+            auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_routes(
+                policy_result.policies, policy_result.count, args.policy_file,
+                policy_store->next_generation());
+            if (!build_res.ok) {
+                std::fprintf(stderr, "failed to build initial policy snapshot: %s\n",
+                             build_res.error.c_str());
+                health_state.not_ready_reason.store("initial policy snapshot build error",
+                                                    std::memory_order_release);
+                bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
+                if (l2_cache != nullptr) {
+                    bytetaper::cache::l2_close(&l2_cache);
+                }
+                bytetaper::observability::logger_shutdown();
+                return 5;
+            }
+            initial_snapshot = build_res.snapshot;
+        } else {
+            auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_routes(
+                nullptr, 0, "none", policy_store->next_generation());
+            initial_snapshot = build_res.snapshot;
+        }
+    }
+
+    std::string install_err;
+    if (!policy_store->install_initial(initial_snapshot, &install_err)) {
+        std::fprintf(stderr, "failed to install initial policy snapshot: %s\n",
+                     install_err.c_str());
+        health_state.not_ready_reason.store("initial policy snapshot install error",
+                                            std::memory_order_release);
+        bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
+        if (l2_cache != nullptr) {
+            bytetaper::cache::l2_close(&l2_cache);
+        }
+        bytetaper::observability::logger_shutdown();
+        return 6;
     }
 
     std::unique_ptr<bytetaper::taperquery::TqApplyService> apply_service;
@@ -352,7 +520,7 @@ int main(int argc, char** argv) {
     if (args.admin_enable_taperquery) {
         audit_store = std::make_unique<bytetaper::taperquery::TqApplyAuditStore>();
         apply_service = std::make_unique<bytetaper::taperquery::TqApplyService>(
-            policy_store.get(), nullptr, audit_store.get());
+            policy_store.get(), nullptr, audit_store.get(), persistence_config);
         bytetaper::admin::TaperQueryAdminHttpServerConfig admin_config{};
         admin_config.listen_address = args.admin_address;
         admin_config.port = args.admin_port;

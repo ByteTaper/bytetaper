@@ -5,9 +5,13 @@
 
 #include "taperquery/policy_ir_normalize.h"
 #include "taperquery/policy_ir_validator.h"
+#include "taperquery/policy_ir_yaml_emitter.h"
+#include "taperquery/policy_persistence.h"
 #include "taperquery/tq_apply_audit.h"
 #include "taperquery/tq_compiler.h"
 #include "taperquery/tq_parser.h"
+
+#include <chrono>
 
 namespace bytetaper::taperquery {
 
@@ -38,9 +42,10 @@ DefaultTqSnapshotBuilder g_default_builder;
 } // namespace
 
 TqApplyService::TqApplyService(runtime::RuntimePolicyStore* policy_store,
-                               TqSnapshotBuilder* builder, TqApplyAuditStore* audit_store)
+                               TqSnapshotBuilder* builder, TqApplyAuditStore* audit_store,
+                               LocalPolicyPersistenceConfig persistence_config)
     : policy_store_(policy_store), builder_(builder ? builder : &g_default_builder),
-      audit_store_(audit_store) {}
+      audit_store_(audit_store), persistence_config_(std::move(persistence_config)) {}
 
 TqApplyResult TqApplyService::execute(const TqApplyRequest& request) {
     TqApplyResult result = execute_impl(request);
@@ -344,6 +349,50 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
         result.status = TqApplyStatus::RejectedSnapshotBuildFailed;
         result.message = "building final runtime policy snapshot failed: " + final_build_res.error;
         return result;
+    }
+
+    // Emit canonical YAML from normalized candidate IR
+    PolicyIrYamlEmitResult emit_res = emit_policy_ir_canonical_yaml(candidate);
+    if (!emit_res.ok) {
+        result.ok = false;
+        result.status = TqApplyStatus::InternalError;
+        result.message = "canonical YAML emit failed: " + emit_res.error;
+        TqApplyDiagnostic diag;
+        diag.severity = "error";
+        diag.code = "CANONICAL_YAML_EMIT_FAILED";
+        diag.reason = emit_res.error;
+        result.diagnostics.push_back(diag);
+        return result;
+    }
+
+    // Persist before swap — durability before visibility
+    if (persistence_config_.enabled && !persistence_config_.state_dir.empty()) {
+        PersistedPolicyMetadata meta{};
+        meta.policy_identity = final_build_res.snapshot->policy_identity;
+        meta.previous_policy_identity = current_snapshot->policy_identity;
+        meta.expected_base_identity = request.expected_base_identity;
+        meta.generation = final_build_res.snapshot->generation;
+        meta.source_type = "taperquery";
+        meta.written_at_unix_epoch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::system_clock::now().time_since_epoch())
+                                            .count();
+        meta.operator_id = request.operator_id;
+        meta.request_id = request.request_id;
+
+        auto persist_res =
+            persist_active_policy_canonical_yaml(persistence_config_, candidate, meta);
+
+        if (!persist_res.ok) {
+            result.ok = false;
+            result.status = TqApplyStatus::RejectedPersistenceFailed;
+            result.message = "persistence failed: " + persist_res.error;
+            TqApplyDiagnostic diag;
+            diag.severity = "error";
+            diag.code = "PERSISTENCE_FAILED";
+            diag.reason = persist_res.error;
+            result.diagnostics.push_back(diag);
+            return result;
+        }
     }
 
     // Step 14 - Swap active snapshot via atomic CAS swap_if_current

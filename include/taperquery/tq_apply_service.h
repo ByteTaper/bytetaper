@@ -5,6 +5,7 @@
 
 #include "runtime/policy_snapshot.h"
 #include "taperquery/policy_ir.h"
+#include "taperquery/policy_persistence.h"
 #include "taperquery/route_analysis.h"
 #include "taperquery/tq_diagnostic.h"
 #include "taperquery/tq_plan.h"
@@ -36,6 +37,7 @@ enum class TqApplyStatus : std::uint8_t {
     RejectedCasMismatch,
     RejectedNoChanges,
     RejectedSnapshotBuildFailed,
+    RejectedPersistenceFailed,
     InternalError,
 };
 
@@ -97,7 +99,8 @@ class TqApplyService {
 public:
     explicit TqApplyService(runtime::RuntimePolicyStore* policy_store,
                             TqSnapshotBuilder* builder = nullptr,
-                            TqApplyAuditStore* audit_store = nullptr);
+                            TqApplyAuditStore* audit_store = nullptr,
+                            LocalPolicyPersistenceConfig persistence_config = {});
 
     TqApplyResult execute(const TqApplyRequest& request);
 
@@ -107,6 +110,7 @@ private:
     runtime::RuntimePolicyStore* policy_store_ = nullptr;
     TqSnapshotBuilder* builder_ = nullptr;
     TqApplyAuditStore* audit_store_ = nullptr;
+    LocalPolicyPersistenceConfig persistence_config_;
 };
 
 } // namespace bytetaper::taperquery

@@ -62,7 +62,7 @@ static constexpr std::size_t kAsyncL2StoreEncScratchSize =
 
 // Sharding configuration.
 static constexpr std::size_t kRuntimeShardCount = 256;
-static constexpr std::size_t kRuntimeQueueSlotsPerShard = 16; // 256 * 8 = 2048 total slots
+static constexpr std::size_t kRuntimeQueueSlotsPerShard = 16; // 256 * 16 = 4096 total slots
 static constexpr std::size_t kRuntimePendingSlotsPerShard = 16;
 static constexpr std::size_t kWorkerQueueMaxWorkers = 8;
 static constexpr std::size_t kRuntimeMaxShardsPerWorker = kRuntimeShardCount;

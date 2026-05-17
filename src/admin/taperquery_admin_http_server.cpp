@@ -209,6 +209,8 @@ static std::string status_to_string(taperquery::TqApplyStatus s) {
         return "RejectedNoChanges";
     case taperquery::TqApplyStatus::RejectedSnapshotBuildFailed:
         return "RejectedSnapshotBuildFailed";
+    case taperquery::TqApplyStatus::RejectedPersistenceFailed:
+        return "RejectedPersistenceFailed";
     case taperquery::TqApplyStatus::InternalError:
         return "InternalError";
     }
@@ -237,6 +239,8 @@ static int status_to_http_code(taperquery::TqApplyStatus s, taperquery::TqApplyM
         return (mode == taperquery::TqApplyMode::DryRun) ? 200 : 409;
     case taperquery::TqApplyStatus::RejectedSnapshotBuildFailed:
         return 500;
+    case taperquery::TqApplyStatus::RejectedPersistenceFailed:
+        return 500;
     case taperquery::TqApplyStatus::InternalError:
         return 500;
     }
@@ -261,6 +265,8 @@ static std::string apply_status_to_error_code(taperquery::TqApplyStatus s) {
         return "NO_CHANGES";
     case taperquery::TqApplyStatus::RejectedSnapshotBuildFailed:
         return "SNAPSHOT_BUILD_FAILED";
+    case taperquery::TqApplyStatus::RejectedPersistenceFailed:
+        return "PERSISTENCE_FAILED";
     case taperquery::TqApplyStatus::InternalError:
         return "INTERNAL_ERROR";
     default:

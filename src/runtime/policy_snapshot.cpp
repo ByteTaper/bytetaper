@@ -344,6 +344,7 @@ bool RuntimePolicyStore::install_initial(std::shared_ptr<const RuntimePolicySnap
         return false;
     }
     active_ = std::move(snapshot);
+    generation_ = active_->generation;
     return true;
 }
 

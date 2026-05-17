@@ -1,0 +1,594 @@
+// SPDX-FileCopyrightText: 2026 Haluan Irsad
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
+
+#include "taperquery/policy_persistence.h"
+
+#include "taperquery/policy_ir_from_yaml.h"
+#include "taperquery/policy_ir_identity.h"
+#include "taperquery/policy_ir_yaml_emitter.h"
+
+#include <array>
+#include <cctype>
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+namespace bytetaper::taperquery {
+
+namespace {
+
+// Standard SHA-256 implementation
+class SHA256 {
+private:
+    std::uint32_t state[8];
+    std::uint64_t bitlen;
+    std::uint8_t data[64];
+    std::uint32_t datalen;
+
+    void transform() {
+        std::uint32_t m[64];
+        std::uint32_t a, b, c, d, e, f, g, h, t1, t2;
+
+        for (std::size_t i = 0, j = 0; i < 16; ++i, j += 4) {
+            m[i] = (data[j] << 24) | (data[j + 1] << 16) | (data[j + 2] << 8) | (data[j + 3]);
+        }
+        for (std::size_t i = 16; i < 64; ++i) {
+            std::uint32_t s0 = ((m[i - 15] >> 7) | (m[i - 15] << 25)) ^
+                               ((m[i - 15] >> 18) | (m[i - 15] << 14)) ^ (m[i - 15] >> 3);
+            std::uint32_t s1 = ((m[i - 2] >> 17) | (m[i - 2] << 15)) ^
+                               ((m[i - 2] >> 19) | (m[i - 2] << 13)) ^ (m[i - 2] >> 10);
+            m[i] = m[i - 16] + s0 + m[i - 7] + s1;
+        }
+
+        a = state[0];
+        b = state[1];
+        c = state[2];
+        d = state[3];
+        e = state[4];
+        f = state[5];
+        g = state[6];
+        h = state[7];
+
+        const std::uint32_t k[64] = {
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+            0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+            0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+            0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+            0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+            0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+            0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+            0xc67178f2
+        };
+
+        for (std::size_t i = 0; i < 64; ++i) {
+            std::uint32_t sig0 =
+                ((a >> 2) | (a << 30)) ^ ((a >> 13) | (a << 19)) ^ ((a >> 22) | (a << 10));
+            std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            std::uint32_t t1_v = h + sig0 + maj + k[i] + m[i];
+            std::uint32_t sig1 =
+                ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7));
+            std::uint32_t ch = (e & f) ^ (~e & g);
+            std::uint32_t t2_v = sig1 + ch;
+            h = g;
+            g = f;
+            f = e;
+            e = d + t1_v;
+            d = c;
+            c = b;
+            b = a;
+            a = t1_v + t2_v;
+        }
+
+        state[0] += a;
+        state[1] += b;
+        state[2] += c;
+        state[3] += d;
+        state[4] += e;
+        state[5] += f;
+        state[6] += g;
+        state[7] += h;
+    }
+
+public:
+    SHA256() {
+        state[0] = 0x6a09e667;
+        state[1] = 0xbb67ae85;
+        state[2] = 0x3c6ef372;
+        state[3] = 0xa54ff53a;
+        state[4] = 0x510e527f;
+        state[5] = 0x9b05688c;
+        state[6] = 0x1f83d9ab;
+        state[7] = 0x5be0cd19;
+        bitlen = 0;
+        datalen = 0;
+    }
+
+    void update(const std::uint8_t* bytes, std::size_t len) {
+        for (std::size_t i = 0; i < len; ++i) {
+            data[datalen] = bytes[i];
+            datalen++;
+            if (datalen == 64) {
+                transform();
+                bitlen += 512;
+                datalen = 0;
+            }
+        }
+    }
+
+    void final(std::uint8_t hash[32]) {
+        std::uint32_t i = datalen;
+        if (datalen < 56) {
+            data[i++] = 0x80;
+            while (i < 56) {
+                data[i++] = 0x00;
+            }
+        } else {
+            data[i++] = 0x80;
+            while (i < 64) {
+                data[i++] = 0x00;
+            }
+            transform();
+            std::memset(data, 0, 56);
+        }
+
+        bitlen += datalen * 8;
+        data[56] = bitlen >> 56;
+        data[57] = bitlen >> 48;
+        data[58] = bitlen >> 40;
+        data[59] = bitlen >> 32;
+        data[60] = bitlen >> 24;
+        data[61] = bitlen >> 16;
+        data[62] = bitlen >> 8;
+        data[63] = bitlen;
+        transform();
+
+        for (std::uint32_t j = 0; j < 4; ++j) {
+            hash[j] = (state[0] >> (24 - j * 8)) & 0x000000ff;
+            hash[j + 4] = (state[1] >> (24 - j * 8)) & 0x000000ff;
+            hash[j + 8] = (state[2] >> (24 - j * 8)) & 0x000000ff;
+            hash[j + 12] = (state[3] >> (24 - j * 8)) & 0x000000ff;
+            hash[j + 16] = (state[4] >> (24 - j * 8)) & 0x000000ff;
+            hash[j + 20] = (state[5] >> (24 - j * 8)) & 0x000000ff;
+            hash[j + 24] = (state[6] >> (24 - j * 8)) & 0x000000ff;
+            hash[j + 28] = (state[7] >> (24 - j * 8)) & 0x000000ff;
+        }
+    }
+};
+
+std::string compute_sha256(const std::string& input) {
+    SHA256 ctx;
+    ctx.update(reinterpret_cast<const std::uint8_t*>(input.data()), input.size());
+    std::uint8_t hash[32];
+    ctx.final(hash);
+    std::stringstream ss;
+    for (int i = 0; i < 32; ++i) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
+    }
+    return ss.str();
+}
+
+static std::string escape_json_string(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+    for (char c : input) {
+        if (c == '"') {
+            out += "\\\"";
+        } else if (c == '\\') {
+            out += "\\\\";
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\t') {
+            out += "\\t";
+        } else if (c == '\r') {
+            out += "\\r";
+        } else if (static_cast<unsigned char>(c) < 32) {
+            char hex[8];
+            std::snprintf(hex, sizeof(hex), "\\u%04x", static_cast<int>(c));
+            out += hex;
+        } else {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+std::string serialize_metadata(const PersistedPolicyMetadata& meta) {
+    std::string json = "{\n";
+    json += "  \"policy_identity\": \"" + escape_json_string(meta.policy_identity) + "\",\n";
+    json += "  \"previous_policy_identity\": \"" +
+            escape_json_string(meta.previous_policy_identity) + "\",\n";
+    json += "  \"expected_base_identity\": \"" + escape_json_string(meta.expected_base_identity) +
+            "\",\n";
+    json += "  \"generation\": " + std::to_string(meta.generation) + ",\n";
+    json += "  \"source_type\": \"" + escape_json_string(meta.source_type) + "\",\n";
+    json +=
+        "  \"written_at_unix_epoch_ms\": " + std::to_string(meta.written_at_unix_epoch_ms) + ",\n";
+    json += "  \"operator_id\": \"" + escape_json_string(meta.operator_id) + "\",\n";
+    json += "  \"request_id\": \"" + escape_json_string(meta.request_id) + "\",\n";
+    json +=
+        "  \"canonical_yaml_sha256\": \"" + escape_json_string(meta.canonical_yaml_sha256) + "\"\n";
+    json += "}\n";
+    return json;
+}
+
+std::string get_json_string_field(const std::string& json, const std::string& key) {
+    std::string search_key = "\"" + key + "\"";
+    std::size_t pos = json.find(search_key);
+    if (pos == std::string::npos)
+        return "";
+
+    std::size_t colon_pos = json.find(':', pos + search_key.size());
+    if (colon_pos == std::string::npos)
+        return "";
+
+    std::size_t quote_start = json.find('"', colon_pos);
+    if (quote_start == std::string::npos)
+        return "";
+
+    std::size_t quote_end = quote_start + 1;
+    std::string val;
+    while (quote_end < json.size()) {
+        if (json[quote_end] == '"') {
+            break;
+        }
+        if (json[quote_end] == '\\' && quote_end + 1 < json.size()) {
+            char next = json[quote_end + 1];
+            if (next == '"')
+                val += '"';
+            else if (next == '\\')
+                val += '\\';
+            else if (next == 'n')
+                val += '\n';
+            else if (next == 't')
+                val += '\t';
+            else if (next == 'r')
+                val += '\r';
+            else
+                val += next;
+            quote_end += 2;
+        } else {
+            val += json[quote_end];
+            quote_end++;
+        }
+    }
+    return val;
+}
+
+std::uint64_t get_json_uint64_field(const std::string& json, const std::string& key) {
+    std::string search_key = "\"" + key + "\"";
+    std::size_t pos = json.find(search_key);
+    if (pos == std::string::npos)
+        return 0;
+
+    std::size_t colon_pos = json.find(':', pos + search_key.size());
+    if (colon_pos == std::string::npos)
+        return 0;
+
+    std::size_t val_start = colon_pos + 1;
+    while (val_start < json.size() &&
+           (std::isspace(static_cast<unsigned char>(json[val_start])) || json[val_start] == '"')) {
+        val_start++;
+    }
+    std::size_t val_end = val_start;
+    while (val_end < json.size() && std::isdigit(static_cast<unsigned char>(json[val_end]))) {
+        val_end++;
+    }
+    if (val_end == val_start)
+        return 0;
+
+    return std::stoull(json.substr(val_start, val_end - val_start));
+}
+
+bool write_atomic_posix(const std::string& file_path, const std::string& content,
+                        std::string& err) {
+    std::string tmp_path = file_path + ".tmp";
+    int fd = open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        err = "Failed to open temporary file: " + std::string(std::strerror(errno));
+        return false;
+    }
+
+    std::size_t total_written = 0;
+    while (total_written < content.size()) {
+        ssize_t bytes = write(fd, content.data() + total_written, content.size() - total_written);
+        if (bytes < 0) {
+            if (errno == EINTR)
+                continue;
+            err = "Failed to write temporary file: " + std::string(std::strerror(errno));
+            close(fd);
+            unlink(tmp_path.c_str());
+            return false;
+        }
+        total_written += bytes;
+    }
+
+    if (fsync(fd) < 0) {
+        err = "Failed to fsync temporary file: " + std::string(std::strerror(errno));
+        close(fd);
+        unlink(tmp_path.c_str());
+        return false;
+    }
+
+    if (close(fd) < 0) {
+        err = "Failed to close temporary file: " + std::string(std::strerror(errno));
+        unlink(tmp_path.c_str());
+        return false;
+    }
+
+    if (rename(tmp_path.c_str(), file_path.c_str()) < 0) {
+        err = "Failed to rename temporary file to target: " + std::string(std::strerror(errno));
+        unlink(tmp_path.c_str());
+        return false;
+    }
+
+    return true;
+}
+
+void fsync_directory(const std::string& dir_path) {
+    int dir_fd = open(dir_path.c_str(), O_RDONLY);
+    if (dir_fd >= 0) {
+        fsync(dir_fd);
+        close(dir_fd);
+    }
+}
+
+} // namespace
+
+PolicyPersistenceWriteResult
+persist_active_policy_canonical_yaml(const LocalPolicyPersistenceConfig& config,
+                                     const TqPolicyDocument& document,
+                                     const PersistedPolicyMetadata& metadata) {
+    PolicyPersistenceWriteResult res;
+    if (!config.enabled) {
+        res.ok = true;
+        return res;
+    }
+
+    if (config.state_dir.empty()) {
+        res.ok = false;
+        res.error = "State directory is empty";
+        return res;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(config.state_dir, ec);
+    if (ec) {
+        res.ok = false;
+        res.error = "Failed to create state directory: " + ec.message();
+        return res;
+    }
+
+    std::string yaml_path =
+        (std::filesystem::path(config.state_dir) / config.active_policy_filename).string();
+    std::string meta_path =
+        (std::filesystem::path(config.state_dir) / config.metadata_filename).string();
+
+    res.active_policy_path = yaml_path;
+    res.metadata_path = meta_path;
+
+    // 1. Emit canonical YAML
+    PolicyIrYamlEmitResult emit_res = emit_policy_ir_canonical_yaml(document);
+    if (!emit_res.ok) {
+        res.ok = false;
+        res.error = "Canonical YAML emission failed: " + emit_res.error;
+        return res;
+    }
+
+    // 2. Compute SHA-256 over raw YAML bytes
+    std::string yaml_sha = compute_sha256(emit_res.yaml);
+
+    // 3. Write canonical YAML to .tmp, fsync, rename, fsync dir
+    std::string err;
+    if (!write_atomic_posix(yaml_path, emit_res.yaml, err)) {
+        res.ok = false;
+        res.error = err;
+        return res;
+    }
+    fsync_directory(config.state_dir);
+
+    // 4. Update metadata and serialize
+    PersistedPolicyMetadata updated_meta = metadata;
+    updated_meta.canonical_yaml_sha256 = yaml_sha;
+    std::string meta_json = serialize_metadata(updated_meta);
+
+    // 5. Write metadata to .tmp, fsync, rename, fsync dir
+    if (!write_atomic_posix(meta_path, meta_json, err)) {
+        res.ok = false;
+        res.error = err;
+        return res;
+    }
+    fsync_directory(config.state_dir);
+
+    res.ok = true;
+    return res;
+}
+
+PolicyPersistenceLoadResult
+load_persisted_active_policy(const LocalPolicyPersistenceConfig& config) {
+    PolicyPersistenceLoadResult res;
+    if (!config.enabled) {
+        res.ok = false;
+        res.error = "Persistence is disabled";
+        return res;
+    }
+
+    if (config.state_dir.empty()) {
+        res.ok = false;
+        res.error = "State directory is empty";
+        return res;
+    }
+
+    std::string yaml_path =
+        (std::filesystem::path(config.state_dir) / config.active_policy_filename).string();
+    std::string meta_path =
+        (std::filesystem::path(config.state_dir) / config.metadata_filename).string();
+
+    // 1. Check if files exist
+    bool yaml_exists = std::filesystem::exists(yaml_path);
+    bool meta_exists = std::filesystem::exists(meta_path);
+    if (!yaml_exists && !meta_exists) {
+        res.ok = false;
+        res.error = "Persisted active policy and metadata files do not exist";
+        res.files_missing = true;
+        return res;
+    } else if (!yaml_exists || !meta_exists) {
+        res.ok = false;
+        res.error = "Incomplete persisted state: one of active policy or metadata is missing";
+        res.files_missing = false;
+        return res;
+    }
+
+    // 2. Read and parse metadata JSON
+    std::ifstream meta_file(meta_path);
+    if (!meta_file.is_open()) {
+        res.ok = false;
+        res.error = "Failed to open metadata file: " + meta_path;
+        return res;
+    }
+    std::stringstream meta_buf;
+    meta_buf << meta_file.rdbuf();
+    std::string meta_json = meta_buf.str();
+    meta_file.close();
+
+    PersistedPolicyMetadata meta;
+    meta.policy_identity = get_json_string_field(meta_json, "policy_identity");
+    meta.previous_policy_identity = get_json_string_field(meta_json, "previous_policy_identity");
+    meta.expected_base_identity = get_json_string_field(meta_json, "expected_base_identity");
+    meta.generation = get_json_uint64_field(meta_json, "generation");
+    meta.source_type = get_json_string_field(meta_json, "source_type");
+    meta.written_at_unix_epoch_ms = get_json_uint64_field(meta_json, "written_at_unix_epoch_ms");
+    meta.operator_id = get_json_string_field(meta_json, "operator_id");
+    meta.request_id = get_json_string_field(meta_json, "request_id");
+    meta.canonical_yaml_sha256 = get_json_string_field(meta_json, "canonical_yaml_sha256");
+
+    if (meta.policy_identity.empty() || meta.canonical_yaml_sha256.empty()) {
+        res.ok = false;
+        res.error = "Metadata is missing required fields";
+        return res;
+    }
+
+    // 3. Read and verify YAML file integrity
+    std::ifstream yaml_file(yaml_path);
+    if (!yaml_file.is_open()) {
+        res.ok = false;
+        res.error = "Failed to open active policy file: " + yaml_path;
+        return res;
+    }
+    std::stringstream yaml_buf;
+    yaml_buf << yaml_file.rdbuf();
+    std::string yaml_content = yaml_buf.str();
+    yaml_file.close();
+
+    std::string actual_sha = compute_sha256(yaml_content);
+    if (actual_sha != meta.canonical_yaml_sha256) {
+        res.ok = false;
+        res.error = "Active policy file integrity check failed (SHA-256 mismatch)";
+        return res;
+    }
+
+    // 4. Parse YAML using load_policy_ir_from_yaml_file
+    PolicyIrLoadResult yaml_load = load_policy_ir_from_yaml_file(yaml_path.c_str());
+    if (!yaml_load.ok) {
+        res.ok = false;
+        res.error = "Failed to parse active policy YAML: " + yaml_load.error;
+        return res;
+    }
+
+    // 5. Verify computed identity matches metadata
+    std::string computed_identity = compute_policy_document_identity(yaml_load.policy);
+    if (computed_identity != meta.policy_identity) {
+        res.ok = false;
+        res.error = "Policy identity mismatch (computed=" + computed_identity +
+                    ", meta=" + meta.policy_identity + ")";
+        return res;
+    }
+
+    res.ok = true;
+    res.document = std::move(yaml_load.policy);
+    res.metadata = std::move(meta);
+    return res;
+}
+
+StartupPolicyLoadResult
+load_startup_policy_with_persistence(const StartupPolicyLoadConfig& config) {
+    StartupPolicyLoadResult res;
+
+    // Helper to load bootstrap policy
+    auto load_bootstrap = [&]() -> StartupPolicyLoadResult {
+        StartupPolicyLoadResult bootstrap_res;
+        if (config.bootstrap_policy_file.empty()) {
+            bootstrap_res.ok = false;
+            bootstrap_res.error = "Bootstrap policy file is not configured";
+            return bootstrap_res;
+        }
+
+        PolicyIrLoadResult load_res =
+            load_policy_ir_from_yaml_file(config.bootstrap_policy_file.c_str());
+        if (!load_res.ok) {
+            bootstrap_res.ok = false;
+            bootstrap_res.error = "Failed to load bootstrap policy file: " + load_res.error;
+            return bootstrap_res;
+        }
+
+        bootstrap_res.ok = true;
+        bootstrap_res.loaded_source = "bootstrap";
+        bootstrap_res.policy_identity = compute_policy_document_identity(load_res.policy);
+        bootstrap_res.generation = 1;
+        bootstrap_res.policy_ir = std::move(load_res.policy);
+        return bootstrap_res;
+    };
+
+    // 1. If persistence disabled, load bootstrap
+    if (!config.policy_persistence_enabled) {
+        return load_bootstrap();
+    }
+
+    // 2. If state directory is empty, load bootstrap
+    if (config.policy_state_dir.empty()) {
+        return load_bootstrap();
+    }
+
+    // 3. Load persisted active policy
+    LocalPolicyPersistenceConfig local_config;
+    local_config.enabled = true;
+    local_config.state_dir = config.policy_state_dir;
+    local_config.active_policy_filename = config.active_policy_filename;
+    local_config.metadata_filename = config.metadata_filename;
+
+    PolicyPersistenceLoadResult recovery = load_persisted_active_policy(local_config);
+    if (recovery.ok) {
+        res.ok = true;
+        res.loaded_source = "persisted";
+        res.policy_identity = recovery.metadata.policy_identity;
+        res.generation = recovery.metadata.generation;
+        res.policy_ir = std::move(recovery.document);
+        return res;
+    }
+
+    // If recovery failed, check if files were missing vs. corrupt
+    if (recovery.files_missing) {
+        // Safe, first-time bootstrap fallback
+        return load_bootstrap();
+    }
+
+    // Integrity check failed or file is corrupt / partially missing
+    if (config.fallback_to_bootstrap_on_persisted_policy_error) {
+        return load_bootstrap();
+    }
+
+    // Strict fail closed
+    res.ok = false;
+    res.error = "Persisted active policy file exists but is corrupt: " + recovery.error;
+    return res;
+}
+
+} // namespace bytetaper::taperquery

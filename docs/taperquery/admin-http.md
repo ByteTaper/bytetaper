@@ -222,3 +222,46 @@ To completely disable the admin interface:
 ```bash
 export BYTETAPER_ADMIN_ENABLED=0
 ```
+
+---
+
+## Restart Durability & Persistence
+
+To ensure that dynamically applied runtime policies are preserved across process or container restarts, active policy persistence is fully supported.
+
+### How It Works
+1. **Durability Before Visibility**: When you successfully execute a `POST /admin/taperquery/apply` request with `apply` mode, the service serializes the parsed policy to a canonical, space-trimmed YAML representation and writes it atomically to disk before swapping it in memory.
+2. **Atomic Writes**: Policies are written to a temporary staging file first, followed by a directory-level fsync and atomic `rename` operation. This prevents corruption in the event of partial disk/system crashes.
+3. **SHA-256 Digest Verification**: The written policy is protected by SHA-256 metadata digest validation. When the server starts up, it computes the SHA-256 digest of the persisted policy file and validates it against the expected hash in the active JSON metadata file before loading the policy IR into memory.
+4. **Crash Safety**:
+   - If no persisted policy files are found, the server starts up gracefully using the default bootstrap policy file (`--policy-file`).
+   - If persisted policy files are present but are corrupt, incomplete, or digest verification fails, the server rejects the load, prints a fatal error, and aborts startup immediately (returning exit code `1`) to prevent serving stale or undefined cache rules.
+
+### Local-Only Multi-Pod/VM Limitation
+
+> [!WARNING]
+> Active policy persistence is strictly **local-only** and bound to the host filesystem where the ByteTaper process runs.
+>
+> In multi-pod (Kubernetes) or multi-VM load-balanced environments, a `POST /admin/taperquery/apply` request only applies and persists the policy to the specific pod or VM that received the HTTP request.
+>
+> To ensure cluster-wide consistency across multiple instances:
+> 1. Use a centralized configuration manager or orchestrator to dispatch `POST /admin/taperquery/apply` requests to all running instances.
+> 2. Alternatively, mount a shared network volume (e.g., ReadWriteMany) to the state directory so that all pods share the same persisted policy, although individual instances will still need a hot-reload or restart signal to load updates if they do not receive the admin API request directly.
+
+### Environment Variable Configuration
+
+To enable restart durability, set the following environment variables:
+
+```bash
+# Enable active policy persistence
+export BYTETAPER_POLICY_PERSISTENCE_ENABLED=1
+
+# Directory where active-policy.yaml and active-policy.meta.json will be stored
+export BYTETAPER_POLICY_STATE_DIR="/workspace/bytetaper-state"
+```
+
+These environment variables can also be configured or overridden using command-line arguments:
+- `--policy-state-dir <path>` or `--admin-taperquery-state-dir <path>` (Sets the state directory)
+- `--disable-policy-persistence` (Explicitly disables persistence, taking highest precedence)
+- `--admin-taperquery-active-policy-file <filename>` (default: `active-policy.yaml`)
+- `--admin-taperquery-metadata-file <filename>` (default: `active-policy.meta.json`)

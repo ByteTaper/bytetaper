@@ -253,6 +253,43 @@ When an operator submits a candidate policy that compiles to an identical AST/IR
 
 ---
 
+## Active Policy Persistence & Recovery
+
+To ensure that dynamically applied TaperQL policies are preserved across process, container, or VM restarts, ByteTaper supports atomic, active policy persistence.
+
+### Configuration
+
+Persistence can be enabled and configured using either environment variables or command-line arguments:
+
+#### Environment Variables
+- `BYTETAPER_POLICY_PERSISTENCE_ENABLED=1`: Enables policy persistence (defaults to `1` in Docker Compose).
+- `BYTETAPER_POLICY_STATE_DIR="/path/to/state"`: Directory where `active-policy.yaml` and `active-policy.meta.json` will be stored.
+
+#### CLI Arguments
+- `--policy-state-dir <path>`: Specifies the state directory (takes precedence over environment variables).
+- `--disable-policy-persistence`: Explicitly disables persistence entirely (takes highest precedence).
+
+### Recovery & Startup Behaviors
+
+When the ByteTaper server starts up, it automatically performs the following recovery check:
+1. **Graceful Fallback**: If no persisted active policy or metadata files are found, the server starts up cleanly using the default bootstrap policy file (`--policy-file`).
+2. **Strict Integrity Check**: The persisted policy is validated using SHA-256 digest validation. If the files are corrupt, incomplete, or the computed hash does not match the value stored in the metadata JSON file, the server **rejects the load, prints a fatal error, and aborts startup immediately (returning exit code 1)**. This prevents serving stale or undefined routing/caching rules.
+
+### Local-Only Multi-Pod/VM Limitation
+
+> [!IMPORTANT]
+> **Active policy persistence is strictly local to the host filesystem.**
+>
+> In load-balanced, multi-instance settings (such as a Kubernetes Deployment with multiple pods or a VM scale set):
+> - A `POST /admin/taperquery/apply` request only applies and persists the policy to the **specific instance** that handled the HTTP request.
+> - Other instances will continue serving their previous policy state, leading to inconsistent behavior.
+>
+> **Recommended Production Patterns**:
+> 1. **Centralized Dispatch**: Use an external deployer, CI/CD pipeline, or admin control plane to dispatch the `POST /admin/taperquery/apply` request concurrently to **all** active instances.
+> 2. **Shared Volume Mount**: Mount a shared network storage volume (e.g., ReadWriteMany NFS) to the configured state directory so all instances read the same persisted policy on startup or restart.
+
+---
+
 ## Troubleshooting Commands
 
 ```bash

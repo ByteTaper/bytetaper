@@ -6,6 +6,8 @@
 #include "policy/yaml_loader.h"
 #include "taperquery/policy_ir_version.h"
 
+#include <yaml-cpp/yaml.h>
+
 namespace bytetaper::taperquery {
 
 TqRoutePolicy from_runtime_route_policy(const policy::RoutePolicy& route) {
@@ -137,6 +139,20 @@ PolicyIrLoadResult load_policy_ir_from_yaml_file(const char* path) {
     res.policy.schema_version = "yaml/v1";
     res.policy.version.policy_ir_version = kCurrentPolicyIrVersion;
     res.policy.version.identity_version = kCurrentPolicyIdentityVersion;
+
+    try {
+        YAML::Node root = YAML::LoadFile(path);
+        if (root["document_id"] && root["document_id"].IsScalar()) {
+            res.policy.document_id = root["document_id"].as<std::string>();
+        }
+        if (root["expected_base_sha"] && root["expected_base_sha"].IsScalar()) {
+            res.policy.expected_base_sha = root["expected_base_sha"].as<std::string>();
+        }
+    } catch (...) {
+        // Ignore parsing errors for non-existent or malformed root elements, fallback to empty
+        // defaults
+    }
+
     res.policy.routes.clear();
     for (std::size_t i = 0; i < file_res.count; ++i) {
         res.policy.routes.push_back(from_runtime_route_policy(file_res.policies[i]));

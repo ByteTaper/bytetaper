@@ -57,6 +57,8 @@ static std::string status_to_string(TqApplyStatus s) {
         return "RejectedNoChanges";
     case TqApplyStatus::RejectedSnapshotBuildFailed:
         return "RejectedSnapshotBuildFailed";
+    case TqApplyStatus::RejectedPersistenceFailed:
+        return "RejectedPersistenceFailed";
     case TqApplyStatus::InternalError:
         return "InternalError";
     }
@@ -131,7 +133,8 @@ TqApplyAuditRecord build_apply_audit_record(const TqApplyRequest& request,
                result.status == TqApplyStatus::RejectedRouteAnalysis ||
                result.status == TqApplyStatus::RejectedCasMismatch ||
                result.status == TqApplyStatus::RejectedNoChanges ||
-               result.status == TqApplyStatus::RejectedSnapshotBuildFailed) {
+               result.status == TqApplyStatus::RejectedSnapshotBuildFailed ||
+               result.status == TqApplyStatus::RejectedPersistenceFailed) {
         rec.outcome = TqApplyAuditOutcome::Rejected;
     } else {
         rec.outcome = TqApplyAuditOutcome::Failed;
@@ -378,7 +381,8 @@ bool should_record(const TqApplyResult& result, const TqApplyAuditStoreOptions& 
         result.status == TqApplyStatus::RejectedRouteAnalysis ||
         result.status == TqApplyStatus::RejectedCasMismatch ||
         result.status == TqApplyStatus::RejectedNoChanges ||
-        result.status == TqApplyStatus::RejectedSnapshotBuildFailed) {
+        result.status == TqApplyStatus::RejectedSnapshotBuildFailed ||
+        result.status == TqApplyStatus::RejectedPersistenceFailed) {
         return options.record_rejected_attempts;
     }
     return true; // record Failed and other unhandled scenarios

@@ -161,6 +161,7 @@ services:
     volumes:
       - ./:/workspace
       - bt-build:/workspace/build
+      - bt-policy-state:/var/lib/bytetaper/policy
     environment:
       - BYTETAPER_TRACE_ENABLED
       - BYTETAPER_TRACE_SCENARIO
@@ -182,12 +183,17 @@ services:
       - BYTETAPER_ADMIN_ENABLED
       - BYTETAPER_ADMIN_ADDRESS
       - BYTETAPER_ADMIN_PORT
+      - BYTETAPER_POLICY_PERSISTENCE_ENABLED=${BYTETAPER_POLICY_PERSISTENCE_ENABLED:-1}
+      - BYTETAPER_POLICY_STATE_DIR=${BYTETAPER_POLICY_STATE_DIR:-/var/lib/bytetaper/policy}
     command:
       - /bin/bash
       - -lc
       - |
         set -eu
         mkdir -p /tmp/bytetaper-cache
+        if [ -n "$${BYTETAPER_POLICY_STATE_DIR:-}" ]; then
+          mkdir -p "$${BYTETAPER_POLICY_STATE_DIR}"
+        fi
 
         ADMIN_ARGS=""
         if [ "$${BYTETAPER_ADMIN_ENABLED:-1}" = "1" ]; then
@@ -1135,3 +1141,4 @@ volumes:
   bt-build-asan: {}
   bt-build-ubsan: {}
   bt-ccache: {}
+  bt-policy-state: {}

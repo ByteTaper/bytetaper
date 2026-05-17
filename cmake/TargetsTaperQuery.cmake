@@ -15,6 +15,7 @@ add_library(bytetaper_taperquery STATIC
   src/taperquery/tq_diagnostic.cpp
   src/taperquery/tq_plan.cpp
   src/taperquery/tq_dry_run_reporter.cpp
+  src/taperquery/policy_ir_yaml_emitter.cpp
 )
 
 target_include_directories(bytetaper_taperquery PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -23,15 +24,20 @@ target_link_libraries(bytetaper_taperquery PUBLIC bytetaper_hash bytetaper_polic
 add_library(bytetaper_taperquery_apply STATIC
   src/taperquery/tq_apply_service.cpp
   src/taperquery/tq_apply_audit.cpp
+  src/taperquery/policy_persistence.cpp
 )
 target_include_directories(bytetaper_taperquery_apply PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(bytetaper_taperquery_apply PUBLIC
   bytetaper_taperquery
+  bytetaper_taperquery_loader
   bytetaper_runtime
 )
 
 add_library(bytetaper_taperquery_loader STATIC
   src/taperquery/policy_ir_from_yaml.cpp
+)
+set_source_files_properties(src/taperquery/policy_ir_from_yaml.cpp
+  PROPERTIES COMPILE_OPTIONS "-fexceptions"
 )
 target_include_directories(bytetaper_taperquery_loader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(bytetaper_taperquery_loader PUBLIC

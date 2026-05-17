@@ -2753,6 +2753,27 @@ if(BUILD_TESTING)
   target_link_libraries(tq_invalidation_ir_test PRIVATE gtest_main bytetaper_taperquery)
   add_test(NAME tq_invalidation_ir_test COMMAND tq_invalidation_ir_test)
 
+  add_executable(policy_ir_yaml_emitter_test
+    tests/policy_ir_yaml_emitter_test.cpp
+  )
+  target_include_directories(policy_ir_yaml_emitter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(policy_ir_yaml_emitter_test PRIVATE gtest_main bytetaper_taperquery bytetaper_taperquery_loader)
+  add_test(NAME policy_ir_yaml_emitter_test COMMAND policy_ir_yaml_emitter_test)
+
+  add_executable(taperquery_policy_persistence_test
+    tests/taperquery_policy_persistence_test.cpp
+  )
+  target_include_directories(taperquery_policy_persistence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(taperquery_policy_persistence_test PRIVATE gtest_main bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter)
+  add_test(NAME taperquery_policy_persistence_test COMMAND taperquery_policy_persistence_test)
+
+  add_executable(runtime_policy_startup_recovery_test
+    tests/runtime_policy_startup_recovery_test.cpp
+  )
+  target_include_directories(runtime_policy_startup_recovery_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(runtime_policy_startup_recovery_test PRIVATE gtest_main bytetaper_taperquery_apply bytetaper_taperquery_loader bytetaper_runtime)
+  add_test(NAME runtime_policy_startup_recovery_test COMMAND runtime_policy_startup_recovery_test)
+
   # Concurrency and Race Harness tests (BT-RACE-001)
   add_executable(inflight_registry_generation_concurrency_test
     tests/concurrency/inflight_registry_generation_concurrency_test.cpp
