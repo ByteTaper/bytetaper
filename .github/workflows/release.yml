@@ -92,6 +92,21 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Update Chart.yaml versions dynamically from tag
+        run: |
+          TAG="${BYTETAPER_VERSION}"
+          if [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            SEMVER="${TAG#v}"
+            echo "==> Dynamically updating Chart.yaml to version: ${SEMVER}, appVersion: ${TAG}"
+            sed -i "s/^version: .*/version: ${SEMVER}/" charts/bytetaper/Chart.yaml
+            sed -i "s/^appVersion: .*/appVersion: \"${TAG}\"/" charts/bytetaper/Chart.yaml
+
+            # Print updated lines for build visibility
+            grep -E "^(version|appVersion):" charts/bytetaper/Chart.yaml
+          else
+            echo "--> Dry-run or non-tag build (${TAG}). Keeping default static versions in Chart.yaml."
+          fi
+
       - name: Phase 1 — Verify release inputs
         run: tools/release/verify_release_inputs.sh
 
