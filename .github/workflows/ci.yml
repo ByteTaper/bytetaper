@@ -9,7 +9,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -41,7 +41,7 @@ jobs:
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-healthz-readyz-test
 
   sanitizer-fast:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: test
     strategy:
       fail-fast: false
@@ -61,7 +61,7 @@ jobs:
             docker compose run --rm bytetaper-${{ matrix.sanitizer }}-test
 
   sanitizer-tsan:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: test
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
@@ -78,7 +78,7 @@ jobs:
             docker compose run --rm bytetaper-tsan-test
 
   benchmark:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
@@ -113,7 +113,7 @@ jobs:
           retention-days: 30
 
   runtime-image:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: test
     steps:
       - name: Checkout code
@@ -136,6 +136,7 @@ jobs:
           echo "BYTETAPER_VERSION=${GITHUB_REF_NAME:-dev}" >> "$GITHUB_ENV"
           echo "BYTETAPER_GIT_SHA=${GITHUB_SHA:-unknown}" >> "$GITHUB_ENV"
           echo "BYTETAPER_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          echo "BYTETAPER_RUNTIME_OS_IMAGE=ubuntu:26.04" >> "$GITHUB_ENV"
 
       - name: Build production image with metadata
         run: |
@@ -144,6 +145,7 @@ jobs:
             --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
             --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
             --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
+            --build-arg BYTETAPER_RUNTIME_OS_IMAGE="${BYTETAPER_RUNTIME_OS_IMAGE}" \
             -t bytetaper-runtime:ci \
             .
 
@@ -167,6 +169,8 @@ jobs:
           echo "$LABELS" | jq -e '.["org.opencontainers.image.version"] == "'"${BYTETAPER_VERSION}"'"' > /dev/null
           echo "$LABELS" | jq -e '.["org.opencontainers.image.created"] == "'"${BYTETAPER_BUILD_DATE}"'"' > /dev/null
           echo "$LABELS" | jq -e '.["org.opencontainers.image.licenses"] == "AGPL-3.0-only OR LicenseRef-Commercial"' > /dev/null
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.base.name"] == "'"${BYTETAPER_RUNTIME_OS_IMAGE}"'"' > /dev/null
+          echo "$LABELS" | jq -e '.["io.bytetaper.os-image"] == "'"${BYTETAPER_RUNTIME_OS_IMAGE}"'"' > /dev/null
 
       - name: Verify non-root user
         run: |
@@ -236,7 +240,7 @@ jobs:
           retention-days: 30
 
   helm-chart:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
       - uses: azure/setup-helm@v4
@@ -282,7 +286,7 @@ jobs:
         run: helm template bytetaper charts/bytetaper --values charts/bytetaper/examples/network-policy-values.yaml
 
   infra-templates:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
 
@@ -320,7 +324,7 @@ jobs:
           terraform -chdir=terraform/examples/aks validate
 
   operator:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
 

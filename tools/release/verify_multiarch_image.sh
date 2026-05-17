@@ -42,6 +42,22 @@ else
   exit 1
 fi
 
+RUNTIME_OS_IMAGE="${BYTETAPER_RUNTIME_OS_IMAGE:-ubuntu:26.04}"
+
+echo "Checking manifest-list OS image annotations... "
+if echo "${INSPECT}" | grep -F -q "org.opencontainers.image.base.name: ${RUNTIME_OS_IMAGE}" &&
+   echo "${INSPECT}" | grep -F -q "io.bytetaper.os-image: ${RUNTIME_OS_IMAGE}"; then
+  echo "PASS"
+else
+  echo "FAIL"
+  echo "Expected manifest-list annotations:"
+  echo "  org.opencontainers.image.base.name: ${RUNTIME_OS_IMAGE}"
+  echo "  io.bytetaper.os-image: ${RUNTIME_OS_IMAGE}"
+  echo "Inspection output:"
+  echo "${INSPECT}"
+  exit 1
+fi
+
 DIGEST=$(printf "%s\n" "${INSPECT}" | awk '/^Digest:[[:space:]]*sha256:/ {print $2; exit}')
 if [[ ! "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
   echo "ERROR: Could not resolve a valid manifest-list digest from inspection."

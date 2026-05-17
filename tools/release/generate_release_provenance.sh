@@ -15,6 +15,7 @@ GITHUB_RUN_ID="${GITHUB_RUN_ID:-0}"
 GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-1}"
 GITHUB_ACTOR="${GITHUB_ACTOR:-unknown}"
 GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}"
+BYTETAPER_RUNTIME_OS_IMAGE="${BYTETAPER_RUNTIME_OS_IMAGE:-ubuntu:26.04}"
 
 DIGEST_FILE="dist/release/bytetaper-runtime-image-digest.txt"
 PROVENANCE_FILE="dist/release/bytetaper-provenance.json"
@@ -46,6 +47,7 @@ jq -n \
   --arg image_ref "${IMAGE_REF}" \
   --arg image_digest "${IMAGE_DIGEST}" \
   --arg image_digest_hex "${IMAGE_DIGEST_HEX}" \
+  --arg os_image "${BYTETAPER_RUNTIME_OS_IMAGE}" \
   --arg workflow "${GITHUB_WORKFLOW}" \
   --arg workflow_ref "${GITHUB_WORKFLOW_REF}" \
   --arg run_id "${GITHUB_RUN_ID}" \
@@ -65,6 +67,7 @@ jq -n \
         image: $image_name,
         image_reference: $image_ref,
         dockerfile: "docker/production.Dockerfile",
+        os_image: $os_image,
         platforms: ["linux/amd64", "linux/arm64"]
       },
       environment: {
@@ -75,7 +78,7 @@ jq -n \
         github_run_id: $run_id,
         github_run_attempt: $run_attempt,
         github_actor: $actor,
-        runner_image: "ubuntu-24.04"
+        runner_image: "ubuntu-26.04"
       }
     },
     metadata: {
@@ -95,6 +98,7 @@ jq -n \
       release_manifest: "bytetaper-release-manifest.json",
       sbom_artifacts: ["bytetaper-sbom.cdx.json", "bytetaper-sbom.spdx.json"],
       vulnerability_report_artifacts: ["bytetaper-vulnerability-report.json", "bytetaper-vulnerability-report.sarif"],
+      os_image: $os_image,
       image_digest: $image_digest
     }
   }' > "${PROVENANCE_FILE}"

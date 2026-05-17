@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -71,6 +71,7 @@ jobs:
           echo "BYTETAPER_VERSION=${VERSION}" >> $GITHUB_ENV
           echo "BYTETAPER_GIT_SHA=${GITHUB_SHA}" >> $GITHUB_ENV
           echo "BYTETAPER_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+          echo "BYTETAPER_RUNTIME_OS_IMAGE=ubuntu:26.04" >> $GITHUB_ENV
 
       - name: Enforce PR dry-run mode
         if: ${{ github.event_name == 'pull_request' }}
@@ -98,6 +99,7 @@ jobs:
             --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
             --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
             --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
+            --build-arg BYTETAPER_RUNTIME_OS_IMAGE="${BYTETAPER_RUNTIME_OS_IMAGE}" \
             -t bytetaper-runtime:release .
 
       - name: Phase 2 — Build and push multi-arch image
@@ -107,6 +109,9 @@ jobs:
             --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
             --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
             --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
+            --build-arg BYTETAPER_RUNTIME_OS_IMAGE="${BYTETAPER_RUNTIME_OS_IMAGE}" \
+            --annotation "index:org.opencontainers.image.base.name=${BYTETAPER_RUNTIME_OS_IMAGE}" \
+            --annotation "index:io.bytetaper.os-image=${BYTETAPER_RUNTIME_OS_IMAGE}" \
             -t ghcr.io/bytetaper/bytetaper-runtime:${BYTETAPER_VERSION} \
             -t ghcr.io/bytetaper/bytetaper-runtime:${BYTETAPER_VERSION#v} \
             -t ghcr.io/bytetaper/bytetaper-runtime:sha-${GITHUB_SHA:0:12} .
@@ -131,6 +136,8 @@ jobs:
           echo "$LABELS" | jq -e '.["org.opencontainers.image.version"] == "'"${BYTETAPER_VERSION}"'"' >/dev/null || (echo "ERROR: Version label mismatch" && exit 1)
           echo "$LABELS" | jq -e '.["org.opencontainers.image.created"] == "'"${BYTETAPER_BUILD_DATE}"'"' >/dev/null || (echo "ERROR: Created label mismatch" && exit 1)
           echo "$LABELS" | jq -e '.["org.opencontainers.image.licenses"] == "AGPL-3.0-only OR LicenseRef-Commercial"' >/dev/null || (echo "ERROR: Licenses label mismatch" && exit 1)
+          echo "$LABELS" | jq -e '.["org.opencontainers.image.base.name"] == "'"${BYTETAPER_RUNTIME_OS_IMAGE}"'"' >/dev/null || (echo "ERROR: Base image label mismatch" && exit 1)
+          echo "$LABELS" | jq -e '.["io.bytetaper.os-image"] == "'"${BYTETAPER_RUNTIME_OS_IMAGE}"'"' >/dev/null || (echo "ERROR: OS image label mismatch" && exit 1)
 
       - name: Pre-publish validation — Non-root user contract
         run: |
@@ -243,6 +250,7 @@ jobs:
 
           ### Container Contracts & References
           * **OCI Runtime Reference:** \`${DIGEST_REF}\`
+          * **OS Image:** \`${BYTETAPER_RUNTIME_OS_IMAGE}\`
           * **Supported Platforms:** \`linux/amd64\`, \`linux/arm64\`
           * **Helm Chart Package:** \`${CHART_PKG}\`
           * **Release Manifest:** \`bytetaper-release-manifest.json\`

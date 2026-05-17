@@ -12,6 +12,7 @@ if [[ -z "${BYTETAPER_VERSION:-}" || -z "${BYTETAPER_GIT_SHA:-}" || -z "${BYTETA
   echo "ERROR: BYTETAPER_VERSION, BYTETAPER_GIT_SHA, and BYTETAPER_BUILD_DATE environment variables are required."
   exit 1
 fi
+BYTETAPER_RUNTIME_OS_IMAGE="${BYTETAPER_RUNTIME_OS_IMAGE:-ubuntu:26.04}"
 
 DIGEST_FILE="dist/release/bytetaper-runtime-image-digest.txt"
 if [[ ! -f "${DIGEST_FILE}" ]]; then
@@ -41,6 +42,7 @@ cat <<EOF > dist/release/bytetaper-release-manifest.json
     "tag": "${IMG_TAG}",
     "digest": "${IMG_DIGEST}",
     "reference": "${IMG_REF}",
+    "os_image": "${BYTETAPER_RUNTIME_OS_IMAGE}",
     "platforms": ["linux/amd64", "linux/arm64"]
   },
   "helm_chart": {

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
 ARG ROCKSPACK_IMAGE=haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d-devel
+ARG BYTETAPER_RUNTIME_OS_IMAGE=ubuntu:26.04
 
 ARG BYTETAPER_VERSION=dev
 ARG BYTETAPER_GIT_SHA=unknown
@@ -54,11 +55,12 @@ RUN cmake -S . -B /tmp/build -G Ninja \
  && cmake --build /tmp/build --target bytetaper-extproc-server
 
 # --- Stage 2: Minimal Runtime Image ---
-FROM ubuntu:26.04 AS runtime
+FROM ${BYTETAPER_RUNTIME_OS_IMAGE} AS runtime
 
 ARG BYTETAPER_VERSION=dev
 ARG BYTETAPER_GIT_SHA=unknown
 ARG BYTETAPER_BUILD_DATE=unknown
+ARG BYTETAPER_RUNTIME_OS_IMAGE=ubuntu:26.04
 
 LABEL org.opencontainers.image.title="ByteTaper Runtime"
 LABEL org.opencontainers.image.description="ByteTaper API Performance Gateway runtime image"
@@ -67,6 +69,8 @@ LABEL org.opencontainers.image.revision="${BYTETAPER_GIT_SHA}"
 LABEL org.opencontainers.image.version="${BYTETAPER_VERSION}"
 LABEL org.opencontainers.image.created="${BYTETAPER_BUILD_DATE}"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-only OR LicenseRef-Commercial"
+LABEL org.opencontainers.image.base.name="${BYTETAPER_RUNTIME_OS_IMAGE}"
+LABEL io.bytetaper.os-image="${BYTETAPER_RUNTIME_OS_IMAGE}"
 
 ENV DEBIAN_FRONTEND=noninteractive
 

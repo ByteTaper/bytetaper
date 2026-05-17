@@ -16,6 +16,7 @@ ALLOWLIST="${BYTETAPER_CVE_ALLOWLIST:-tools/supply_chain/cve-allowlist.yaml}"
 VERSION="${BYTETAPER_VERSION:-dev}"
 GIT_SHA="${BYTETAPER_GIT_SHA:-unknown}"
 BUILD_DATE="${BYTETAPER_BUILD_DATE:-unknown}"
+RUNTIME_OS_IMAGE="${BYTETAPER_RUNTIME_OS_IMAGE:-ubuntu:26.04}"
 IGNORE_FILE="$OUT_DIR/.cveignore"
 VULN_JSON="$OUT_DIR/bytetaper-runtime-vulnerability-report.json"
 
@@ -62,6 +63,7 @@ cat <<EOF > "$OUT_DIR/bytetaper-supply-chain-manifest.json"
   "name": "bytetaper",
   "component": "bytetaper-runtime",
   "image": "$IMAGE",
+  "os_image": "$RUNTIME_OS_IMAGE",
   "version": "$VERSION",
   "git_sha": "$GIT_SHA",
   "build_date": "$BUILD_DATE",
