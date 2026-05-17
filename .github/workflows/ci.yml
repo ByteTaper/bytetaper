@@ -9,7 +9,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -41,7 +41,7 @@ jobs:
           LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run --rm bytetaper-healthz-readyz-test
 
   sanitizer-fast:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     needs: test
     strategy:
       fail-fast: false
@@ -61,7 +61,7 @@ jobs:
             docker compose run --rm bytetaper-${{ matrix.sanitizer }}-test
 
   sanitizer-tsan:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     needs: test
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
@@ -78,7 +78,7 @@ jobs:
             docker compose run --rm bytetaper-tsan-test
 
   benchmark:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
@@ -113,7 +113,7 @@ jobs:
           retention-days: 30
 
   runtime-image:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     needs: test
     steps:
       - name: Checkout code
@@ -240,7 +240,7 @@ jobs:
           retention-days: 30
 
   helm-chart:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: azure/setup-helm@v4
@@ -286,7 +286,7 @@ jobs:
         run: helm template bytetaper charts/bytetaper --values charts/bytetaper/examples/network-policy-values.yaml
 
   infra-templates:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
@@ -324,7 +324,7 @@ jobs:
           terraform -chdir=terraform/examples/aks validate
 
   operator:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
