@@ -371,7 +371,25 @@ static WorkerEvent worker_wait_for_event(WorkerQueue* q, std::size_t worker_id) 
     return WorkerEvent{ WorkerEventKind::Shutdown, 0 };
 }
 
+static bool shard_try_mark_processing(WorkerQueue* q, std::size_t worker_id, std::size_t shard_id) {
+    const std::size_t expected_owner = shard_id % q->worker_count;
+    if (expected_owner != worker_id) {
+        return false;
+    }
+    RuntimeShard& shard = q->shards[shard_id];
+    std::lock_guard<std::mutex> lock(shard.mu);
+    if (shard.state != RuntimeShardState::Queued) {
+        return false;
+    }
+    shard.state = RuntimeShardState::Processing;
+    return true;
+}
+
 static void process_ready_shard(WorkerQueue* q, std::size_t worker_id, std::size_t shard_id) {
+    if (!shard_try_mark_processing(q, worker_id, shard_id)) {
+        return;
+    }
+
     RuntimeShard& shard = q->shards[shard_id];
 
     std::size_t lookup_executed = 0;
@@ -543,10 +561,12 @@ static void shard_requeue_or_clear(WorkerQueue* q, std::size_t shard_idx) {
     {
         std::lock_guard<std::mutex> lock(shard.mu);
         if (shard_has_pending_work(shard)) {
-            shard.ready_enqueued = true;
-            should_requeue = true;
+            shard.state = RuntimeShardState::Queued;
+            if (q->running.load(std::memory_order_acquire)) {
+                should_requeue = true;
+            }
         } else {
-            shard.ready_enqueued = false;
+            shard.state = RuntimeShardState::Idle;
         }
     }
 
@@ -706,7 +726,7 @@ const char* worker_queue_init(WorkerQueue* q, const WorkerQueueConfig& config) {
             q->shards[i].body_pool.bodies[j] =
                 q->shards[i].body_pool.slab + (j * q->async_store_body_pool_slot_size);
         }
-        q->shards[i].ready_enqueued = false;
+        q->shards[i].state = RuntimeShardState::Idle;
     }
 
     return nullptr;
@@ -783,8 +803,8 @@ bool worker_queue_try_enqueue_lookup(WorkerQueue* q, const L2LookupJob& job) {
         shard.lookup_tail = (shard.lookup_tail + 1) % kRuntimeQueueSlotsPerShard;
         shard.lookup_count++;
 
-        if (!shard.ready_enqueued) {
-            shard.ready_enqueued = true;
+        if (shard.state == RuntimeShardState::Idle) {
+            shard.state = RuntimeShardState::Queued;
             should_push_ready = true;
         }
     }
@@ -874,8 +894,8 @@ bool worker_queue_try_enqueue_store(WorkerQueue* q, const L2StoreJob& job) {
         shard.store_tail = (shard.store_tail + 1) % kRuntimeQueueSlotsPerShard;
         shard.store_count++;
 
-        if (!shard.ready_enqueued) {
-            shard.ready_enqueued = true;
+        if (shard.state == RuntimeShardState::Idle) {
+            shard.state = RuntimeShardState::Queued;
             should_push_ready = true;
         }
     }
@@ -932,8 +952,8 @@ bool worker_queue_enqueue_l2_invalidate(WorkerQueue* q, const char* key, std::ui
         ::bytetaper::metrics::record_cache_event(
             q->resources.cache_metrics, bytetaper::metrics::CacheMetricEvent::L2RemoveEnqueued);
 
-        if (!shard.ready_enqueued) {
-            shard.ready_enqueued = true;
+        if (shard.state == RuntimeShardState::Idle) {
+            shard.state = RuntimeShardState::Queued;
             should_push_ready = true;
         }
     }
@@ -1061,6 +1081,9 @@ bool worker_drain_owned_once(WorkerQueue* q, std::size_t worker_id) {
                 break;
             }
         }
+
+        // Restore drained shard state to Idle or Queued
+        shard_requeue_or_clear(q, s_idx);
     }
     return worked;
 }
@@ -1079,6 +1102,21 @@ bool worker_test_run_one_event(WorkerQueue* q, std::size_t worker_id) {
         return true;
     }
     return false;
+}
+
+RuntimeShardState worker_queue_shard_state_for_test(WorkerQueue* q, std::size_t shard_idx) {
+    return q->shards[shard_idx].state;
+}
+
+void worker_queue_shard_set_state_for_test(WorkerQueue* q, std::size_t shard_idx,
+                                           RuntimeShardState state) {
+    std::lock_guard<std::mutex> lock(q->shards[shard_idx].mu);
+    q->shards[shard_idx].state = state;
+}
+
+bool worker_queue_shard_try_mark_processing_for_test(WorkerQueue* q, std::size_t worker_id,
+                                                     std::size_t shard_id) {
+    return shard_try_mark_processing(q, worker_id, shard_id);
 }
 
 } // namespace bytetaper::runtime

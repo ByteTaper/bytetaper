@@ -136,6 +136,12 @@ struct WorkerQueueResources {
     metrics::CacheMetrics* cache_metrics = nullptr;
 };
 
+enum class RuntimeShardState : std::uint8_t {
+    Idle,
+    Queued,
+    Processing,
+};
+
 // Represents a single sharded queue with its own lock and inline pending registry.
 // Each worker owns multiple shards based on its index.
 struct RuntimeShard {
@@ -168,7 +174,7 @@ struct RuntimeShard {
     // Shard-local store body pool.
     StoreBodyPool body_pool = {};
 
-    bool ready_enqueued = false;
+    RuntimeShardState state = RuntimeShardState::Idle;
 };
 
 // Fixed-capacity worker queue with sharding. Must not be copied or moved after init.
@@ -238,6 +244,12 @@ bool worker_drain_owned_once(WorkerQueue* q, std::size_t worker_id);
  * Process exactly one event for the given worker (non-blocking if queue is empty).
  */
 bool worker_test_run_one_event(WorkerQueue* q, std::size_t worker_id);
+
+RuntimeShardState worker_queue_shard_state_for_test(WorkerQueue* q, std::size_t shard_idx);
+void worker_queue_shard_set_state_for_test(WorkerQueue* q, std::size_t shard_idx,
+                                           RuntimeShardState state);
+bool worker_queue_shard_try_mark_processing_for_test(WorkerQueue* q, std::size_t worker_id,
+                                                     std::size_t shard_id);
 
 } // namespace bytetaper::runtime
 

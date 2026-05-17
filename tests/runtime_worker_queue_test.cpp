@@ -523,7 +523,10 @@ TEST_F(WorkerQueueTest, DeterministicWakeupOnNonPrimaryShard) {
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
     // Verify that the job was processed and shard 1 is empty
-    EXPECT_EQ(q_->shards[1].lookup_count, 0u);
+    {
+        std::lock_guard<std::mutex> lock(q_->shards[1].mu);
+        EXPECT_EQ(q_->shards[1].lookup_count, 0u);
+    }
 
     worker_queue_shutdown(q_.get());
 }
@@ -540,7 +543,7 @@ TEST_F(WorkerQueueTest, ReadyQueueInitialState) {
     }
 
     for (std::size_t s = 0; s < kRuntimeShardCount; ++s) {
-        EXPECT_FALSE(q_->shards[s].ready_enqueued);
+        EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), s), RuntimeShardState::Idle);
     }
 }
 
@@ -570,6 +573,7 @@ TEST_F(WorkerQueueTest, SingleReadyQueuePushPerShard) {
     // Expect that the ready queue for worker 0 has count == 1
     EXPECT_EQ(q_->worker_ready[0].count, 1u);
     EXPECT_EQ(q_->worker_ready[0].shard_ids[q_->worker_ready[0].head], shard_idx);
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
 
     // Second enqueue for another key that maps to the same shard
     L2StoreJob job2;
@@ -589,6 +593,7 @@ TEST_F(WorkerQueueTest, SingleReadyQueuePushPerShard) {
 
     // The ready queue should STILL have count == 1 (no duplicate push!)
     EXPECT_EQ(q_->worker_ready[0].count, 1u);
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
 }
 
 TEST_F(WorkerQueueTest, PrecedenceAndTypedPop) {
@@ -696,7 +701,7 @@ TEST_F(WorkerQueueTest, RequeueAndClearSemantics) {
 
     // Requeue since 1 job remains
     worker_queue_shard_requeue_or_clear_for_test(q_.get(), shard_idx);
-    EXPECT_TRUE(q_->shards[shard_idx].ready_enqueued);
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
     EXPECT_EQ(q_->worker_ready[0].count, 1u);
     EXPECT_EQ(q_->worker_ready[0].shard_ids[q_->worker_ready[0].head], shard_idx);
 
@@ -708,9 +713,9 @@ TEST_F(WorkerQueueTest, RequeueAndClearSemantics) {
     q_->worker_ready[0].tail = 0;
     q_->worker_ready[0].count = 0;
 
-    // Run requeue_or_clear (should clear ready_enqueued to false and NOT requeue)
+    // Run requeue_or_clear (should clear state to Idle and NOT requeue)
     worker_queue_shard_requeue_or_clear_for_test(q_.get(), shard_idx);
-    EXPECT_FALSE(q_->shards[shard_idx].ready_enqueued);
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Idle);
     EXPECT_EQ(q_->worker_ready[0].count, 0u);
 }
 
@@ -871,6 +876,7 @@ TEST_F(WorkerQueueTest, ShutdownDrainsPendingJobs) {
     // shutdown
     EXPECT_EQ(q_->shards[target_shard].lookup_count, 0u);
     EXPECT_EQ(q_->shards[target_shard].store_count, 0u);
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), target_shard), RuntimeShardState::Idle);
 }
 
 TEST_F(WorkerQueueTest, StateMachineProcessesReadyShard) {
@@ -1276,4 +1282,278 @@ TEST_F(WorkerQueueTest, DynamicAsyncStoreMaxBodySizeValidation) {
     oversized_job.body_len = oversized_body.size();
     EXPECT_FALSE(worker_queue_try_enqueue_store(q_.get(), oversized_job));
     EXPECT_EQ(metrics_.l2_async_store_oversized_skipped_total.load(), 1u);
+    EXPECT_FALSE(oversized_job.body_len == 0); // use oversized_job to avoid unused variable warning
+}
+
+TEST_F(WorkerQueueTest, ShardStateStartsIdle) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 2;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    for (std::size_t s = 0; s < kRuntimeShardCount; ++s) {
+        EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), s), RuntimeShardState::Idle);
+    }
+}
+
+TEST_F(WorkerQueueTest, EnqueueTransitionsIdleToQueued) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 2;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    L2LookupJob job;
+    std::strcpy(job.key, "key-a");
+    std::size_t shard_idx = expected_shard("key-a");
+    std::size_t owner = shard_idx % cfg.worker_count;
+
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Idle);
+    EXPECT_EQ(q_->worker_ready[owner].count, 0u);
+
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job));
+
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
+    EXPECT_EQ(q_->worker_ready[owner].count, 1u);
+}
+
+TEST_F(WorkerQueueTest, DuplicateEnqueueDoesNotDuplicateReadyEvent) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 2;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    std::size_t shard_idx = expected_shard("key-a");
+    std::size_t owner = shard_idx % cfg.worker_count;
+
+    L2LookupJob job1;
+    std::strcpy(job1.key, "key-a");
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job1));
+    EXPECT_EQ(q_->worker_ready[owner].count, 1u);
+
+    // Collision key for same shard
+    std::string key2;
+    for (int i = 0; i < 1000; ++i) {
+        std::string candidate = "key-collision-" + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            key2 = candidate;
+            break;
+        }
+    }
+    ASSERT_FALSE(key2.empty());
+    L2LookupJob job2;
+    std::strcpy(job2.key, key2.c_str());
+
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job2));
+    EXPECT_EQ(q_->worker_ready[owner].count, 1u);
+}
+
+TEST_F(WorkerQueueTest, WorkerPopTransitionsQueuedToProcessing) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    std::size_t shard_idx = 0;
+    L2LookupJob job;
+    std::string key0;
+    for (int i = 0; i < 1000; ++i) {
+        std::string candidate = "key-find-" + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            key0 = candidate;
+            break;
+        }
+    }
+    ASSERT_FALSE(key0.empty());
+    std::strcpy(job.key, key0.c_str());
+
+    // Enqueue -> state becomes Queued, pushed to ready queue
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job));
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
+
+    // 1. Verify Queued -> Processing transition succeeds
+    EXPECT_TRUE(worker_queue_shard_try_mark_processing_for_test(q_.get(), 0, shard_idx));
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx),
+              RuntimeShardState::Processing);
+
+    // 2. Verify subsequent transition attempt fails (already Processing)
+    EXPECT_FALSE(worker_queue_shard_try_mark_processing_for_test(q_.get(), 0, shard_idx));
+
+    // 3. Verify transition attempt on Idle shard fails
+    worker_queue_shard_set_state_for_test(q_.get(), shard_idx, RuntimeShardState::Idle);
+    EXPECT_FALSE(worker_queue_shard_try_mark_processing_for_test(q_.get(), 0, shard_idx));
+}
+
+TEST_F(WorkerQueueTest, WorkerPopRejectsInvalidState) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    std::size_t shard_idx = 0;
+    L2LookupJob job;
+    std::string key0;
+    for (int i = 0; i < 1000; ++i) {
+        std::string candidate = "key-find-" + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            key0 = candidate;
+            break;
+        }
+    }
+    ASSERT_FALSE(key0.empty());
+    std::strcpy(job.key, key0.c_str());
+
+    // Enqueue -> state becomes Queued, pushed to ready queue
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job));
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
+
+    // Manually set state back to Idle
+    worker_queue_shard_set_state_for_test(q_.get(), shard_idx, RuntimeShardState::Idle);
+
+    // Run one event -> pops the ready event, but rejects processing because state is not Queued!
+    // So the job remains in the queue!
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Idle);
+    EXPECT_EQ(q_->shards[shard_idx].lookup_count, 1u);
+}
+
+TEST_F(WorkerQueueTest, ProcessingShardWithRemainingWorkRequeues) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    cfg.lookup_lane_quota = 1; // set quota to 1
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    L2LookupJob job1;
+    std::strcpy(job1.key, "key-1");
+    std::size_t shard_idx = expected_shard("key-1");
+
+    // Collision key for same shard
+    std::string key2;
+    for (int i = 0; i < 1000; ++i) {
+        std::string candidate = "key-collision-" + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            key2 = candidate;
+            break;
+        }
+    }
+    ASSERT_FALSE(key2.empty());
+    L2LookupJob job2;
+    std::strcpy(job2.key, key2.c_str());
+
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job1));
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job2));
+
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
+    EXPECT_EQ(q_->worker_ready[0].count, 1u);
+
+    // Run one event -> will execute 1 lookup job, leaving 1 job.
+    // It should requeue: state remains Queued, ready queue count is still 1 (requeued)!
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
+    EXPECT_EQ(q_->worker_ready[0].count, 1u);
+}
+
+TEST_F(WorkerQueueTest, ProcessingShardWithoutRemainingWorkReturnsIdle) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    L2LookupJob job1;
+    std::strcpy(job1.key, "key-1");
+    std::size_t shard_idx = expected_shard("key-1");
+
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job1));
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
+    EXPECT_EQ(q_->worker_ready[0].count, 1u);
+
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 0));
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Idle);
+    EXPECT_EQ(q_->worker_ready[0].count, 0u);
+}
+
+TEST_F(WorkerQueueTest, EnqueueWhileProcessingDoesNotPushDuplicateReadyEvent) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 1;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    std::size_t shard_idx = 5;
+    // Set to Processing manually
+    worker_queue_shard_set_state_for_test(q_.get(), shard_idx, RuntimeShardState::Processing);
+
+    L2LookupJob job;
+    std::strcpy(job.key, "some-key"); // We need a key that maps to shard_idx!
+    std::string target_key;
+    for (int i = 0; i < 1000; ++i) {
+        std::string candidate = "key-find-" + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            target_key = candidate;
+            break;
+        }
+    }
+    ASSERT_FALSE(target_key.empty());
+    std::strcpy(job.key, target_key.c_str());
+
+    // Enqueue
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job));
+
+    // Should not push to ready queue because it's in Processing state
+    EXPECT_EQ(q_->worker_ready[0].count, 0u);
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx),
+              RuntimeShardState::Processing);
+
+    // Call requeue_or_clear_for_test -> sees work remains, transitions to Queued, pushes to ready
+    // queue
+    worker_queue_shard_requeue_or_clear_for_test(q_.get(), shard_idx);
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
+    EXPECT_EQ(q_->worker_ready[0].count, 1u);
+}
+
+TEST_F(WorkerQueueTest, WrongWorkerReadyEventIsRejected) {
+    WorkerQueueConfig cfg;
+    cfg.worker_count = 2;
+    ASSERT_EQ(worker_queue_init(q_.get(), cfg), nullptr);
+    q_->running = true;
+
+    // Shard 0 is owned by worker 0 (0 % 2 == 0)
+    std::size_t shard_idx = 0;
+
+    // Set shard state to Queued manually
+    worker_queue_shard_set_state_for_test(q_.get(), shard_idx, RuntimeShardState::Queued);
+
+    // Enqueue job into shard 0 manually so there is work
+    L2LookupJob job;
+    std::strcpy(job.key, "key-maps-to-shard-0"); // we can find one or just use one
+    std::string key0;
+    for (int i = 0; i < 1000; ++i) {
+        std::string candidate = "key-find-" + std::to_string(i);
+        if (expected_shard(candidate) == shard_idx) {
+            key0 = candidate;
+            break;
+        }
+    }
+    ASSERT_FALSE(key0.empty());
+    std::strcpy(job.key, key0.c_str());
+    EXPECT_TRUE(worker_queue_try_enqueue_lookup(q_.get(), job));
+
+    // Clear ready queue of worker 0 (since enqueue put it there)
+    q_->worker_ready[0].head = 0;
+    q_->worker_ready[0].tail = 0;
+    q_->worker_ready[0].count = 0;
+
+    // Manually push shard 0 into worker 1's ready queue
+    {
+        auto& rq1 = q_->worker_ready[1];
+        std::lock_guard<std::mutex> lock(rq1.mu);
+        rq1.shard_ids[rq1.tail] = shard_idx;
+        rq1.tail = (rq1.tail + 1) % kRuntimeShardCount;
+        rq1.count = 1;
+    }
+
+    // Run one event on worker 1
+    // It should pop the event but reject it because worker 1 does not own shard 0!
+    // The shard state should remain Queued (not transition to Processing or Idle), and job remains
+    // in shard
+    EXPECT_TRUE(worker_test_run_one_event(q_.get(), 1));
+    EXPECT_EQ(worker_queue_shard_state_for_test(q_.get(), shard_idx), RuntimeShardState::Queued);
+    EXPECT_EQ(q_->shards[shard_idx].lookup_count, 1u);
 }
