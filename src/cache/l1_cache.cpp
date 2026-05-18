@@ -7,6 +7,7 @@
 #include "hash/hash.h"
 #include "metrics/cache_metrics.h"
 
+#include <cstdio>
 #include <cstring>
 
 namespace bytetaper::cache {
@@ -292,6 +293,64 @@ L1RemoveResult l1_remove(L1Cache* cache, const char* key,
 
 bool l1_remove_key(L1Cache* cache, const char* key, bytetaper::metrics::CacheMetrics* metrics) {
     return l1_remove(cache, key, metrics) == L1RemoveResult::Removed;
+}
+
+L1RouteNamespaceCleanupResult
+l1_cleanup_route_namespace(L1Cache* cache, const L1RouteNamespaceCleanupRequest& request) {
+    if (cache == nullptr || request.route_id == nullptr) {
+        return { .ok = false, .removed_count = 0, .error = "null cache or route_id" };
+    }
+
+    char marker[512];
+    std::snprintf(marker, sizeof(marker), "|%s|epoch:%llu|", request.route_id,
+                  static_cast<unsigned long long>(request.old_epoch));
+
+    std::size_t removed = 0;
+
+    for (std::size_t s = 0; s < kL1ShardCount; ++s) {
+        L1CacheShard& shard = cache->shards[s];
+        std::scoped_lock lock(shard.mutex);
+
+        for (std::size_t i = 0; i < kL1SlotsPerShard; ++i) {
+            if (shard.generations[i] == 0) {
+                continue;
+            }
+            const char* key = shard.slots[i].key;
+
+            if (std::strstr(key, marker) == nullptr) {
+                continue;
+            }
+
+            if (request.old_policy_identity != nullptr && request.old_policy_identity[0] != '\0') {
+                const char* p = std::strstr(key, marker);
+                if (p == nullptr) {
+                    continue;
+                }
+                p += std::strlen(marker);
+                int pipes_found = 0;
+                while (*p != '\0' && pipes_found < 3) {
+                    if (*p == '|') {
+                        ++pipes_found;
+                    }
+                    ++p;
+                }
+                if (pipes_found < 3) {
+                    continue;
+                }
+                const char* next_pipe = std::strchr(p, '|');
+                std::size_t policy_len = (next_pipe != nullptr) ? (next_pipe - p) : std::strlen(p);
+                if (std::strlen(request.old_policy_identity) != policy_len ||
+                    std::strncmp(p, request.old_policy_identity, policy_len) != 0) {
+                    continue;
+                }
+            }
+
+            clear_slot(&shard, i);
+            ++removed;
+        }
+    }
+
+    return { .ok = true, .removed_count = removed, .error = "" };
 }
 
 } // namespace bytetaper::cache

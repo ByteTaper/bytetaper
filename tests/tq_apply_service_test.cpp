@@ -1261,4 +1261,285 @@ TEST_F(TqApplyServiceTest, TaperQueryApplyEnqueuesCleanupForRemovedRoute) {
     EXPECT_TRUE(found_cleanup);
 }
 
+TEST_F(TqApplyServiceTest, DryRunDoesNotMutateEpochOrClean) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+    runtime::route_cache_epoch_reset_for_tests(&epoch_store, "initial_route", 5);
+
+    auto l1_cache = std::make_unique<cache::L1Cache>();
+    cache::l1_init(l1_cache.get());
+
+    cache::CacheEntry e{};
+    std::strncpy(e.key, "GET|initial_route|epoch:5|/initial|||policy_v1", sizeof(e.key) - 1);
+    e.body = "body";
+    e.body_len = 4;
+    cache::l1_put(l1_cache.get(), e);
+
+    RouteCacheCleanupQueueImpl cleanup_queue;
+    cleanup_queue.start_worker();
+
+    TqApplyAuditStore audit_store{};
+    LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+
+    TqApplyService service(&store, nullptr, &audit_store, persistence_config, &epoch_store,
+                           &cleanup_queue, l1_cache.get());
+
+    // Execute in DryRun mode
+    TqApplyRequest req{};
+    req.source = "policy \"my-policy\" against sha \"\" { "
+                 "route \"initial_route\" when method get path prefix \"/initial\" { mutate "
+                 "full; cache store ttl 60s { l1 enabled capacity 1000 entries } } }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::DryRun;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_TRUE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::DryRunReady);
+
+    // Verify epoch was NOT bumped (remains 5)
+    std::uint64_t current_epoch = 0;
+    EXPECT_EQ(runtime::route_cache_epoch_get(&epoch_store, "initial_route", &current_epoch),
+              runtime::RouteCacheEpochResult::Ok);
+    EXPECT_EQ(current_epoch, 5);
+
+    // Verify L1 cache entry was NOT cleaned up
+    cache::CacheEntry out{};
+    char body_buf[128];
+    EXPECT_TRUE(cache::l1_get(l1_cache.get(), "GET|initial_route|epoch:5|/initial|||policy_v1", 0,
+                              &out, body_buf, sizeof(body_buf)));
+
+    // Verify L2 queue has 0 completed jobs
+    cleanup_queue.shutdown();
+    EXPECT_EQ(cleanup_queue.get_completed_jobs().size(), 0);
+}
+
+TEST_F(TqApplyServiceTest, FailedApplyDoesNotMutateEpochOrClean) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+    runtime::route_cache_epoch_reset_for_tests(&epoch_store, "initial_route", 5);
+
+    auto l1_cache = std::make_unique<cache::L1Cache>();
+    cache::l1_init(l1_cache.get());
+
+    cache::CacheEntry e{};
+    std::strncpy(e.key, "GET|initial_route|epoch:5|/initial|||policy_v1", sizeof(e.key) - 1);
+    e.body = "body";
+    e.body_len = 4;
+    cache::l1_put(l1_cache.get(), e);
+
+    RouteCacheCleanupQueueImpl cleanup_queue;
+    cleanup_queue.start_worker();
+
+    TqApplyAuditStore audit_store{};
+    LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+
+    TqApplyService service(&store, nullptr, &audit_store, persistence_config, &epoch_store,
+                           &cleanup_queue, l1_cache.get());
+
+    // Execute with wrong expected_base_identity (should fail CAS mismatch)
+    TqApplyRequest req{};
+    req.source = "policy \"my-policy\" against sha \"\" { "
+                 "route \"initial_route\" when method get path prefix \"/initial\" { mutate "
+                 "full; cache store ttl 60s { l1 enabled capacity 1000 entries } } }";
+    req.expected_base_identity = "wrong_sha";
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedCasMismatch);
+
+    // Verify epoch was NOT bumped (remains 5)
+    std::uint64_t current_epoch = 0;
+    EXPECT_EQ(runtime::route_cache_epoch_get(&epoch_store, "initial_route", &current_epoch),
+              runtime::RouteCacheEpochResult::Ok);
+    EXPECT_EQ(current_epoch, 5);
+
+    // Verify L1 cache entry was NOT cleaned up
+    cache::CacheEntry out{};
+    char body_buf[128];
+    EXPECT_TRUE(cache::l1_get(l1_cache.get(), "GET|initial_route|epoch:5|/initial|||policy_v1", 0,
+                              &out, body_buf, sizeof(body_buf)));
+
+    // Verify L2 queue has 0 completed jobs
+    cleanup_queue.shutdown();
+    EXPECT_EQ(cleanup_queue.get_completed_jobs().size(), 0);
+}
+
+TEST_F(TqApplyServiceTest, EpochBumpFailureAbortsSnapshotSwap) {
+    runtime::RouteCacheEpochStore epoch_store{};
+
+    // Fill the epoch store completely to trigger CapacityExceeded on any new registration
+    for (std::size_t i = 0; i < runtime::kMaxRouteCacheEpochEntries; ++i) {
+        std::string route_id = "route_" + std::to_string(i);
+        ASSERT_EQ(runtime::route_cache_epoch_register(&epoch_store, route_id.c_str()),
+                  runtime::RouteCacheEpochResult::Ok);
+    }
+
+    TqApplyAuditStore audit_store{};
+    LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+
+    TqApplyService service(&store, nullptr, &audit_store, persistence_config, &epoch_store);
+
+    std::string initial_identity_before = store.load()->policy_identity;
+
+    // Apply a policy that adds a new route ("new_route"), which will fail registration
+    TqApplyRequest req{};
+    req.source = "policy \"my-policy\" against sha \"" + initial_identity_before +
+                 "\" { "
+                 "route \"new_route\" when method get path prefix \"/new\" { mutate disabled } }";
+    req.expected_base_identity = initial_identity_before;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::InternalError);
+    EXPECT_NE(res.message.find("Failed to register added route: new_route"), std::string::npos);
+
+    // Verify the snapshot in the store was NOT swapped
+    EXPECT_EQ(store.load()->policy_identity, initial_identity_before);
+}
+
+class CasMismatchTriggerBuilder : public TqSnapshotBuilder {
+public:
+    CasMismatchTriggerBuilder(runtime::RuntimePolicyStore* store,
+                              const std::string& initial_identity)
+        : store_(store), initial_identity_(initial_identity) {}
+
+    runtime::RuntimePolicySnapshotBuildResult build_snapshot(const TqPolicyDocument& policy_ir,
+                                                             std::uint64_t generation) override {
+        // Trigger the concurrent snapshot update during the final build
+        if (generation > 1 && !triggered_) {
+            triggered_ = true;
+            TqPolicyDocument dummy_doc;
+            dummy_doc.document_id = "dummy";
+            dummy_doc.version.source_schema_version = "tq/v1";
+            auto dummy_res = runtime::build_runtime_policy_snapshot_from_ir(dummy_doc, generation);
+            if (dummy_res.ok) {
+                std::string err;
+                // Swapping snapshot concurrently so the apply service's CAS swap fails
+                store_->swap_if_current(initial_identity_, dummy_res.snapshot, &err);
+            }
+        }
+        return runtime::build_runtime_policy_snapshot_from_ir(policy_ir, generation);
+    }
+
+private:
+    runtime::RuntimePolicyStore* store_;
+    std::string initial_identity_;
+    bool triggered_ = false;
+};
+
+TEST_F(TqApplyServiceTest, SwapFailureRollsBackEpochStore) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+    runtime::route_cache_epoch_reset_for_tests(&epoch_store, "initial_route", 5);
+
+    TqApplyAuditStore audit_store{};
+    LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+
+    // Use our custom builder that triggers a CAS mismatch failure
+    CasMismatchTriggerBuilder builder(&store, initial_identity);
+    TqApplyService service(&store, &builder, &audit_store, persistence_config, &epoch_store);
+
+    TqApplyRequest req{};
+    req.source = "policy \"my-policy\" against sha \"" + initial_identity +
+                 "\" { "
+                 "route \"initial_route\" when method get path prefix \"/initial\" { mutate "
+                 "full; cache store ttl 60s { l1 enabled capacity 1000 entries } } }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedCasMismatch);
+
+    // Verify epoch was rolled back to 5 due to CAS swap failure
+    std::uint64_t current_epoch = 0;
+    EXPECT_EQ(runtime::route_cache_epoch_get(&epoch_store, "initial_route", &current_epoch),
+              runtime::RouteCacheEpochResult::Ok);
+    EXPECT_EQ(current_epoch, 5);
+}
+
+TEST_F(TqApplyServiceTest, DryRunReportsWouldCleanup) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+    runtime::route_cache_epoch_reset_for_tests(&epoch_store, "initial_route", 5);
+
+    TqApplyAuditStore audit_store{};
+    LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+
+    TqApplyService service(&store, nullptr, &audit_store, persistence_config, &epoch_store);
+
+    TqApplyRequest req{};
+    req.source = "policy \"my-policy\" against sha \"" + initial_identity +
+                 "\" { "
+                 "route \"initial_route\" when method get path prefix \"/initial\" { mutate "
+                 "full; cache store ttl 60s { l1 enabled capacity 1000 entries } } }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::DryRun;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_TRUE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::DryRunReady);
+
+    // Verify dry-run reports would_cleanup_l1 and would_cleanup_l2
+    bool found = false;
+    for (const auto& ch : res.cache_namespace_versioning.changed_routes) {
+        if (ch.route_id == "initial_route") {
+            found = true;
+            EXPECT_TRUE(ch.epoch_bump_required);
+            EXPECT_TRUE(ch.would_cleanup_l1);
+            EXPECT_TRUE(ch.would_cleanup_l2);
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(TqApplyServiceTest, SwapFailureRollsBackAddedRoutes) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+    runtime::route_cache_epoch_reset_for_tests(&epoch_store, "initial_route", 5);
+
+    TqApplyAuditStore audit_store{};
+    LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+
+    // Use our custom builder that triggers a CAS mismatch failure
+    CasMismatchTriggerBuilder builder(&store, initial_identity);
+    TqApplyService service(&store, &builder, &audit_store, persistence_config, &epoch_store);
+
+    TqApplyRequest req{};
+    req.source =
+        "policy \"my-policy\" against sha \"" + initial_identity +
+        "\" { "
+        "route \"initial_route\" when method get path prefix \"/initial\" { mutate disabled } "
+        "route \"added_route\" when method get path prefix \"/added\" { mutate disabled } }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    // Initially, there's only 1 registered route in epoch_store
+    EXPECT_EQ(epoch_store.count, 1u);
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedCasMismatch);
+
+    // Verify "added_route" was completely unregistered and epoch_store reverted back to count 1
+    EXPECT_EQ(epoch_store.count, 1u);
+    std::uint64_t current_epoch = 0;
+    EXPECT_EQ(runtime::route_cache_epoch_get(&epoch_store, "added_route", &current_epoch),
+              runtime::RouteCacheEpochResult::NotFound);
+}
+
 } // namespace bytetaper::taperquery

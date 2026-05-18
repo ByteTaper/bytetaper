@@ -43,6 +43,13 @@ RouteCacheEpochResult route_cache_epoch_get(const RouteCacheEpochStore* store, c
 RouteCacheEpochResult route_cache_epoch_bump(RouteCacheEpochStore* store, const char* route_id,
                                              std::uint64_t* out_new_epoch);
 
+// Set route epoch (used for transactional rollback on failed commits)
+RouteCacheEpochResult route_cache_epoch_set(RouteCacheEpochStore* store, const char* route_id,
+                                            std::uint64_t epoch);
+
+// Remove/unregister a route from the store (used for transactional rollback of added routes)
+RouteCacheEpochResult route_cache_epoch_remove(RouteCacheEpochStore* store, const char* route_id);
+
 // Test-only reset
 RouteCacheEpochResult route_cache_epoch_reset_for_tests(RouteCacheEpochStore* store,
                                                         const char* route_id, std::uint64_t epoch);

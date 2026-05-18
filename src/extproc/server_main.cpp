@@ -520,14 +520,15 @@ int main(int argc, char** argv) {
 
     auto route_cache_epoch_store = std::make_unique<bytetaper::runtime::RouteCacheEpochStore>();
     auto route_cache_cleanup_queue =
-        std::make_unique<bytetaper::taperquery::RouteCacheCleanupQueueImpl>();
+        std::make_unique<bytetaper::taperquery::RouteCacheCleanupQueueImpl>(
+            l2_cache, &metrics_registry.cache_metrics);
     route_cache_cleanup_queue->start_worker();
 
     if (args.admin_enable_taperquery) {
         audit_store = std::make_unique<bytetaper::taperquery::TqApplyAuditStore>();
         apply_service = std::make_unique<bytetaper::taperquery::TqApplyService>(
             policy_store.get(), nullptr, audit_store.get(), persistence_config,
-            route_cache_epoch_store.get(), route_cache_cleanup_queue.get());
+            route_cache_epoch_store.get(), route_cache_cleanup_queue.get(), l1_cache.get());
         bytetaper::admin::TaperQueryAdminHttpServerConfig admin_config{};
         admin_config.listen_address = args.admin_address;
         admin_config.port = args.admin_port;

@@ -87,6 +87,7 @@ struct TqApplyResult {
     std::vector<TqApplyDiagnostic> diagnostics;
 
     TqCacheNamespaceVersioningResult cache_namespace_versioning;
+    TqCacheNamespaceApplyResult cache_namespace_apply_result;
 
     std::vector<std::string> enqueued_cleanups;
 
@@ -109,7 +110,8 @@ public:
                             TqApplyAuditStore* audit_store = nullptr,
                             LocalPolicyPersistenceConfig persistence_config = {},
                             runtime::RouteCacheEpochStore* epoch_store = nullptr,
-                            RouteCacheCleanupQueue* cleanup_queue = nullptr);
+                            RouteCacheCleanupQueue* cleanup_queue = nullptr,
+                            cache::L1Cache* l1_cache = nullptr);
 
     TqApplyResult execute(const TqApplyRequest& request);
 
@@ -121,6 +123,7 @@ private:
     TqApplyAuditStore* audit_store_ = nullptr;
     LocalPolicyPersistenceConfig persistence_config_;
     runtime::RouteCacheEpochStore* epoch_store_ = nullptr;
+    cache::L1Cache* l1_cache_ = nullptr;
     RouteCacheCleanupQueue* cleanup_queue_ = nullptr;
 };
 

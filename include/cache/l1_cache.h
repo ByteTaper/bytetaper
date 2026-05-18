@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <string>
 
 namespace bytetaper::cache {
 
@@ -76,6 +77,22 @@ bool l1_remove_key(L1Cache* cache, const char* key,
 
 // Returns true only if entry is safe to store in L1 (body present and within capacity).
 bool l1_can_store_entry(const CacheEntry& entry);
+
+struct L1RouteNamespaceCleanupRequest {
+    const char* route_id = nullptr;
+    std::uint64_t old_epoch = 0;
+    const char* old_policy_identity = nullptr; // nullptr = match any
+    bool include_variant_entries = true;
+};
+
+struct L1RouteNamespaceCleanupResult {
+    bool ok = false;
+    std::size_t removed_count = 0;
+    std::string error;
+};
+
+L1RouteNamespaceCleanupResult
+l1_cleanup_route_namespace(L1Cache* cache, const L1RouteNamespaceCleanupRequest& request);
 
 } // namespace bytetaper::cache
 

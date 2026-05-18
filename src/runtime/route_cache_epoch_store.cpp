@@ -76,6 +76,53 @@ RouteCacheEpochResult route_cache_epoch_bump(RouteCacheEpochStore* store, const 
     return RouteCacheEpochResult::NotFound;
 }
 
+RouteCacheEpochResult route_cache_epoch_set(RouteCacheEpochStore* store, const char* route_id,
+                                            std::uint64_t epoch) {
+    if (store == nullptr || route_id == nullptr) {
+        return RouteCacheEpochResult::InvalidArgument;
+    }
+
+    std::scoped_lock lock(store->mutex);
+
+    for (std::size_t i = 0; i < store->count; ++i) {
+        if (std::strcmp(store->entries[i].route_id, route_id) == 0) {
+            store->entries[i].epoch.store(epoch, std::memory_order_relaxed);
+            return RouteCacheEpochResult::Ok;
+        }
+    }
+
+    return RouteCacheEpochResult::NotFound;
+}
+
+RouteCacheEpochResult route_cache_epoch_remove(RouteCacheEpochStore* store, const char* route_id) {
+    if (store == nullptr || route_id == nullptr) {
+        return RouteCacheEpochResult::InvalidArgument;
+    }
+
+    std::scoped_lock lock(store->mutex);
+
+    for (std::size_t i = 0; i < store->count; ++i) {
+        if (std::strcmp(store->entries[i].route_id, route_id) == 0) {
+            // Shift subsequent elements left to compact the array safely
+            for (std::size_t j = i; j < store->count - 1; ++j) {
+                std::strncpy(store->entries[j].route_id, store->entries[j + 1].route_id,
+                             sizeof(store->entries[j].route_id) - 1);
+                store->entries[j].route_id[sizeof(store->entries[j].route_id) - 1] = '\0';
+                store->entries[j].epoch.store(
+                    store->entries[j + 1].epoch.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed);
+            }
+            // Clear the now unused last entry
+            store->entries[store->count - 1].route_id[0] = '\0';
+            store->entries[store->count - 1].epoch.store(0, std::memory_order_relaxed);
+            store->count--;
+            return RouteCacheEpochResult::Ok;
+        }
+    }
+
+    return RouteCacheEpochResult::NotFound;
+}
+
 RouteCacheEpochResult route_cache_epoch_reset_for_tests(RouteCacheEpochStore* store,
                                                         const char* route_id, std::uint64_t epoch) {
     if (store == nullptr || route_id == nullptr) {

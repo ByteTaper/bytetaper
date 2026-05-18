@@ -47,10 +47,10 @@ TqApplyService::TqApplyService(runtime::RuntimePolicyStore* policy_store,
                                TqSnapshotBuilder* builder, TqApplyAuditStore* audit_store,
                                LocalPolicyPersistenceConfig persistence_config,
                                runtime::RouteCacheEpochStore* epoch_store,
-                               RouteCacheCleanupQueue* cleanup_queue)
+                               RouteCacheCleanupQueue* cleanup_queue, cache::L1Cache* l1_cache)
     : policy_store_(policy_store), builder_(builder ? builder : &g_default_builder),
       audit_store_(audit_store), persistence_config_(std::move(persistence_config)),
-      epoch_store_(epoch_store), cleanup_queue_(cleanup_queue) {}
+      epoch_store_(epoch_store), l1_cache_(l1_cache), cleanup_queue_(cleanup_queue) {}
 
 TqApplyResult TqApplyService::execute(const TqApplyRequest& request) {
     TqApplyResult result = execute_impl(request);
@@ -419,14 +419,32 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
         }
     }
 
-    // Step 13.5 - Bump route epochs for affected routes in the epoch store (if configured)
+    // Step 13.5 - Dry-run detect cache namespace impacts before swap (no mutation or cleanups)
     if (epoch_store_ != nullptr) {
-        auto ns_res = version_cache_namespace_for_apply_plan(result.plan, epoch_store_);
-        result.cache_namespace_versioning = ns_res;
+        auto ns_detect = detect_cache_namespace_impacts(result.plan, epoch_store_);
+        result.cache_namespace_versioning = ns_detect;
+        if (!ns_detect.ok) {
+            result.ok = false;
+            result.status = TqApplyStatus::InternalError;
+            result.message = "cache namespace versioning failed: " + ns_detect.error;
+
+            TqApplyDiagnostic diag;
+            diag.severity = "error";
+            diag.code = "INTERNAL_ERROR";
+            diag.reason = ns_detect.error;
+            result.diagnostics.push_back(diag);
+            return result;
+        }
+    }
+
+    // Step 13.7 - Version/bump epochs in the RouteCacheEpochStore BEFORE swap
+    TqCacheNamespaceApplyResult ns_res;
+    if (epoch_store_ != nullptr) {
+        ns_res = version_epochs_for_apply(result.plan, epoch_store_);
         if (!ns_res.ok) {
             result.ok = false;
             result.status = TqApplyStatus::InternalError;
-            result.message = "cache namespace versioning failed: " + ns_res.error;
+            result.message = "cache namespace epoch versioning failed: " + ns_res.error;
 
             TqApplyDiagnostic diag;
             diag.severity = "error";
@@ -441,6 +459,17 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
     std::string swap_err;
     if (!policy_store_->swap_if_current(current_snapshot->policy_identity, final_build_res.snapshot,
                                         &swap_err)) {
+        // Rollback any mutated epochs in epoch_store_ to enforce "failed applies must not bump"
+        if (epoch_store_ != nullptr) {
+            for (const auto& r : ns_res.routes) {
+                if (r.old_epoch == 0) {
+                    runtime::route_cache_epoch_remove(epoch_store_, r.route_id.c_str());
+                } else {
+                    runtime::route_cache_epoch_set(epoch_store_, r.route_id.c_str(), r.old_epoch);
+                }
+            }
+        }
+
         if (swap_err.find("CAS mismatch") != std::string::npos) {
             result.ok = false;
             result.status = TqApplyStatus::RejectedCasMismatch;
@@ -467,28 +496,54 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
         return result;
     }
 
-    // Async cleanup: log and enqueue old namespace cleanups for maximum visibility
-    for (const auto& ch : result.cache_namespace_versioning.changed_routes) {
-        bool is_removed = !ch.before_route_identity.empty() && ch.after_route_identity.empty();
-        if (ch.before_epoch != 0 && (ch.before_epoch != ch.after_epoch || is_removed)) {
+    // Step 14.5 - Swap succeeded! Safe to perform actual L1 and L2 cleanups
+    if (epoch_store_ != nullptr) {
+        auto cleanup_res = cleanup_cache_namespaces_for_apply(ns_res, l1_cache_, cleanup_queue_);
+        result.cache_namespace_apply_result = cleanup_res;
+
+        // Repopulate for backward compatibility / exact verification
+        result.cache_namespace_versioning.ok = cleanup_res.ok;
+        result.cache_namespace_versioning.error = cleanup_res.error;
+        result.cache_namespace_versioning.changed_routes.clear();
+        for (const auto& r : cleanup_res.routes) {
+            TqRouteCacheNamespaceChange ch;
+            ch.route_id = r.route_id;
+            ch.before_route_identity = r.before_route_identity;
+            ch.after_route_identity = r.after_route_identity;
+            ch.epoch_bump_required = r.l1_cleanup_required || r.l2_cleanup_required;
+            ch.would_cleanup_l1 = r.l1_cleanup_required;
+            ch.would_cleanup_l2 = r.l2_cleanup_required;
+            ch.before_epoch = r.old_epoch;
+            ch.after_epoch = r.new_epoch;
+            ch.reasons = r.reasons;
+            result.cache_namespace_versioning.changed_routes.push_back(ch);
+        }
+
+        if (!cleanup_res.ok) {
+            result.ok = false;
+            result.status = TqApplyStatus::InternalError;
+            result.message = "cache namespace cleanup post-commit failed: " + cleanup_res.error;
+
+            TqApplyDiagnostic diag;
+            diag.severity = "error";
+            diag.code = "INTERNAL_ERROR";
+            diag.reason = cleanup_res.error;
+            result.diagnostics.push_back(diag);
+            return result;
+        }
+    }
+
+    // Async cleanup: log and populate enqueued cleanups for maximum visibility
+    for (const auto& r : result.cache_namespace_apply_result.routes) {
+        if (r.l2_cleanup_required && r.old_epoch != 0) {
             std::string cleanup_job =
-                "route:" + ch.route_id + ":epoch:" + std::to_string(ch.before_epoch);
+                "route:" + r.route_id + ":epoch:" + std::to_string(r.old_epoch);
             result.enqueued_cleanups.push_back(cleanup_job);
 
             std::fprintf(stdout,
                          "[RouteCacheCleanup] Enqueued async RouteCacheCleanupJob for route '%s' "
-                         "(clearing old epoch namespace: %lu)\n",
-                         ch.route_id.c_str(), static_cast<unsigned long>(ch.before_epoch));
-
-            if (cleanup_queue_ != nullptr) {
-                RouteCacheCleanupJob job;
-                job.route_id = ch.route_id;
-                job.old_epoch = ch.before_epoch;
-                job.new_epoch = ch.after_epoch;
-                job.before_policy_identity = ch.before_route_identity;
-                job.after_policy_identity = ch.after_route_identity;
-                cleanup_queue_->enqueue(job);
-            }
+                         "(clearing old epoch namespace: %llu)\n",
+                         r.route_id.c_str(), static_cast<unsigned long long>(r.old_epoch));
         }
     }
 

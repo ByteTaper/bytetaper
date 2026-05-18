@@ -10,9 +10,19 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
+
+namespace bytetaper::cache {
+struct L1Cache;
+struct L2DiskCache;
+} // namespace bytetaper::cache
+
+namespace bytetaper::metrics {
+struct CacheMetrics;
+}
 
 namespace bytetaper::taperquery {
 
@@ -26,6 +36,8 @@ struct TqRouteCacheNamespaceChange {
     std::string before_route_identity;
     std::string after_route_identity;
     bool epoch_bump_required = false;
+    bool would_cleanup_l1 = false;
+    bool would_cleanup_l2 = false;
     std::uint64_t before_epoch = 0;
     std::uint64_t after_epoch = 0;
     std::vector<std::string> reasons; // e.g. "FieldFilteringBehavior"
@@ -56,7 +68,8 @@ public:
 // Durable, thread-safe production-grade asynchronous cleanup queue implementation
 class RouteCacheCleanupQueueImpl : public RouteCacheCleanupQueue {
 public:
-    RouteCacheCleanupQueueImpl() = default;
+    explicit RouteCacheCleanupQueueImpl(cache::L2DiskCache* l2_cache = nullptr,
+                                        metrics::CacheMetrics* metrics = nullptr);
     ~RouteCacheCleanupQueueImpl() override {
         shutdown();
     }
@@ -101,32 +114,27 @@ public:
     }
 
 private:
+    std::optional<RouteCacheCleanupJob> try_dequeue() {
+        std::unique_lock<std::mutex> lock(mu_);
+        cv_.wait(lock, [this]() { return !jobs_.empty() || shutdown_; });
+        if (shutdown_ && jobs_.empty())
+            return std::nullopt;
+        auto job = std::move(jobs_.front());
+        jobs_.erase(jobs_.begin());
+        return job;
+    }
+
     void worker_loop() {
-        while (true) {
-            RouteCacheCleanupJob job;
-            {
-                std::unique_lock<std::mutex> lock(mu_);
-                cv_.wait(lock, [this]() { return !jobs_.empty() || shutdown_; });
-                if (shutdown_ && jobs_.empty()) {
-                    return;
-                }
-                job = std::move(jobs_.front());
-                jobs_.erase(jobs_.begin());
-            }
-
-            // Perform physical cleanup logging & trace
-            std::fprintf(stdout,
-                         "[RouteCacheCleanup] Asynchronously clearing old epoch namespace %lu for "
-                         "route '%s'\n",
-                         job.old_epoch, job.route_id.c_str());
-            std::fflush(stdout);
-
+        while (auto job = try_dequeue()) {
+            execute_cleanup(*job);
             {
                 std::lock_guard<std::mutex> lock(mu_);
-                completed_jobs_.push_back(job);
+                completed_jobs_.push_back(*job);
             }
         }
     }
+
+    void execute_cleanup(const RouteCacheCleanupJob& job);
 
     std::mutex mu_;
     std::condition_variable cv_;
@@ -134,6 +142,32 @@ private:
     std::vector<RouteCacheCleanupJob> completed_jobs_;
     std::thread worker_thread_;
     bool shutdown_ = false;
+
+    cache::L2DiskCache* l2_cache_ = nullptr;
+    metrics::CacheMetrics* metrics_ = nullptr;
+};
+
+// Unified cleanup plan and results types
+struct TqRouteCacheCleanupPlan {
+    std::string route_id;
+    std::uint64_t old_epoch = 0;
+    std::uint64_t new_epoch = 0;
+    std::string before_route_identity;
+    std::string after_route_identity;
+    bool l1_cleanup_required = false;
+    bool l2_cleanup_required = false;
+    bool variant_cleanup_required = false;
+    std::vector<std::string> reasons;
+    // Filled in after execution:
+    std::size_t l1_removed_count = 0;
+    bool l2_cleanup_enqueued = false;
+    std::vector<std::string> warnings;
+};
+
+struct TqCacheNamespaceApplyResult {
+    bool ok = false;
+    std::vector<TqRouteCacheCleanupPlan> routes;
+    std::string error;
 };
 
 // Detect affected routes from plan and bump their epochs.
@@ -145,6 +179,21 @@ version_cache_namespace_for_apply_plan(const TqApplyPlan& plan,
 // Detect only — no bump. Used by dry-run.
 TqCacheNamespaceVersioningResult
 detect_cache_namespace_impacts(const TqApplyPlan& plan, runtime::RouteCacheEpochStore* epoch_store);
+
+// Unified function doing both epoch bump, synchronous L1 cleanup and async L2 enqueuing
+TqCacheNamespaceApplyResult version_and_cleanup_cache_namespaces_for_apply(
+    const TqApplyPlan& plan, runtime::RouteCacheEpochStore* epoch_store, cache::L1Cache* l1_cache,
+    RouteCacheCleanupQueue* l2_cleanup_queue);
+
+// Decoupled epoch bump/register stage (to be run BEFORE active policy snapshot swap)
+TqCacheNamespaceApplyResult version_epochs_for_apply(const TqApplyPlan& plan,
+                                                     runtime::RouteCacheEpochStore* epoch_store);
+
+// Decoupled cleanup stage (to be run AFTER successful active policy snapshot swap)
+TqCacheNamespaceApplyResult
+cleanup_cache_namespaces_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
+                                   cache::L1Cache* l1_cache,
+                                   RouteCacheCleanupQueue* l2_cleanup_queue);
 
 } // namespace bytetaper::taperquery
 
