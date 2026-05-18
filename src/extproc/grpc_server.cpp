@@ -469,7 +469,8 @@ public:
     cache::L2DiskCache* l2_cache = nullptr;
     metrics::MetricsRegistry* metrics_registry = nullptr;
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
-    runtime::RouteCacheEpochStore route_cache_epoch_store{};
+    runtime::RouteCacheEpochStore* route_cache_epoch_store = nullptr;
+    std::unique_ptr<runtime::RouteCacheEpochStore> owned_route_cache_epoch_store;
     std::unique_ptr<runtime::WorkerQueue> worker_queue;
 
     grpc::Status Process(grpc::ServerContext*,
@@ -604,7 +605,7 @@ public:
                         filter_state.context.runtime_metrics = &metrics_registry->runtime_metrics;
                     }
                     filter_state.context.worker_queue = worker_queue.get();
-                    filter_state.context.route_cache_epoch_store = &route_cache_epoch_store;
+                    filter_state.context.route_cache_epoch_store = route_cache_epoch_store;
 
                     observability::TraceSpanScope cache_lookup_span{};
                     if (trace_enabled) {
@@ -1178,14 +1179,22 @@ bool start_grpc_server(const GrpcServerConfig& config, GrpcServerHandle* handle)
     impl->service.metrics_registry = config.metrics_registry;
     impl->service.coalescing_registry = config.coalescing_registry;
 
+    if (config.route_cache_epoch_store != nullptr) {
+        impl->service.route_cache_epoch_store = config.route_cache_epoch_store;
+    } else {
+        impl->service.owned_route_cache_epoch_store =
+            std::make_unique<runtime::RouteCacheEpochStore>();
+        impl->service.route_cache_epoch_store = impl->service.owned_route_cache_epoch_store.get();
+    }
+
     // Initialize epoch store from startup snapshot
     std::shared_ptr<const runtime::RuntimePolicySnapshot> initial_snap =
         impl->service.policy_store->load();
-    if (initial_snap != nullptr) {
-        impl->service.route_cache_epoch_store.count = 0;
+    if (initial_snap != nullptr && impl->service.route_cache_epoch_store != nullptr) {
+        impl->service.route_cache_epoch_store->count = 0;
         for (const auto& r : initial_snap->routes) {
             if (r.cache.behavior == policy::CacheBehavior::Store) {
-                runtime::route_cache_epoch_register(&impl->service.route_cache_epoch_store,
+                runtime::route_cache_epoch_register(impl->service.route_cache_epoch_store,
                                                     r.route_id);
             }
         }

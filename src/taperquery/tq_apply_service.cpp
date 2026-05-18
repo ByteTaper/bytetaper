@@ -9,6 +9,7 @@
 #include "taperquery/policy_ir_yaml_roundtrip.h"
 #include "taperquery/policy_persistence.h"
 #include "taperquery/tq_apply_audit.h"
+#include "taperquery/tq_cache_namespace_versioning.h"
 #include "taperquery/tq_compiler.h"
 #include "taperquery/tq_parser.h"
 
@@ -44,9 +45,12 @@ DefaultTqSnapshotBuilder g_default_builder;
 
 TqApplyService::TqApplyService(runtime::RuntimePolicyStore* policy_store,
                                TqSnapshotBuilder* builder, TqApplyAuditStore* audit_store,
-                               LocalPolicyPersistenceConfig persistence_config)
+                               LocalPolicyPersistenceConfig persistence_config,
+                               runtime::RouteCacheEpochStore* epoch_store,
+                               RouteCacheCleanupQueue* cleanup_queue)
     : policy_store_(policy_store), builder_(builder ? builder : &g_default_builder),
-      audit_store_(audit_store), persistence_config_(std::move(persistence_config)) {}
+      audit_store_(audit_store), persistence_config_(std::move(persistence_config)),
+      epoch_store_(epoch_store), cleanup_queue_(cleanup_queue) {}
 
 TqApplyResult TqApplyService::execute(const TqApplyRequest& request) {
     TqApplyResult result = execute_impl(request);
@@ -362,6 +366,8 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
 
     // Step 12 - Dry-run exit
     if (request.mode == TqApplyMode::DryRun) {
+        result.cache_namespace_versioning =
+            detect_cache_namespace_impacts(result.plan, epoch_store_);
         result.ok = true;
         result.status = TqApplyStatus::DryRunReady;
         result.candidate_policy_identity = build_res.snapshot->policy_identity;
@@ -413,6 +419,24 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
         }
     }
 
+    // Step 13.5 - Bump route epochs for affected routes in the epoch store (if configured)
+    if (epoch_store_ != nullptr) {
+        auto ns_res = version_cache_namespace_for_apply_plan(result.plan, epoch_store_);
+        result.cache_namespace_versioning = ns_res;
+        if (!ns_res.ok) {
+            result.ok = false;
+            result.status = TqApplyStatus::InternalError;
+            result.message = "cache namespace versioning failed: " + ns_res.error;
+
+            TqApplyDiagnostic diag;
+            diag.severity = "error";
+            diag.code = "INTERNAL_ERROR";
+            diag.reason = ns_res.error;
+            result.diagnostics.push_back(diag);
+            return result;
+        }
+    }
+
     // Step 14 - Swap active snapshot via atomic CAS swap_if_current
     std::string swap_err;
     if (!policy_store_->swap_if_current(current_snapshot->policy_identity, final_build_res.snapshot,
@@ -441,6 +465,31 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
         diag.reason = swap_err;
         result.diagnostics.push_back(diag);
         return result;
+    }
+
+    // Async cleanup: log and enqueue old namespace cleanups for maximum visibility
+    for (const auto& ch : result.cache_namespace_versioning.changed_routes) {
+        bool is_removed = !ch.before_route_identity.empty() && ch.after_route_identity.empty();
+        if (ch.before_epoch != 0 && (ch.before_epoch != ch.after_epoch || is_removed)) {
+            std::string cleanup_job =
+                "route:" + ch.route_id + ":epoch:" + std::to_string(ch.before_epoch);
+            result.enqueued_cleanups.push_back(cleanup_job);
+
+            std::fprintf(stdout,
+                         "[RouteCacheCleanup] Enqueued async RouteCacheCleanupJob for route '%s' "
+                         "(clearing old epoch namespace: %lu)\n",
+                         ch.route_id.c_str(), static_cast<unsigned long>(ch.before_epoch));
+
+            if (cleanup_queue_ != nullptr) {
+                RouteCacheCleanupJob job;
+                job.route_id = ch.route_id;
+                job.old_epoch = ch.before_epoch;
+                job.new_epoch = ch.after_epoch;
+                job.before_policy_identity = ch.before_route_identity;
+                job.after_policy_identity = ch.after_route_identity;
+                cleanup_queue_->enqueue(job);
+            }
+        }
     }
 
     result.ok = true;

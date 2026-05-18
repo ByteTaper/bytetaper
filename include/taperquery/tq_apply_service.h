@@ -7,6 +7,7 @@
 #include "taperquery/policy_ir.h"
 #include "taperquery/policy_persistence.h"
 #include "taperquery/route_analysis.h"
+#include "taperquery/tq_cache_namespace_versioning.h"
 #include "taperquery/tq_diagnostic.h"
 #include "taperquery/tq_plan.h"
 
@@ -85,6 +86,10 @@ struct TqApplyResult {
 
     std::vector<TqApplyDiagnostic> diagnostics;
 
+    TqCacheNamespaceVersioningResult cache_namespace_versioning;
+
+    std::vector<std::string> enqueued_cleanups;
+
     std::string message;
 };
 
@@ -102,7 +107,9 @@ public:
     explicit TqApplyService(runtime::RuntimePolicyStore* policy_store,
                             TqSnapshotBuilder* builder = nullptr,
                             TqApplyAuditStore* audit_store = nullptr,
-                            LocalPolicyPersistenceConfig persistence_config = {});
+                            LocalPolicyPersistenceConfig persistence_config = {},
+                            runtime::RouteCacheEpochStore* epoch_store = nullptr,
+                            RouteCacheCleanupQueue* cleanup_queue = nullptr);
 
     TqApplyResult execute(const TqApplyRequest& request);
 
@@ -113,6 +120,8 @@ private:
     TqSnapshotBuilder* builder_ = nullptr;
     TqApplyAuditStore* audit_store_ = nullptr;
     LocalPolicyPersistenceConfig persistence_config_;
+    runtime::RouteCacheEpochStore* epoch_store_ = nullptr;
+    RouteCacheCleanupQueue* cleanup_queue_ = nullptr;
 };
 
 } // namespace bytetaper::taperquery

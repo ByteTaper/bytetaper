@@ -18,6 +18,10 @@ namespace bytetaper::coalescing {
 struct InFlightRegistry;
 }
 
+namespace bytetaper::runtime {
+struct RouteCacheEpochStore;
+}
+
 namespace bytetaper::extproc {
 
 struct GrpcServerConfig {
@@ -29,6 +33,7 @@ struct GrpcServerConfig {
     cache::L2DiskCache* l2_cache = nullptr;
     metrics::MetricsRegistry* metrics_registry = nullptr;
     coalescing::InFlightRegistry* coalescing_registry = nullptr;
+    runtime::RouteCacheEpochStore* route_cache_epoch_store = nullptr;
     runtime::WorkerQueueConfig wq_config{};
 };
 

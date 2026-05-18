@@ -39,6 +39,16 @@ TqRoutePolicy normalize_route_policy_ir(const TqRoutePolicy& input) {
         to_lowercase(result.cache.private_cache.auth_scope_header);
     // Lowercase and stable-dedup vary_headers names
     result.cache.vary_headers.names = stable_dedup_and_lowercase(result.cache.vary_headers.names);
+
+    // Normalize field_variant fields to 0 if not enabled to ensure round-trip identity parity
+    if (!result.cache.field_variant.enabled) {
+        result.cache.field_variant.max_variants_per_route = 0;
+        result.cache.field_variant.min_field_count = 0;
+        result.cache.field_variant.max_field_count = 0;
+        result.cache.field_variant.admission_threshold = 0;
+        result.cache.field_variant.ttl_max_ms = 0;
+    }
+
     return result;
 }
 

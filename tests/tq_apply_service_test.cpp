@@ -1,12 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
+#include "apg/context.h"
+#include "cache/cache_key.h"
+#include "cache/l1_cache.h"
 #include "runtime/policy_snapshot.h"
+#include "stages/cache_key_prepare_stage.h"
+#include "stages/l1_cache_lookup_stage.h"
+#include "stages/l1_variant_lookup_stage.h"
 #include "taperquery/policy_ir.h"
 #include "taperquery/policy_ir_identity.h"
 #include "taperquery/policy_ir_yaml_roundtrip.h"
+#include "taperquery/tq_apply_audit.h"
 #include "taperquery/tq_apply_service.h"
 
+#include <chrono>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <thread>
@@ -774,6 +782,483 @@ TEST_F(TqApplyServiceTest, RestartLoadedIdentityParity) {
     EXPECT_EQ(startup_res.generation, res.after_generation);
 
     std::filesystem::remove_all(state_dir);
+}
+
+TEST_F(TqApplyServiceTest, ApplyBumpsEpochForFieldFilteringChange) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+
+    TqApplyService service(&store, nullptr, nullptr, {}, &epoch_store);
+
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"initial_route\" when path prefix "
+                 "\"/initial\" { fields allow [\"id\", \"email\"]; } }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    ASSERT_TRUE(res.ok) << res.message;
+    EXPECT_EQ(res.status, TqApplyStatus::Applied);
+
+    std::uint64_t current = 0;
+    auto get_res = runtime::route_cache_epoch_get(&epoch_store, "initial_route", &current);
+    ASSERT_EQ(get_res, runtime::RouteCacheEpochResult::Ok);
+    EXPECT_EQ(current, 2u);
+}
+
+TEST_F(TqApplyServiceTest, DryRunDoesNotBumpEpoch) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+
+    TqApplyService service(&store, nullptr, nullptr, {}, &epoch_store);
+
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"initial_route\" when path prefix "
+                 "\"/initial\" { fields allow [\"id\", \"email\"]; } }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::DryRun;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    ASSERT_TRUE(res.ok) << res.message;
+    EXPECT_EQ(res.status, TqApplyStatus::DryRunReady);
+
+    std::uint64_t current = 0;
+    auto get_res = runtime::route_cache_epoch_get(&epoch_store, "initial_route", &current);
+    ASSERT_EQ(get_res, runtime::RouteCacheEpochResult::Ok);
+    EXPECT_EQ(current, 1u);
+
+    ASSERT_EQ(res.cache_namespace_versioning.changed_routes.size(), 1u);
+    EXPECT_TRUE(res.cache_namespace_versioning.changed_routes[0].epoch_bump_required);
+}
+
+TEST_F(TqApplyServiceTest, FailedApplyDoesNotBumpEpoch) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+
+    TqApplyService service(&store, nullptr, nullptr, {}, &epoch_store);
+
+    TqApplyRequest req;
+    req.source =
+        "policy \"my-policy\" against sha \"\" { route \"initial_route\" when path prefix "
+        "\"/initial\" { fields allow []; } }"; // invalid empty allow list fails semantic validation
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    ASSERT_FALSE(res.ok);
+
+    std::uint64_t current = 0;
+    auto get_res = runtime::route_cache_epoch_get(&epoch_store, "initial_route", &current);
+    ASSERT_EQ(get_res, runtime::RouteCacheEpochResult::Ok);
+    EXPECT_EQ(current, 1u);
+}
+
+TEST_F(TqApplyServiceTest, SuccessfulApplyBumpsOnlyAffectedRoute) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+    runtime::route_cache_epoch_register(&epoch_store, "other_route");
+
+    TqApplyService service(&store, nullptr, nullptr, {}, &epoch_store);
+
+    TqApplyRequest req;
+    req.source =
+        "policy \"my-policy\" against sha \"\" { route \"initial_route\" when path prefix "
+        "\"/initial\" { fields allow [\"id\", \"email\"]; } route \"other_route\" when path prefix "
+        "\"/other\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    ASSERT_TRUE(res.ok) << res.message;
+
+    std::uint64_t current_initial = 0;
+    runtime::route_cache_epoch_get(&epoch_store, "initial_route", &current_initial);
+    EXPECT_EQ(current_initial, 2u);
+
+    std::uint64_t current_other = 0;
+    runtime::route_cache_epoch_get(&epoch_store, "other_route", &current_other);
+    EXPECT_EQ(current_other, 1u);
+}
+
+TEST_F(TqApplyServiceTest, E2eCacheUnreachableAfterApply) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+
+    RouteCacheCleanupQueueImpl cleanup_queue;
+    cleanup_queue.start_worker();
+
+    TqApplyAuditStore audit_store{};
+    LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+
+    TqApplyService service(&store, nullptr, &audit_store, persistence_config, &epoch_store,
+                           &cleanup_queue);
+
+    // Initial policy with cache enabled and allowed fields (id, email)
+    TqApplyRequest req_init{};
+    req_init.source = "policy \"my-policy\" against sha \"\" { route \"initial_route\" when method "
+                      "get path prefix "
+                      "\"/initial\" { mutate full; cache store ttl 60s { l1 enabled capacity 1000 "
+                      "entries } fields allow [\"id\", \"email\"]; } }";
+    req_init.expected_base_identity = initial_identity;
+    req_init.mode = TqApplyMode::Apply;
+    req_init.strict_production = false;
+
+    auto res_init = service.execute(req_init);
+    ASSERT_TRUE(res_init.ok) << res_init.message;
+    std::string base_sha = res_init.applied_policy_identity;
+
+    // Get epoch before apply
+    std::uint64_t epoch_before = 0;
+    runtime::route_cache_epoch_get(&epoch_store, "initial_route", &epoch_before);
+    EXPECT_EQ(epoch_before, 2u);
+
+    // Initialize mock L1 Cache
+    auto l1_cache = std::make_unique<cache::L1Cache>();
+    cache::l1_init(l1_cache.get());
+
+    auto active_snap_init = store.load();
+    const policy::RoutePolicy* matched_policy_init = nullptr;
+    for (const auto& r : active_snap_init->routes) {
+        if (r.route_id != nullptr && std::strcmp(r.route_id, "initial_route") == 0) {
+            matched_policy_init = &r;
+            break;
+        }
+    }
+    ASSERT_NE(matched_policy_init, nullptr);
+
+    // Generate cache key for epoch 2
+    cache::CacheKeyInput input{};
+    input.method = policy::HttpMethod::Get;
+    input.route_id = "initial_route";
+    input.path = "/initial";
+    input.policy_version = matched_policy_init->policy_identity;
+    input.route_cache_epoch = epoch_before;
+    input.route_cache_epoch_ready = true;
+
+    char key_before[cache::kCacheKeyMaxLen];
+    ASSERT_TRUE(cache::build_cache_key(input, key_before, sizeof(key_before)));
+
+    // Store a cached entry containing the 'email' field under epoch 2
+    cache::CacheEntry entry{};
+    std::strncpy(entry.key, key_before, cache::kCacheKeyMaxLen - 1);
+    entry.status_code = 200;
+    entry.body = "{\"id\":123,\"email\":\"old@example.com\"}";
+    entry.body_len = std::strlen(entry.body);
+    entry.created_at_epoch_ms = 1000;
+    entry.expires_at_epoch_ms = 9999999999LL;
+    cache::l1_put(l1_cache.get(), entry);
+
+    // Simulate pipeline lookup before update: it should result in a CACHE HIT
+    {
+        auto active_snap = store.load();
+        const policy::RoutePolicy* matched_policy = nullptr;
+        for (const auto& r : active_snap->routes) {
+            if (r.route_id != nullptr && std::strcmp(r.route_id, "initial_route") == 0) {
+                matched_policy = &r;
+                break;
+            }
+        }
+        ASSERT_NE(matched_policy, nullptr);
+
+        apg::ApgTransformContext ctx{};
+        ctx.matched_policy = matched_policy;
+        ctx.l1_cache = l1_cache.get();
+        ctx.route_cache_epoch_store = &epoch_store;
+        ctx.request_method = policy::HttpMethod::Get;
+        ctx.request_epoch_ms = 5000;
+        std::strncpy(ctx.raw_path, "/initial", sizeof(ctx.raw_path) - 1);
+
+        auto prep_out = stages::cache_key_prepare_stage(ctx);
+        EXPECT_EQ(prep_out.result, apg::StageResult::Continue);
+        EXPECT_TRUE(ctx.cache_key_ready);
+
+        auto lookup_out = stages::l1_cache_lookup_stage(ctx);
+        EXPECT_EQ(lookup_out.result, apg::StageResult::SkipRemaining);
+        EXPECT_STREQ(lookup_out.note, "l1-hit");
+        EXPECT_TRUE(ctx.cache_hit);
+        EXPECT_STREQ(ctx.cached_response.body, "{\"id\":123,\"email\":\"old@example.com\"}");
+    }
+
+    // Now apply a policy change that modifies the allowed fields: restricting allowed fields to
+    // just 'id' (triggers FieldFilteringBehavior, bumping epoch to 3)
+    TqApplyRequest req_update{};
+    req_update.source = "policy \"my-policy\" against sha \"\" { route \"initial_route\" when "
+                        "method get path prefix "
+                        "\"/initial\" { mutate full; cache store ttl 60s { l1 enabled capacity "
+                        "1000 entries } fields allow [\"id\"]; } }";
+    req_update.expected_base_identity = base_sha;
+    req_update.mode = TqApplyMode::Apply;
+    req_update.strict_production = false;
+
+    auto res_update = service.execute(req_update);
+    ASSERT_TRUE(res_update.ok) << res_update.message;
+
+    // Verify epoch has been bumped dynamically by TqApplyService
+    std::uint64_t epoch_after = 0;
+    runtime::route_cache_epoch_get(&epoch_store, "initial_route", &epoch_after);
+    EXPECT_EQ(epoch_after, 3u);
+
+    // Simulate pipeline lookup after update: it must result in a CACHE MISS (email won't be
+    // served!)
+    {
+        auto active_snap = store.load();
+        const policy::RoutePolicy* matched_policy = nullptr;
+        for (const auto& r : active_snap->routes) {
+            if (r.route_id != nullptr && std::strcmp(r.route_id, "initial_route") == 0) {
+                matched_policy = &r;
+                break;
+            }
+        }
+        ASSERT_NE(matched_policy, nullptr);
+
+        apg::ApgTransformContext ctx{};
+        ctx.matched_policy = matched_policy;
+        ctx.l1_cache = l1_cache.get();
+        ctx.route_cache_epoch_store = &epoch_store;
+        ctx.request_method = policy::HttpMethod::Get;
+        ctx.request_epoch_ms = 5000;
+        std::strncpy(ctx.raw_path, "/initial", sizeof(ctx.raw_path) - 1);
+
+        auto prep_out = stages::cache_key_prepare_stage(ctx);
+        EXPECT_EQ(prep_out.result, apg::StageResult::Continue);
+        EXPECT_TRUE(ctx.cache_key_ready);
+
+        auto lookup_out = stages::l1_cache_lookup_stage(ctx);
+        EXPECT_EQ(lookup_out.result, apg::StageResult::Continue);
+        EXPECT_STREQ(lookup_out.note, "l1-miss");
+        EXPECT_FALSE(ctx.cache_hit);
+    }
+
+    // Prove Gap 3: Assert the durable cleanup queue enqueued and processed both epoch updates
+    std::this_thread::sleep_for(std::chrono::milliseconds(50)); // let async thread run
+    auto completed = cleanup_queue.get_completed_jobs();
+    ASSERT_EQ(completed.size(), 2);
+    bool found_target_job = false;
+    for (const auto& job : completed) {
+        if (job.old_epoch == 2 && job.new_epoch == 3) {
+            found_target_job = true;
+            EXPECT_EQ(job.route_id, "initial_route");
+        }
+    }
+    EXPECT_TRUE(found_target_job);
+}
+
+TEST_F(TqApplyServiceTest, TaperQueryApplyBumpsEpochForVariantCacheChange) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+
+    RouteCacheCleanupQueueImpl cleanup_queue;
+    cleanup_queue.start_worker();
+
+    TqApplyAuditStore audit_store{};
+    LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+
+    TqApplyService service(&store, nullptr, &audit_store, persistence_config, &epoch_store,
+                           &cleanup_queue);
+
+    // Initial policy with cache enabled, allowed fields (id, email), and field_variant enabled!
+    TqApplyRequest req_init{};
+    req_init.source =
+        "policy \"my-policy\" against sha \"\" { route \"initial_route\" when method get path "
+        "prefix "
+        "\"/initial\" { mutate full; cache store ttl 60s { l1 enabled capacity 1000 entries "
+        "field_variant { enabled true max_variants_per_route 16 min_field_count 1 max_field_count "
+        "16 admission_threshold 3 ttl_max 500s } } fields allow [\"id\", \"email\"]; } }";
+    req_init.expected_base_identity = initial_identity;
+    req_init.mode = TqApplyMode::Apply;
+    req_init.strict_production = false;
+
+    auto res_init = service.execute(req_init);
+    ASSERT_TRUE(res_init.ok) << res_init.message;
+    std::string base_sha = res_init.applied_policy_identity;
+
+    std::uint64_t epoch_before = 0;
+    runtime::route_cache_epoch_get(&epoch_store, "initial_route", &epoch_before);
+    EXPECT_EQ(epoch_before, 2u);
+
+    // Initialize mock L1 Cache
+    auto l1_cache = std::make_unique<cache::L1Cache>();
+    cache::l1_init(l1_cache.get());
+
+    auto active_snap_init = store.load();
+    const policy::RoutePolicy* matched_policy_init = nullptr;
+    for (const auto& r : active_snap_init->routes) {
+        if (r.route_id != nullptr && std::strcmp(r.route_id, "initial_route") == 0) {
+            matched_policy_init = &r;
+            break;
+        }
+    }
+    ASSERT_NE(matched_policy_init, nullptr);
+
+    // Prepare a variant cache key input under epoch 2
+    char fields[2][policy::kMaxFieldNameLen] = {};
+    std::strncpy(fields[0], "id", policy::kMaxFieldNameLen - 1);
+    std::strncpy(fields[1], "email", policy::kMaxFieldNameLen - 1);
+
+    cache::CacheKeyInput input{};
+    input.method = policy::HttpMethod::Get;
+    input.route_id = "initial_route";
+    input.path = "/initial";
+    input.policy_version = matched_policy_init->policy_identity;
+    input.route_cache_epoch = epoch_before;
+    input.route_cache_epoch_ready = true;
+    input.variant = true;
+    input.selected_fields = fields;
+    input.selected_field_count = 2;
+
+    char key_before[cache::kCacheKeyMaxLen];
+    ASSERT_TRUE(cache::build_cache_key(input, key_before, sizeof(key_before)));
+
+    // Store variant entry in L1 Cache
+    cache::CacheEntry entry{};
+    std::strncpy(entry.key, key_before, cache::kCacheKeyMaxLen - 1);
+    entry.status_code = 200;
+    entry.body = "{\"id\":123,\"email\":\"variant@example.com\"}";
+    entry.body_len = std::strlen(entry.body);
+    entry.created_at_epoch_ms = 1000;
+    entry.expires_at_epoch_ms = 9999999999LL;
+    cache::l1_put(l1_cache.get(), entry);
+
+    // Pipeline lookup before update: it must result in a VARIANT CACHE HIT!
+    {
+        auto active_snap = store.load();
+        const policy::RoutePolicy* matched_policy = nullptr;
+        for (const auto& r : active_snap->routes) {
+            if (r.route_id != nullptr && std::strcmp(r.route_id, "initial_route") == 0) {
+                matched_policy = &r;
+                break;
+            }
+        }
+        ASSERT_NE(matched_policy, nullptr);
+
+        apg::ApgTransformContext ctx{};
+        ctx.matched_policy = matched_policy;
+        ctx.l1_cache = l1_cache.get();
+        ctx.route_cache_epoch_store = &epoch_store;
+        ctx.request_method = policy::HttpMethod::Get;
+        ctx.request_epoch_ms = 5000;
+        std::strncpy(ctx.raw_path, "/initial", sizeof(ctx.raw_path) - 1);
+        std::strncpy(ctx.selected_fields[0], "id", policy::kMaxFieldNameLen - 1);
+        std::strncpy(ctx.selected_fields[1], "email", policy::kMaxFieldNameLen - 1);
+        ctx.selected_field_count = 2;
+
+        auto prep_out = stages::cache_key_prepare_stage(ctx);
+        EXPECT_EQ(prep_out.result, apg::StageResult::Continue);
+        EXPECT_TRUE(ctx.variant_cache_key_ready);
+
+        auto lookup_out = stages::l1_variant_lookup_stage(ctx);
+        EXPECT_EQ(lookup_out.result, apg::StageResult::SkipRemaining);
+        EXPECT_STREQ(lookup_out.note, "l1-variant-hit");
+        EXPECT_TRUE(ctx.cache_hit);
+        EXPECT_STREQ(ctx.cached_response.body, "{\"id\":123,\"email\":\"variant@example.com\"}");
+    }
+
+    // Now, apply the update that restricts allowed fields to just 'id' (removing 'email')
+    TqApplyRequest req_update{};
+    req_update.source =
+        "policy \"my-policy\" against sha \"\" { route \"initial_route\" when method get path "
+        "prefix "
+        "\"/initial\" { mutate full; cache store ttl 60s { l1 enabled capacity 1000 entries "
+        "field_variant { enabled true max_variants_per_route 16 min_field_count 1 max_field_count "
+        "16 admission_threshold 3 ttl_max 500s } } fields allow [\"id\"]; } }";
+    req_update.expected_base_identity = base_sha;
+    req_update.mode = TqApplyMode::Apply;
+    req_update.strict_production = false;
+
+    auto res_update = service.execute(req_update);
+    ASSERT_TRUE(res_update.ok) << res_update.message;
+
+    // Verify epoch was bumped dynamically
+    std::uint64_t epoch_after = 0;
+    runtime::route_cache_epoch_get(&epoch_store, "initial_route", &epoch_after);
+    EXPECT_EQ(epoch_after, 3u);
+
+    // Pipeline lookup after update: it must result in a CACHE MISS (old variant response is
+    // unreachable!)
+    {
+        auto active_snap = store.load();
+        const policy::RoutePolicy* matched_policy = nullptr;
+        for (const auto& r : active_snap->routes) {
+            if (r.route_id != nullptr && std::strcmp(r.route_id, "initial_route") == 0) {
+                matched_policy = &r;
+                break;
+            }
+        }
+        ASSERT_NE(matched_policy, nullptr);
+
+        apg::ApgTransformContext ctx{};
+        ctx.matched_policy = matched_policy;
+        ctx.l1_cache = l1_cache.get();
+        ctx.route_cache_epoch_store = &epoch_store;
+        ctx.request_method = policy::HttpMethod::Get;
+        ctx.request_epoch_ms = 5000;
+        std::strncpy(ctx.raw_path, "/initial", sizeof(ctx.raw_path) - 1);
+        std::strncpy(ctx.selected_fields[0], "id", policy::kMaxFieldNameLen - 1);
+        std::strncpy(ctx.selected_fields[1], "email", policy::kMaxFieldNameLen - 1);
+        ctx.selected_field_count = 2;
+
+        auto prep_out = stages::cache_key_prepare_stage(ctx);
+        EXPECT_EQ(prep_out.result, apg::StageResult::Continue);
+        EXPECT_TRUE(ctx.variant_cache_key_ready);
+
+        auto lookup_out = stages::l1_variant_lookup_stage(ctx);
+        EXPECT_EQ(lookup_out.result, apg::StageResult::Continue);
+        EXPECT_STREQ(lookup_out.note, "l1-miss");
+        EXPECT_FALSE(ctx.cache_hit);
+    }
+}
+
+TEST_F(TqApplyServiceTest, TaperQueryApplyEnqueuesCleanupForRemovedRoute) {
+    runtime::RouteCacheEpochStore epoch_store{};
+    runtime::route_cache_epoch_register(&epoch_store, "initial_route");
+
+    TqApplyAuditStore audit_store{};
+    LocalPolicyPersistenceConfig persistence_config{};
+    persistence_config.enabled = false;
+
+    TqApplyService service(&store, nullptr, &audit_store, persistence_config, &epoch_store);
+
+    // Initial policy with two routes
+    TqApplyRequest req_init{};
+    req_init.source = "policy \"my-policy\" against sha \"\" { "
+                      "route \"initial_route\" when method get path prefix \"/initial\" { mutate "
+                      "full; cache store ttl 60s { l1 enabled capacity 1000 entries } } "
+                      "route \"other_route\" when method get path prefix \"/other\" { mutate full; "
+                      "cache store ttl 60s { l1 enabled capacity 1000 entries } } }";
+    req_init.expected_base_identity = initial_identity;
+    req_init.mode = TqApplyMode::Apply;
+    req_init.strict_production = false;
+
+    auto res_init = service.execute(req_init);
+    ASSERT_TRUE(res_init.ok) << res_init.message;
+    std::string base_sha = res_init.applied_policy_identity;
+
+    // Apply update that removes other_route
+    TqApplyRequest req_update{};
+    req_update.source = "policy \"my-policy\" against sha \"\" { "
+                        "route \"initial_route\" when method get path prefix \"/initial\" { mutate "
+                        "full; cache store ttl 60s { l1 enabled capacity 1000 entries } } }";
+    req_update.expected_base_identity = base_sha;
+    req_update.mode = TqApplyMode::Apply;
+    req_update.strict_production = false;
+
+    auto res_update = service.execute(req_update);
+    ASSERT_TRUE(res_update.ok) << res_update.message;
+
+    // Assert that the cleanup job for other_route was enqueued
+    bool found_cleanup = false;
+    for (const auto& clean : res_update.enqueued_cleanups) {
+        if (clean == "route:other_route:epoch:2" || clean == "route:other_route:epoch:1") {
+            found_cleanup = true;
+        }
+    }
+    EXPECT_TRUE(found_cleanup);
 }
 
 } // namespace bytetaper::taperquery

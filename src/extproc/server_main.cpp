@@ -13,6 +13,7 @@
 #include "metrics/prometheus_registry.h"
 #include "observability/logger.h"
 #include "policy/yaml_loader.h"
+#include "runtime/route_cache_epoch_store.h"
 #include "taperquery/policy_persistence.h"
 #include "taperquery/tq_apply_audit.h"
 
@@ -517,10 +518,16 @@ int main(int argc, char** argv) {
     bytetaper::admin::TaperQueryAdminHttpServerHandle admin_handle{};
     bool admin_started = false;
 
+    auto route_cache_epoch_store = std::make_unique<bytetaper::runtime::RouteCacheEpochStore>();
+    auto route_cache_cleanup_queue =
+        std::make_unique<bytetaper::taperquery::RouteCacheCleanupQueueImpl>();
+    route_cache_cleanup_queue->start_worker();
+
     if (args.admin_enable_taperquery) {
         audit_store = std::make_unique<bytetaper::taperquery::TqApplyAuditStore>();
         apply_service = std::make_unique<bytetaper::taperquery::TqApplyService>(
-            policy_store.get(), nullptr, audit_store.get(), persistence_config);
+            policy_store.get(), nullptr, audit_store.get(), persistence_config,
+            route_cache_epoch_store.get(), route_cache_cleanup_queue.get());
         bytetaper::admin::TaperQueryAdminHttpServerConfig admin_config{};
         admin_config.listen_address = args.admin_address;
         admin_config.port = args.admin_port;
@@ -545,6 +552,7 @@ int main(int argc, char** argv) {
     config.coalescing_registry = coalescing_registry.get();
     config.wq_config = wq_config;
     config.policy_store = policy_store.get();
+    config.route_cache_epoch_store = route_cache_epoch_store.get();
 
     bytetaper::extproc::GrpcServerHandle handle{};
     if (!bytetaper::extproc::start_grpc_server(config, &handle)) {
