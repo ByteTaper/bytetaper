@@ -461,4 +461,68 @@ TEST(CompiledFieldSelectionTest, NullPathSafe) {
     EXPECT_FALSE(res.has_selected_descendant);
 }
 
+TEST(FieldSelectionRequestTargetTest, AllowlistDisallowedQueryFieldDropped) {
+    apg::ApgTransformContext context{};
+    set_selected_fields(&context, "id", "secret_token", "name");
+
+    policy::FieldFilterPolicy policy_filter{};
+    policy_filter.mode = policy::FieldFilterMode::Allowlist;
+    std::strncpy(policy_filter.fields[0], "id", policy::kMaxFieldNameLen - 1);
+    std::strncpy(policy_filter.fields[1], "name", policy::kMaxFieldNameLen - 1);
+    policy_filter.field_count = 2;
+
+    EXPECT_TRUE(enforce_selected_fields_policy(&context, policy_filter));
+    EXPECT_EQ(context.selected_field_count, 2u);
+    EXPECT_STREQ(context.selected_fields[0], "id");
+    EXPECT_STREQ(context.selected_fields[1], "name");
+}
+
+TEST(FieldSelectionRequestTargetTest, ClientQueryPresentFlagAndDisallowedIntersection) {
+    apg::ApgTransformContext context{};
+
+    // Case A: No fields query parameter
+    set_raw_query(&context, "other_param=1");
+    ASSERT_TRUE(parse_and_store_selected_fields(&context));
+    EXPECT_FALSE(context.client_query_present);
+    EXPECT_EQ(context.selected_field_count, 0u);
+
+    // Case B: Fields query parameter is present but empty
+    set_raw_query(&context, "fields=");
+    ASSERT_TRUE(parse_and_store_selected_fields(&context));
+    EXPECT_TRUE(context.client_query_present);
+    EXPECT_EQ(context.selected_field_count, 0u);
+
+    // Case C: Fields query parameter is present and non-empty
+    set_raw_query(&context, "fields=id,secret_token");
+    ASSERT_TRUE(parse_and_store_selected_fields(&context));
+    EXPECT_TRUE(context.client_query_present);
+    EXPECT_EQ(context.selected_field_count, 2u);
+
+    // Case D: Intersect with a Denylist policy denying "secret_token"
+    policy::FieldFilterPolicy policy_filter{};
+    policy_filter.mode = policy::FieldFilterMode::Denylist;
+    std::strncpy(policy_filter.fields[0], "secret_token", policy::kMaxFieldNameLen - 1);
+    policy_filter.field_count = 1;
+
+    EXPECT_TRUE(enforce_selected_fields_policy(&context, policy_filter));
+    // secret_token is denied, so it gets dropped. id remains.
+    EXPECT_EQ(context.selected_field_count, 1u);
+    EXPECT_STREQ(context.selected_fields[0], "id");
+    // Client query present must still remain true!
+    EXPECT_TRUE(context.client_query_present);
+
+    // Case E: Fully denied query selection (Finding 1 case)
+    apg::ApgTransformContext context2{};
+    set_raw_query(&context2, "fields=secret_token");
+    ASSERT_TRUE(parse_and_store_selected_fields(&context2));
+    EXPECT_TRUE(context2.client_query_present);
+    EXPECT_EQ(context2.selected_field_count, 1u);
+
+    EXPECT_TRUE(enforce_selected_fields_policy(&context2, policy_filter));
+    // secret_token gets dropped, making count 0
+    EXPECT_EQ(context2.selected_field_count, 0u);
+    // client_query_present is STILL true!
+    EXPECT_TRUE(context2.client_query_present);
+}
+
 } // namespace bytetaper::field_selection

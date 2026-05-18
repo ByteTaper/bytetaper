@@ -159,24 +159,26 @@ private:
     }
 
     void recover_to_statement() {
+        bool first = true;
         while (curr_.kind != TqTokenKind::EndOfFile) {
             if (curr_.kind == TqTokenKind::Semicolon || curr_.kind == TqTokenKind::RightBrace) {
                 consume();
                 break;
             }
-            if (curr_.kind == TqTokenKind::KeywordRoute ||
-                curr_.kind == TqTokenKind::KeywordPolicy ||
-                curr_.kind == TqTokenKind::KeywordMutate ||
-                curr_.kind == TqTokenKind::KeywordFailure ||
-                curr_.kind == TqTokenKind::KeywordMaxResponse ||
-                curr_.kind == TqTokenKind::KeywordCache ||
-                curr_.kind == TqTokenKind::KeywordFields ||
-                curr_.kind == TqTokenKind::KeywordPaginate ||
-                curr_.kind == TqTokenKind::KeywordCompress ||
-                curr_.kind == TqTokenKind::KeywordCoalesce) {
+            if (!first && (curr_.kind == TqTokenKind::KeywordRoute ||
+                           curr_.kind == TqTokenKind::KeywordPolicy ||
+                           curr_.kind == TqTokenKind::KeywordMutate ||
+                           curr_.kind == TqTokenKind::KeywordFailure ||
+                           curr_.kind == TqTokenKind::KeywordMaxResponse ||
+                           curr_.kind == TqTokenKind::KeywordCache ||
+                           curr_.kind == TqTokenKind::KeywordFields ||
+                           curr_.kind == TqTokenKind::KeywordPaginate ||
+                           curr_.kind == TqTokenKind::KeywordCompress ||
+                           curr_.kind == TqTokenKind::KeywordCoalesce)) {
                 break;
             }
             consume();
+            first = false;
         }
     }
 
@@ -227,6 +229,9 @@ private:
                     result_.ok = false;
                     return decl;
                 }
+                if (curr_.kind == TqTokenKind::KeywordPolicy) {
+                    break;
+                }
                 if (curr_.kind == TqTokenKind::KeywordRoute) {
                     decl.routes.push_back(parse_route_decl());
                 } else {
@@ -271,6 +276,10 @@ private:
                     result_.diagnostics.truncated = true;
                     result_.ok = false;
                     return decl;
+                }
+                if (curr_.kind == TqTokenKind::KeywordRoute ||
+                    curr_.kind == TqTokenKind::KeywordPolicy) {
+                    break;
                 }
                 TqAstStatementKind kind = TqAstStatementKind::Mutate;
                 bool is_valid_statement = true;

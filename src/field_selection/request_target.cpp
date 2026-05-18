@@ -42,6 +42,8 @@ void clear_selected_fields(apg::ApgTransformContext* context) {
     for (std::size_t i = 0; i < policy::kMaxFields; ++i) {
         context->selected_fields[i][0] = '\0';
     }
+    context->request_query_view_ready = false;
+    context->request_query_view = {};
 }
 
 std::size_t bounded_query_length(const apg::ApgTransformContext& context) {
@@ -168,6 +170,22 @@ bool parse_and_store_selected_fields(apg::ApgTransformContext* context) {
     }
 
     clear_selected_fields(context);
+    context->client_query_present = false;
+
+    if (!context->request_query_view_ready) {
+        apg::parse_query_view(context->raw_query, context->raw_query_length,
+                              &context->request_query_view);
+        context->request_query_view_ready = true;
+    }
+
+    for (std::uint8_t i = 0; i < context->request_query_view.count; ++i) {
+        const auto& param = context->request_query_view.params[i];
+        if (query_key_is_fields(param.key, param.key_len)) {
+            context->client_query_present = true;
+            break;
+        }
+    }
+
     ParsedFieldsQuery parsed_fields{};
     if (!parse_fields_query_parameter(*context, &parsed_fields)) {
         return false;

@@ -47,6 +47,7 @@ route:
       - scenario
       - version
       - payload
+      - sentinel
   compression:
     enabled: true
     min_size_bytes: 1024

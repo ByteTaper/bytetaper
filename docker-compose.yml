@@ -90,6 +90,27 @@ services:
         set -eu
         python3 tests/integration/e2e/oversized_envoy_assert.py
 
+  bytetaper-policy-allowlist-test:
+    image: bytetaper-dev:latest
+    user: root
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      mock-api:
+        condition: service_healthy
+      bytetaper-extproc:
+        condition: service_healthy
+      envoy:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        python3 tests/integration/e2e/policy_allowlist_e2e_test.py
+
   bytetaper-cache-hit-test:
     image: bytetaper-dev:latest
     working_dir: /workspace
@@ -152,6 +173,8 @@ services:
 
   bytetaper-extproc:
     image: bytetaper-dev:latest
+    cap_add:
+      - SYS_PTRACE
     depends_on:
       bytetaper-build-server:
         condition: service_completed_successfully

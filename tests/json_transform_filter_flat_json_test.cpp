@@ -559,4 +559,82 @@ TEST(JsonTransformFilterFlatJsonTest, ToggleReturnsInvalidInputForInvalidPointer
               FlatJsonFilterStatus::InvalidInput);
 }
 
+TEST(JsonTransformFilterFlatJsonTest, FlatDenylistFiltersBody) {
+    const char* body = R"({"id":1,"secret_token":"abc","name":"Andi"})";
+    const ParsedFlatJsonObject parsed = parse_or_fail(body);
+
+    apg::ApgTransformContext context{};
+    policy::FieldFilterPolicy filter_policy{};
+    filter_policy.mode = policy::FieldFilterMode::Denylist;
+    std::strncpy(filter_policy.fields[0], "secret_token", policy::kMaxFieldNameLen - 1);
+    filter_policy.field_count = 1;
+
+    char output[128] = {};
+    std::size_t output_length = 0;
+    ASSERT_EQ(filter_flat_json_by_policy_denylist(parsed, context, filter_policy, output,
+                                                  sizeof(output), &output_length),
+              FlatJsonFilterStatus::Ok);
+    EXPECT_STREQ(output, R"({"id":1,"name":"Andi"})");
+    EXPECT_EQ(context.removed_field_count, 1u);
+}
+
+TEST(JsonTransformFilterFlatJsonTest, NestedDenylistFiltersBody) {
+    const char* body =
+        R"({"id":1,"user":{"name":"Andi","secret_token":"xyz"},"debug_internal":"log"})";
+    ParsedFlatJsonObject parsed{};
+    const FlatJsonParseStatus parse_status =
+        parse_flat_json_object(body, JsonResponseKind::EligibleJson, &parsed);
+    ASSERT_EQ(parse_status, FlatJsonParseStatus::SkipUnsupported);
+
+    apg::ApgTransformContext context{};
+    policy::RoutePolicy matched_policy{};
+    matched_policy.field_filter.mode = policy::FieldFilterMode::Denylist;
+    std::strncpy(matched_policy.field_filter.fields[0], "user.secret_token",
+                 policy::kMaxFieldNameLen - 1);
+    std::strncpy(matched_policy.field_filter.fields[1], "debug_internal",
+                 policy::kMaxFieldNameLen - 1);
+    matched_policy.field_filter.field_count = 2;
+    context.matched_policy = &matched_policy;
+
+    char output[256] = {};
+    std::size_t output_length = 0;
+    ASSERT_EQ(transform_flat_json_with_filter_toggle(body, parse_status, &parsed, context, true,
+                                                     output, sizeof(output), &output_length),
+              FlatJsonFilterStatus::Ok);
+    EXPECT_STREQ(output, R"({"id":1,"user":{"name":"Andi"}})");
+    EXPECT_EQ(context.removed_field_count, 2u);
+}
+
+TEST(JsonTransformFilterFlatJsonTest, DenylistClientQueryBypassLeakage) {
+    const char* body = R"({"id":1,"secret_token":"abc","name":"Andi"})";
+    ParsedFlatJsonObject parsed{};
+    const FlatJsonParseStatus parse_status =
+        parse_flat_json_object(body, JsonResponseKind::EligibleJson, &parsed);
+
+    apg::ApgTransformContext context{};
+    policy::RoutePolicy matched_policy{};
+    matched_policy.field_filter.mode = policy::FieldFilterMode::Denylist;
+    std::strncpy(matched_policy.field_filter.fields[0], "secret_token",
+                 policy::kMaxFieldNameLen - 1);
+    matched_policy.field_filter.field_count = 1;
+    context.matched_policy = &matched_policy;
+
+    // Simulate client requested ONLY secret_token (?fields=secret_token)
+    // Which got filtered out by denylist policy, resulting in 0 selected fields,
+    // but client_query_present = true.
+    context.client_query_present = true;
+    context.selected_field_count = 0;
+
+    char output[128] = {};
+    std::size_t output_length = 0;
+
+    // We expect it to use filter_nested_json_by_selected_fields and output empty JSON `{}`
+    // instead of falling back to policy denylist (which would leak id and name)!
+    ASSERT_EQ(transform_flat_json_with_filter_toggle(body, parse_status, &parsed, context, true,
+                                                     output, sizeof(output), &output_length),
+              FlatJsonFilterStatus::Ok);
+    EXPECT_STREQ(output, "{}");
+    EXPECT_EQ(context.removed_field_count, 3u); // all 3 fields filtered
+}
+
 } // namespace bytetaper::json_transform

@@ -53,6 +53,7 @@ routes:
         - scenario
         - version
         - payload
+        - sentinel
 
   - id: "admin-exact"
     match:

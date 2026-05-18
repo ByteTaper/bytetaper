@@ -53,6 +53,7 @@ struct StreamFilterState {
     json_transform::JsonResponseKind response_kind =
         json_transform::JsonResponseKind::SkipUnsupported;
     bool has_query_selection = false;
+    bool has_effective_field_filter = false;
     std::shared_ptr<const runtime::RuntimePolicySnapshot> active_policy_snapshot = nullptr;
     const policy::RoutePolicy* matched_policy = nullptr;
     bool is_non_2xx_response = false;
@@ -235,8 +236,33 @@ apply_request_headers_selection(const envoy::service::ext_proc::v3::ProcessingRe
             compression::parse_accept_encoding(view.accept_encoding, view.accept_encoding_len);
     }
 
-    state->has_query_selection = state->context.selected_field_count > 0;
+    state->has_query_selection = state->context.client_query_present;
     return view;
+}
+
+static void prepare_effective_field_selection_from_policy(StreamFilterState* state) {
+    if (state == nullptr || state->matched_policy == nullptr)
+        return;
+
+    const policy::FieldFilterPolicy& ff = state->matched_policy->field_filter;
+
+    if (ff.mode == policy::FieldFilterMode::None)
+        return;
+
+    if (ff.mode == policy::FieldFilterMode::Allowlist && !state->has_query_selection) {
+        state->context.selected_field_count = 0;
+        for (std::size_t i = 0; i < ff.field_count && i < policy::kMaxFields; ++i) {
+            std::strncpy(state->context.selected_fields[i], ff.fields[i],
+                         policy::kMaxFieldNameLen - 1);
+            state->context.selected_fields[i][policy::kMaxFieldNameLen - 1] = '\0';
+            state->context.selected_field_count++;
+        }
+        state->has_effective_field_filter = true;
+    } else if (ff.mode == policy::FieldFilterMode::Allowlist && state->has_query_selection) {
+        state->has_effective_field_filter = state->context.selected_field_count > 0;
+    } else if (ff.mode == policy::FieldFilterMode::Denylist) {
+        state->has_effective_field_filter = true;
+    }
 }
 
 void apply_response_content_type(const envoy::service::ext_proc::v3::ProcessingRequest& request,
@@ -284,6 +310,7 @@ bool is_compression_only_route(const StreamFilterState& state) {
         return false;
     }
     return state.matched_policy->compression.enabled && !state.has_query_selection &&
+           state.matched_policy->field_filter.mode == policy::FieldFilterMode::None &&
            state.matched_policy->cache.behavior != policy::CacheBehavior::Store &&
            !state.matched_policy->pagination.enabled && !state.matched_policy->coalescing.enabled;
 }
@@ -294,6 +321,10 @@ bool route_needs_response_body_processing(const StreamFilterState& state) {
     }
 
     if (state.has_query_selection) {
+        return true;
+    }
+
+    if (state.matched_policy->field_filter.mode != policy::FieldFilterMode::None) {
         return true;
     }
 
@@ -376,7 +407,7 @@ bool build_filtered_body_response(const envoy::service::ext_proc::v3::Processing
         return false;
     }
 
-    const bool filtering_active = state.has_query_selection;
+    const bool filtering_active = state.has_query_selection || state.has_effective_field_filter;
 
     if (filtering_active) {
         if (state.response_kind != json_transform::JsonResponseKind::EligibleJson) {
@@ -549,6 +580,13 @@ public:
                         filter_state.active_policy_snapshot->route_matcher,
                         filter_state.context.raw_path,
                         metrics_registry ? &metrics_registry->runtime_metrics : nullptr);
+                }
+
+                if (filter_state.matched_policy != nullptr) {
+                    field_selection::enforce_selected_fields_policy(
+                        &filter_state.context, filter_state.matched_policy->field_filter);
+                    filter_state.has_query_selection = filter_state.context.client_query_present;
+                    prepare_effective_field_selection_from_policy(&filter_state);
                 }
 
                 if (trace_enabled) {

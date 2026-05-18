@@ -62,6 +62,12 @@ FlatJsonFilterStatus filter_flat_json_by_selected_fields(const ParsedFlatJsonObj
                                                          char* output, std::size_t output_capacity,
                                                          std::size_t* output_length);
 
+FlatJsonFilterStatus
+filter_flat_json_by_policy_denylist(const ParsedFlatJsonObject& parsed,
+                                    const apg::ApgTransformContext& context,
+                                    const policy::FieldFilterPolicy& policy_filter, char* output,
+                                    std::size_t output_capacity, std::size_t* output_length);
+
 // Applies JSON filtering when enabled, otherwise returns the original body unchanged.
 // Updates context.removed_field_count with the per-call removed key metric.
 FlatJsonFilterStatus transform_flat_json_with_filter_toggle(const char* input_body,

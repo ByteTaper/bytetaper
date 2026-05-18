@@ -90,6 +90,7 @@ struct ApgTransformContext {
     std::size_t raw_query_length = 0;
     RequestQueryView request_query_view = {};
     bool request_query_view_ready = false;
+    bool client_query_present = false;
     char selected_fields[policy::kMaxFields][policy::kMaxFieldNameLen] = {};
     // Canonical API-intelligence metric.
     // This count represents selected fields after policy filtering.

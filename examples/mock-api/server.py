@@ -143,6 +143,10 @@ def build_payload(size=1024, scenario="default", sentinel="bt-001", version=1):
         "sentinel": sentinel,
         "version": version,
         "payload": "x" * size,
+        "secret_token": "super-secret-token-123",
+        "debug_internal": "internal-debug-log-data",
+        "request_path": "/api/v1/small",
+        "generated_at_epoch_ms": 1716035000000,
     }
     return json.dumps(base_object, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
@@ -287,7 +291,8 @@ class Handler(BaseHTTPRequestHandler):
             base_body = json.dumps(base_object, separators=(",", ":"), sort_keys=True)
             base_size = len(base_body.encode("utf-8"))
             filler_length = 1200000 - base_size
-            payload = build_payload(filler_length, scenario="oversized-json")
+            base_object["payload"] = "x" * filler_length
+            payload = json.dumps(base_object, separators=(",", ":"), sort_keys=True).encode("utf-8")
             self.write_response(200, payload, delay_kind=delay_kind)
             return
 

@@ -509,6 +509,11 @@ static void send_response(int conn_fd, int status_code, const std::string& statu
 }
 
 static void handle_connection(int conn_fd, TaperQueryAdminHttpServerImpl* impl) {
+    struct timeval tv;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*) &tv, sizeof(tv));
+
     const auto& config = impl->config;
     char chunk[1024];
     std::string request_headers;
@@ -869,7 +874,8 @@ static void accept_loop(TaperQueryAdminHttpServerImpl* impl) {
                 break;
             continue;
         }
-        handle_connection(conn_fd, impl);
+        std::thread t([conn_fd, impl]() { handle_connection(conn_fd, impl); });
+        t.detach();
     }
 }
 
