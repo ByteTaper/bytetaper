@@ -155,11 +155,11 @@ TEST(TaperQueryPolicyIrHashTest, KnownEmptyHashCheck) {
     // formatting regressions.
     TqRoutePolicy empty_route;
     std::string route_hash = compute_route_policy_identity(empty_route);
-    // Placeholder to be updated on build-run
-    EXPECT_EQ(route_hash, "f6f43c5661249b8c");
+    // Authoritative known hash value for an empty route policy
+    EXPECT_EQ(route_hash, "01b469597fa5feff");
 
     TqPolicyDocument empty_doc;
     std::string doc_hash = compute_policy_document_identity(empty_doc);
-    // Placeholder to be updated on build-run
+    // Authoritative known hash value for an empty policy document
     EXPECT_EQ(doc_hash, "d4e71d17c5cb4e10");
 }
