@@ -2,8 +2,8 @@ apiVersion: v2
 name: bytetaper
 description: A Helm chart for deploying the ByteTaper API Performance Gateway runtime
 type: application
-version: 0.1.0
-appVersion: "v0.1.0"
+version: 0.1.1
+appVersion: "v0.1.1"
 home: https://github.com/ByteTaper/bytetaper
 sources:
   - https://github.com/ByteTaper/bytetaper
