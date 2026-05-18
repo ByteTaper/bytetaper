@@ -17,11 +17,12 @@ struct PolicyIrLoadResult {
     std::string error;
 };
 
-/**
- * Loads and constructs a modern TqPolicyDocument IR directly from a YAML file path.
- * Leverages the existing production yaml loader internally.
- */
 PolicyIrLoadResult load_policy_ir_from_yaml_file(const char* path);
+
+/**
+ * Loads and constructs a modern TqPolicyDocument IR directly from a YAML content string.
+ */
+PolicyIrLoadResult load_policy_ir_from_yaml_string(const char* yaml_content, std::size_t len);
 
 /**
  * Maps a single static C-array style RoutePolicy to our safe modern heap-based TqRoutePolicy IR.

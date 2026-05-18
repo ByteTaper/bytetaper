@@ -4,8 +4,10 @@
 #include "runtime/policy_snapshot.h"
 #include "taperquery/policy_ir.h"
 #include "taperquery/policy_ir_identity.h"
+#include "taperquery/policy_ir_yaml_roundtrip.h"
 #include "taperquery/tq_apply_service.h"
 
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <thread>
 namespace bytetaper::taperquery {
@@ -586,6 +588,192 @@ TEST_F(TqApplyServiceTest, DryRunNoOpAllowed) {
     EXPECT_TRUE(res.ok);
     EXPECT_EQ(res.status, TqApplyStatus::DryRunReady);
     EXPECT_EQ(store.load()->policy_identity, initial_identity);
+}
+
+TEST_F(TqApplyServiceTest, ApplyUsesRoundTripIrForSnapshot) {
+    TqApplyService service(&store);
+
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"new_route\" when path prefix "
+                 "\"/new-path\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_TRUE(res.ok) << res.message;
+    EXPECT_EQ(res.status, TqApplyStatus::Applied);
+
+    auto current = store.load();
+    ASSERT_NE(current, nullptr);
+    EXPECT_EQ(current->policy_identity, res.applied_policy_identity);
+}
+
+TEST_F(TqApplyServiceTest, DryRunExercisesRoundTrip) {
+    TqApplyService service(&store);
+
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"new_route\" when path prefix "
+                 "\"/new-path\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::DryRun;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_TRUE(res.ok) << res.message;
+    EXPECT_EQ(res.status, TqApplyStatus::DryRunReady);
+    EXPECT_EQ(store.load()->policy_identity, initial_identity); // No swap
+}
+
+TEST_F(TqApplyServiceTest, MetadataUsesPersistedIdentityAndCandidateIdentity) {
+    std::string state_dir = "/tmp/tq_apply_persistence_test_dir";
+    std::filesystem::remove_all(state_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = state_dir;
+
+    TqApplyService service(&store, nullptr, nullptr, config);
+
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"new_route\" when path prefix "
+                 "\"/new-path\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_TRUE(res.ok) << res.message;
+
+    // Load persisted meta
+    auto recovery = load_persisted_active_policy(config);
+    ASSERT_TRUE(recovery.ok) << recovery.error;
+    EXPECT_EQ(recovery.metadata.policy_identity, res.applied_policy_identity);
+    EXPECT_EQ(recovery.metadata.persisted_policy_identity, res.applied_policy_identity);
+    EXPECT_FALSE(recovery.metadata.candidate_policy_identity.empty());
+
+    // Clean up
+    std::filesystem::remove_all(state_dir);
+}
+
+TEST_F(TqApplyServiceTest, RejectedCanonicalYamlMismatch) {
+    std::string state_dir = "/tmp/tq_apply_mismatch_test_dir";
+    std::filesystem::remove_all(state_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = state_dir;
+
+    TqApplyService service(&store, nullptr, nullptr, config);
+
+    std::function<PolicyIrYamlRoundTripResult(const TqPolicyDocument&)> mock_hook =
+        [](const TqPolicyDocument&) {
+            PolicyIrYamlRoundTripResult r;
+            r.ok = true;
+            r.candidate_policy_identity = "candidate_123";
+            r.persisted_policy_identity = "persisted_456"; // Mismatch!
+            return r;
+        };
+    set_roundtrip_override_for_testing(&mock_hook);
+
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"new_route\" when path prefix "
+                 "\"/new-path\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedCanonicalYamlMismatch);
+
+    // Assert active snapshot remains unchanged
+    EXPECT_EQ(store.load()->policy_identity, initial_identity);
+
+    // Assert no files written
+    EXPECT_FALSE(std::filesystem::exists(state_dir + "/active-policy.yaml"));
+    EXPECT_FALSE(std::filesystem::exists(state_dir + "/active-policy.meta.json"));
+
+    // Reset hook
+    set_roundtrip_override_for_testing(nullptr);
+    std::filesystem::remove_all(state_dir);
+}
+
+TEST_F(TqApplyServiceTest, RejectedCanonicalYamlRoundTripFailed) {
+    std::string state_dir = "/tmp/tq_apply_roundtrip_fail_test_dir";
+    std::filesystem::remove_all(state_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = state_dir;
+
+    TqApplyService service(&store, nullptr, nullptr, config);
+
+    std::function<PolicyIrYamlRoundTripResult(const TqPolicyDocument&)> mock_hook =
+        [](const TqPolicyDocument&) {
+            PolicyIrYamlRoundTripResult r;
+            r.ok = false;
+            r.error = "Mock roundtrip emission/parsing failure";
+            return r;
+        };
+    set_roundtrip_override_for_testing(&mock_hook);
+
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"new_route\" when path prefix "
+                 "\"/new-path\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_FALSE(res.ok);
+    EXPECT_EQ(res.status, TqApplyStatus::RejectedCanonicalYamlRoundTripFailed);
+
+    // Assert active snapshot remains unchanged
+    EXPECT_EQ(store.load()->policy_identity, initial_identity);
+
+    // Assert no files written
+    EXPECT_FALSE(std::filesystem::exists(state_dir + "/active-policy.yaml"));
+    EXPECT_FALSE(std::filesystem::exists(state_dir + "/active-policy.meta.json"));
+
+    // Reset hook
+    set_roundtrip_override_for_testing(nullptr);
+    std::filesystem::remove_all(state_dir);
+}
+
+TEST_F(TqApplyServiceTest, RestartLoadedIdentityParity) {
+    std::string state_dir = "/tmp/tq_apply_restart_parity_test_dir";
+    std::filesystem::remove_all(state_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = state_dir;
+
+    TqApplyService service(&store, nullptr, nullptr, config);
+
+    TqApplyRequest req;
+    req.source = "policy \"my-policy\" against sha \"\" { route \"new_route\" when path prefix "
+                 "\"/new-path\" {} }";
+    req.expected_base_identity = initial_identity;
+    req.mode = TqApplyMode::Apply;
+    req.strict_production = false;
+
+    auto res = service.execute(req);
+    EXPECT_TRUE(res.ok) << res.message;
+    EXPECT_EQ(res.status, TqApplyStatus::Applied);
+
+    // Use loader directly matching recovery startup config
+    StartupPolicyLoadConfig load_config;
+    load_config.policy_state_dir = state_dir;
+    load_config.policy_persistence_enabled = true;
+    load_config.fallback_to_bootstrap_on_persisted_policy_error = false;
+
+    auto startup_res = load_startup_policy_with_persistence(load_config);
+    ASSERT_TRUE(startup_res.ok) << startup_res.error;
+    EXPECT_EQ(startup_res.policy_identity, res.applied_policy_identity);
+    EXPECT_EQ(startup_res.generation, res.after_generation);
+
+    std::filesystem::remove_all(state_dir);
 }
 
 } // namespace bytetaper::taperquery

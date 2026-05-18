@@ -20,6 +20,8 @@ struct LocalPolicyPersistenceConfig {
 
 struct PersistedPolicyMetadata {
     std::string policy_identity;
+    std::string candidate_policy_identity;
+    std::string persisted_policy_identity;
     std::string previous_policy_identity;
     std::string expected_base_identity;
     std::uint64_t generation = 0;

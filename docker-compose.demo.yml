@@ -1,0 +1,134 @@
+# docker-compose.demo.yml
+#
+# Local demo override for ByteTaper.
+#
+# Usage:
+#
+#   export LOCAL_UID=$(id -u)
+#   export LOCAL_GID=$(id -g)
+#
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml build bytetaper-dev
+#
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d \
+#     mock-api \
+#     bytetaper-extproc \
+#     envoy
+#
+# Demo URLs:
+#
+#   Envoy public demo URL:       http://localhost:10000
+#   Envoy admin URL:             http://localhost:9901
+#   Mock upstream direct URL:    http://localhost:9000
+#   ByteTaper ExtProc gRPC:      localhost:18080
+#   ByteTaper health/metrics:    http://localhost:18081
+#   TaperQuery Admin HTTP:       http://localhost:18082
+#
+# TaperQuery notes:
+#
+#   - BYTETAPER_ADMIN_ENABLED=1 enables the local TaperQuery Admin HTTP API.
+#   - BYTETAPER_POLICY_PERSISTENCE_ENABLED=1 makes applied policies durable.
+#   - BYTETAPER_POLICY_STATE_DIR=/var/lib/bytetaper/policy is mounted to a
+#     named volume so applied TaperQuery policies survive container restart.
+#
+# Security:
+#
+#   TaperQuery Admin HTTP is unauthenticated and mutating.
+#   This file is for localhost-only demos. Do not expose port 18082 publicly.
+
+services:
+  mock-api:
+    ports:
+      # Direct upstream access for before/after comparisons.
+      - "9000:8080"
+
+  bytetaper-extproc:
+    environment:
+      # Make TaperQuery explicit for the demo instead of relying on defaults.
+      BYTETAPER_ADMIN_ENABLED: "1"
+      BYTETAPER_ADMIN_ADDRESS: "0.0.0.0"
+      BYTETAPER_ADMIN_PORT: "18082"
+
+      # Persist runtime-applied TaperQuery policy snapshots.
+      BYTETAPER_POLICY_PERSISTENCE_ENABLED: "1"
+      BYTETAPER_POLICY_STATE_DIR: "/var/lib/bytetaper/policy"
+
+      # Conservative local demo runtime knobs.
+      BYTETAPER_WORKER_COUNT: "4"
+      BYTETAPER_LOOKUP_LANE_QUOTA: "4"
+      BYTETAPER_STORE_LANE_QUOTA: "1"
+      BYTETAPER_ASYNC_STORE_MAX_BODY_SIZE: "1048576"
+
+      # Keep tracing disabled unless explicitly enabled from the shell.
+      BYTETAPER_TRACE_ENABLED: "${BYTETAPER_TRACE_ENABLED:-0}"
+      BYTETAPER_TRACE_SCENARIO: "${BYTETAPER_TRACE_SCENARIO:-local-demo}"
+      BYTETAPER_TRACE_SLOW_MS: "${BYTETAPER_TRACE_SLOW_MS:-30}"
+      BYTETAPER_TRACE_OUTPUT_DIR: "${BYTETAPER_TRACE_OUTPUT_DIR:-/workspace/reports/traces}"
+
+    volumes:
+      # Preserve the original source and build mounts from docker-compose.yml.
+      - ./:/workspace
+      - bt-build:/workspace/build
+
+      # Dedicated demo state so TaperQuery apply survives restart/recreate.
+      - bt-demo-policy-state:/var/lib/bytetaper/policy
+
+      # Optional: persist local L2 cache across container recreate during demos.
+      - bt-demo-l2-cache:/tmp/bytetaper-cache
+
+    ports:
+      - "18080:18080"
+      - "18081:18081"
+      - "18082:18082"
+
+  envoy:
+    ports:
+      # Public local demo traffic goes through Envoy, then ByteTaper ext_proc,
+      # then the mock upstream API.
+      - "10000:10000"
+
+      # Optional Envoy admin port for local inspection.
+      - "9901:9901"
+
+  taperquery-demo-shell:
+    image: bytetaper-dev:latest
+    profiles:
+      - demo-tools
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    environment:
+      ADMIN_URL: "http://bytetaper-extproc:18082"
+      ENVOY_URL: "http://envoy:10000"
+      MOCK_URL: "http://mock-api:8080"
+    depends_on:
+      bytetaper-extproc:
+        condition: service_healthy
+      envoy:
+        condition: service_healthy
+      mock-api:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+
+        echo "ByteTaper demo shell"
+        echo
+        echo "Inside-container URLs:"
+        echo "  ADMIN_URL=${ADMIN_URL}"
+        echo "  ENVOY_URL=${ENVOY_URL}"
+        echo "  MOCK_URL=${MOCK_URL}"
+        echo
+        echo "Useful commands:"
+        echo "  curl -s ${ADMIN_URL}/admin/taperquery/policy/current | jq ."
+        echo "  curl -i ${ENVOY_URL}/api/v1/small"
+        echo "  curl -s ${MOCK_URL}/call-count"
+        echo
+        exec /bin/bash
+
+volumes:
+  bt-demo-policy-state:
+    name: bytetaper-demo-policy-state
+  bt-demo-l2-cache:
+    name: bytetaper-demo-l2-cache

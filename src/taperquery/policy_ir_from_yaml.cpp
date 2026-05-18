@@ -6,6 +6,7 @@
 #include "policy/yaml_loader.h"
 #include "taperquery/policy_ir_version.h"
 
+#include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
 namespace bytetaper::taperquery {
@@ -158,6 +159,31 @@ PolicyIrLoadResult load_policy_ir_from_yaml_file(const char* path) {
         res.policy.routes.push_back(from_runtime_route_policy(file_res.policies[i]));
     }
 
+    return res;
+}
+
+PolicyIrLoadResult load_policy_ir_from_yaml_string(const char* yaml_content, std::size_t len) {
+    PolicyIrLoadResult res;
+    char tmp_path[] = "/tmp/bytetaper_roundtrip_XXXXXX";
+    int fd = mkstemp(tmp_path);
+    if (fd == -1) {
+        res.ok = false;
+        res.error = "failed to create temporary file for YAML re-parsing";
+        return res;
+    }
+
+    ssize_t written = ::write(fd, yaml_content, len);
+    ::close(fd);
+
+    if (written < 0 || static_cast<std::size_t>(written) != len) {
+        res.ok = false;
+        res.error = "failed to write all bytes to temporary file for YAML re-parsing";
+        ::unlink(tmp_path);
+        return res;
+    }
+
+    res = load_policy_ir_from_yaml_file(tmp_path);
+    ::unlink(tmp_path);
     return res;
 }
 

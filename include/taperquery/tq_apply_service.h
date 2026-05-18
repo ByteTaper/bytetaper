@@ -38,6 +38,8 @@ enum class TqApplyStatus : std::uint8_t {
     RejectedNoChanges,
     RejectedSnapshotBuildFailed,
     RejectedPersistenceFailed,
+    RejectedCanonicalYamlRoundTripFailed,
+    RejectedCanonicalYamlMismatch,
     InternalError,
 };
 

@@ -59,6 +59,10 @@ static std::string status_to_string(TqApplyStatus s) {
         return "RejectedSnapshotBuildFailed";
     case TqApplyStatus::RejectedPersistenceFailed:
         return "RejectedPersistenceFailed";
+    case TqApplyStatus::RejectedCanonicalYamlRoundTripFailed:
+        return "RejectedCanonicalYamlRoundTripFailed";
+    case TqApplyStatus::RejectedCanonicalYamlMismatch:
+        return "RejectedCanonicalYamlMismatch";
     case TqApplyStatus::InternalError:
         return "InternalError";
     }

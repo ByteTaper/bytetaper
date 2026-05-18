@@ -25,6 +25,7 @@ add_library(bytetaper_taperquery_apply STATIC
   src/taperquery/tq_apply_service.cpp
   src/taperquery/tq_apply_audit.cpp
   src/taperquery/policy_persistence.cpp
+  src/taperquery/policy_ir_yaml_roundtrip.cpp
 )
 target_include_directories(bytetaper_taperquery_apply PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(bytetaper_taperquery_apply PUBLIC

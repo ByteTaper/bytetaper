@@ -211,6 +211,10 @@ static std::string status_to_string(taperquery::TqApplyStatus s) {
         return "RejectedSnapshotBuildFailed";
     case taperquery::TqApplyStatus::RejectedPersistenceFailed:
         return "RejectedPersistenceFailed";
+    case taperquery::TqApplyStatus::RejectedCanonicalYamlRoundTripFailed:
+        return "RejectedCanonicalYamlRoundTripFailed";
+    case taperquery::TqApplyStatus::RejectedCanonicalYamlMismatch:
+        return "RejectedCanonicalYamlMismatch";
     case taperquery::TqApplyStatus::InternalError:
         return "InternalError";
     }
@@ -241,6 +245,10 @@ static int status_to_http_code(taperquery::TqApplyStatus s, taperquery::TqApplyM
         return 500;
     case taperquery::TqApplyStatus::RejectedPersistenceFailed:
         return 500;
+    case taperquery::TqApplyStatus::RejectedCanonicalYamlRoundTripFailed:
+        return 500;
+    case taperquery::TqApplyStatus::RejectedCanonicalYamlMismatch:
+        return 500;
     case taperquery::TqApplyStatus::InternalError:
         return 500;
     }
@@ -267,6 +275,10 @@ static std::string apply_status_to_error_code(taperquery::TqApplyStatus s) {
         return "SNAPSHOT_BUILD_FAILED";
     case taperquery::TqApplyStatus::RejectedPersistenceFailed:
         return "PERSISTENCE_FAILED";
+    case taperquery::TqApplyStatus::RejectedCanonicalYamlRoundTripFailed:
+        return "CANONICAL_YAML_ROUNDTRIP_FAILED";
+    case taperquery::TqApplyStatus::RejectedCanonicalYamlMismatch:
+        return "CANONICAL_YAML_MISMATCH";
     case taperquery::TqApplyStatus::InternalError:
         return "INTERNAL_ERROR";
     default:

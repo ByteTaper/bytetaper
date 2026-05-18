@@ -6,6 +6,7 @@
 #include "taperquery/policy_ir_normalize.h"
 #include "taperquery/policy_ir_validator.h"
 #include "taperquery/policy_ir_yaml_emitter.h"
+#include "taperquery/policy_ir_yaml_roundtrip.h"
 #include "taperquery/policy_persistence.h"
 #include "taperquery/tq_apply_audit.h"
 #include "taperquery/tq_compiler.h"
@@ -313,10 +314,39 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
         }
     }
 
+    // Canonical YAML round-trip — must happen before any snapshot build or file write
+    auto roundtrip = emit_and_reparse_canonical_policy_yaml(candidate);
+    if (!roundtrip.ok) {
+        result.ok = false;
+        result.status = TqApplyStatus::RejectedCanonicalYamlRoundTripFailed;
+        result.message = "canonical YAML round-trip failed: " + roundtrip.error;
+
+        TqApplyDiagnostic diag;
+        diag.severity = "error";
+        diag.code = "CANONICAL_YAML_ROUNDTRIP_FAILED";
+        diag.reason = roundtrip.error;
+        result.diagnostics.push_back(diag);
+        return result;
+    }
+    if (roundtrip.candidate_policy_identity != roundtrip.persisted_policy_identity) {
+        result.ok = false;
+        result.status = TqApplyStatus::RejectedCanonicalYamlMismatch;
+        result.message = "canonical YAML round-trip identity mismatch: candidate=" +
+                         roundtrip.candidate_policy_identity +
+                         ", persisted=" + roundtrip.persisted_policy_identity;
+
+        TqApplyDiagnostic diag;
+        diag.severity = "error";
+        diag.code = "CANONICAL_YAML_MISMATCH";
+        diag.reason = result.message;
+        result.diagnostics.push_back(diag);
+        return result;
+    }
+
     // Production-grade verification: build candidate snapshot using a non-mutating dummy generation
     // to catch compile/runtime failures without consuming a store generation.
     auto dummy_gen = current_snapshot->generation + 1;
-    auto build_res = builder_->build_snapshot(candidate, dummy_gen);
+    auto build_res = builder_->build_snapshot(roundtrip.parsed_policy_ir, dummy_gen);
     if (!build_res.ok) {
         result.ok = false;
         result.status = TqApplyStatus::RejectedSnapshotBuildFailed;
@@ -343,7 +373,7 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
     auto next_gen = current_snapshot->generation + 1;
 
     // Rebuild snapshot with the true incremented generation to ensure strict serial consistency
-    auto final_build_res = builder_->build_snapshot(candidate, next_gen);
+    auto final_build_res = builder_->build_snapshot(roundtrip.parsed_policy_ir, next_gen);
     if (!final_build_res.ok) {
         result.ok = false;
         result.status = TqApplyStatus::RejectedSnapshotBuildFailed;
@@ -351,24 +381,12 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
         return result;
     }
 
-    // Emit canonical YAML from normalized candidate IR
-    PolicyIrYamlEmitResult emit_res = emit_policy_ir_canonical_yaml(candidate);
-    if (!emit_res.ok) {
-        result.ok = false;
-        result.status = TqApplyStatus::InternalError;
-        result.message = "canonical YAML emit failed: " + emit_res.error;
-        TqApplyDiagnostic diag;
-        diag.severity = "error";
-        diag.code = "CANONICAL_YAML_EMIT_FAILED";
-        diag.reason = emit_res.error;
-        result.diagnostics.push_back(diag);
-        return result;
-    }
-
     // Persist before swap — durability before visibility
     if (persistence_config_.enabled && !persistence_config_.state_dir.empty()) {
         PersistedPolicyMetadata meta{};
         meta.policy_identity = final_build_res.snapshot->policy_identity;
+        meta.candidate_policy_identity = roundtrip.candidate_policy_identity;
+        meta.persisted_policy_identity = roundtrip.persisted_policy_identity;
         meta.previous_policy_identity = current_snapshot->policy_identity;
         meta.expected_base_identity = request.expected_base_identity;
         meta.generation = final_build_res.snapshot->generation;
@@ -379,8 +397,8 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
         meta.operator_id = request.operator_id;
         meta.request_id = request.request_id;
 
-        auto persist_res =
-            persist_active_policy_canonical_yaml(persistence_config_, candidate, meta);
+        auto persist_res = persist_active_policy_canonical_yaml(persistence_config_,
+                                                                roundtrip.parsed_policy_ir, meta);
 
         if (!persist_res.ok) {
             result.ok = false;

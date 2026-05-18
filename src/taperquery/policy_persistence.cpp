@@ -204,6 +204,10 @@ static std::string escape_json_string(const std::string& input) {
 std::string serialize_metadata(const PersistedPolicyMetadata& meta) {
     std::string json = "{\n";
     json += "  \"policy_identity\": \"" + escape_json_string(meta.policy_identity) + "\",\n";
+    json += "  \"candidate_policy_identity\": \"" +
+            escape_json_string(meta.candidate_policy_identity) + "\",\n";
+    json += "  \"persisted_policy_identity\": \"" +
+            escape_json_string(meta.persisted_policy_identity) + "\",\n";
     json += "  \"previous_policy_identity\": \"" +
             escape_json_string(meta.previous_policy_identity) + "\",\n";
     json += "  \"expected_base_identity\": \"" + escape_json_string(meta.expected_base_identity) +
@@ -461,6 +465,8 @@ load_persisted_active_policy(const LocalPolicyPersistenceConfig& config) {
 
     PersistedPolicyMetadata meta;
     meta.policy_identity = get_json_string_field(meta_json, "policy_identity");
+    meta.candidate_policy_identity = get_json_string_field(meta_json, "candidate_policy_identity");
+    meta.persisted_policy_identity = get_json_string_field(meta_json, "persisted_policy_identity");
     meta.previous_policy_identity = get_json_string_field(meta_json, "previous_policy_identity");
     meta.expected_base_identity = get_json_string_field(meta_json, "expected_base_identity");
     meta.generation = get_json_uint64_field(meta_json, "generation");

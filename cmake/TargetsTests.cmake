@@ -2711,6 +2711,13 @@ if(BUILD_TESTING)
   target_link_libraries(tq_apply_service_test PRIVATE gtest_main bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter)
   add_test(NAME tq_apply_service_test COMMAND tq_apply_service_test)
 
+  add_executable(policy_ir_yaml_roundtrip_test
+    tests/policy_ir_yaml_roundtrip_test.cpp
+  )
+  target_include_directories(policy_ir_yaml_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(policy_ir_yaml_roundtrip_test PRIVATE gtest_main bytetaper_taperquery_apply bytetaper_taperquery_loader bytetaper_runtime bytetaper_extproc_adapter)
+  add_test(NAME policy_ir_yaml_roundtrip_test COMMAND policy_ir_yaml_roundtrip_test)
+
   add_executable(taperquery_admin_http_server_test
     tests/taperquery_admin_http_server_test.cpp
   )
