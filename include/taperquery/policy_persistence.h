@@ -46,6 +46,17 @@ enum class MetadataValidationError {
     ApiVersionUnsupported,
 };
 
+enum class VersionedPolicyError {
+    Ok,
+    Missing,
+    HashMismatch,
+    Conflict,
+    WriteFailed,
+    RenameFailed,
+    DirectoryCreateFailed,
+    ActiveMirrorHashMismatch,
+};
+
 struct PersistedPolicyMetadata {
     // === Existing fields (unchanged) ===
     std::string policy_identity;
