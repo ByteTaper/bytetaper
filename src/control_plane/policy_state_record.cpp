@@ -376,6 +376,9 @@ std::string serialize_policy_update_job_record(const PolicyUpdateJobRecord& reco
             ",\n";
     json +=
         "  \"updatedAtUnixEpochMs\": " + std::to_string(record.updated_at_unix_epoch_ms) + ",\n";
+    json += "  \"activationStatus\": \"" + escape_json_string(record.activation_status) + "\",\n";
+    json += "  \"activationStage\": \"" + escape_json_string(record.activation_stage) + "\",\n";
+    json += "  \"activationMessage\": \"" + escape_json_string(record.activation_message) + "\",\n";
     if (!policy_update_job_has_failure_details(record)) {
         json += "  \"failure\": null\n";
     } else {
@@ -416,6 +419,9 @@ bool deserialize_policy_update_job_record(const std::string& json, PolicyUpdateJ
     record.candidate_canonical_hash = get_json_string_field(json, "candidateCanonicalHash");
     record.submitted_at_unix_epoch_ms = get_json_uint64_field(json, "submittedAtUnixEpochMs");
     record.updated_at_unix_epoch_ms = get_json_uint64_field(json, "updatedAtUnixEpochMs");
+    record.activation_status = get_json_string_field(json, "activationStatus");
+    record.activation_stage = get_json_string_field(json, "activationStage");
+    record.activation_message = get_json_string_field(json, "activationMessage");
     deserialize_policy_update_job_failure(json, &record.failure);
 
     if (record.record_type.empty() || record.job_id.empty()) {

@@ -189,6 +189,19 @@ TqCacheNamespaceApplyResult version_and_cleanup_cache_namespaces_for_apply(
 TqCacheNamespaceApplyResult version_epochs_for_apply(const TqApplyPlan& plan,
                                                      runtime::RouteCacheEpochStore* epoch_store);
 
+TqCacheNamespaceApplyResult
+enqueue_route_cleanups_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
+                                 RouteCacheCleanupQueue* l2_cleanup_queue);
+
+TqCacheNamespaceApplyResult
+perform_l1_cleanups_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
+                              cache::L1Cache* l1_cache);
+
+TqCacheNamespaceApplyResult
+prepare_operational_sync_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
+                                   cache::L1Cache* l1_cache,
+                                   RouteCacheCleanupQueue* l2_cleanup_queue);
+
 // Decoupled cleanup stage (to be run AFTER successful active policy snapshot swap)
 TqCacheNamespaceApplyResult
 cleanup_cache_namespaces_for_apply(const TqCacheNamespaceApplyResult& epoch_res,

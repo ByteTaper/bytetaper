@@ -85,6 +85,9 @@ struct PolicyUpdateJobRecord {
     std::uint64_t submitted_at_unix_epoch_ms = 0;
     std::uint64_t updated_at_unix_epoch_ms = 0;
     PolicyUpdateJobFailureRecord failure{};
+    std::string activation_status;
+    std::string activation_stage;
+    std::string activation_message;
 };
 
 struct ExpectedActivePolicy {

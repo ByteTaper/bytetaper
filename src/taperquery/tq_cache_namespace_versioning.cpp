@@ -257,28 +257,11 @@ TqCacheNamespaceApplyResult version_epochs_for_apply(const TqApplyPlan& plan,
 }
 
 TqCacheNamespaceApplyResult
-cleanup_cache_namespaces_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
-                                   cache::L1Cache* l1_cache,
-                                   RouteCacheCleanupQueue* l2_cleanup_queue) {
+enqueue_route_cleanups_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
+                                 RouteCacheCleanupQueue* l2_cleanup_queue) {
     TqCacheNamespaceApplyResult result = epoch_res;
 
     for (auto& route_plan : result.routes) {
-        // L1 Cleanup (Synchronous)
-        if (route_plan.l1_cleanup_required && l1_cache != nullptr) {
-            cache::L1RouteNamespaceCleanupRequest l1_req;
-            l1_req.route_id = route_plan.route_id.c_str();
-            l1_req.old_epoch = route_plan.old_epoch;
-            l1_req.old_policy_identity = route_plan.before_route_identity.c_str();
-            l1_req.include_variant_entries = true;
-
-            auto l1_res = cache::l1_cleanup_route_namespace(l1_cache, l1_req);
-            route_plan.l1_removed_count = l1_res.removed_count;
-            if (!l1_res.ok) {
-                route_plan.warnings.push_back("L1 cleanup failed: " + l1_res.error);
-            }
-        }
-
-        // L2 Cleanup (Asynchronous Enqueue)
         if (route_plan.l2_cleanup_required && l2_cleanup_queue != nullptr) {
             RouteCacheCleanupJob l2_job;
             l2_job.route_id = route_plan.route_id;
@@ -293,6 +276,54 @@ cleanup_cache_namespaces_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
     }
 
     return result;
+}
+
+TqCacheNamespaceApplyResult
+perform_l1_cleanups_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
+                              cache::L1Cache* l1_cache) {
+    TqCacheNamespaceApplyResult result = epoch_res;
+
+    for (auto& route_plan : result.routes) {
+        if (route_plan.l1_cleanup_required && l1_cache != nullptr) {
+            cache::L1RouteNamespaceCleanupRequest l1_req;
+            l1_req.route_id = route_plan.route_id.c_str();
+            l1_req.old_epoch = route_plan.old_epoch;
+            l1_req.old_policy_identity = route_plan.before_route_identity.c_str();
+            l1_req.include_variant_entries = true;
+
+            const auto l1_res = cache::l1_cleanup_route_namespace(l1_cache, l1_req);
+            route_plan.l1_removed_count = l1_res.removed_count;
+            route_plan.variant_cleanup_required = true;
+            if (!l1_res.ok) {
+                route_plan.warnings.push_back("L1 cleanup failed: " + l1_res.error);
+            }
+        }
+    }
+
+    return result;
+}
+
+TqCacheNamespaceApplyResult
+prepare_operational_sync_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
+                                   cache::L1Cache* l1_cache,
+                                   RouteCacheCleanupQueue* l2_cleanup_queue) {
+    TqCacheNamespaceApplyResult result =
+        enqueue_route_cleanups_for_apply(epoch_res, l2_cleanup_queue);
+    if (!result.ok) {
+        return result;
+    }
+    return perform_l1_cleanups_for_apply(result, l1_cache);
+}
+
+TqCacheNamespaceApplyResult
+cleanup_cache_namespaces_for_apply(const TqCacheNamespaceApplyResult& epoch_res,
+                                   cache::L1Cache* l1_cache,
+                                   RouteCacheCleanupQueue* l2_cleanup_queue) {
+    TqCacheNamespaceApplyResult result = perform_l1_cleanups_for_apply(epoch_res, l1_cache);
+    if (!result.ok) {
+        return result;
+    }
+    return enqueue_route_cleanups_for_apply(result, l2_cleanup_queue);
 }
 
 } // namespace bytetaper::taperquery

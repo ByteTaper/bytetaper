@@ -26,6 +26,9 @@ PolicyUpdateJobRecord to_job_record(const PolicyUpdateJob& job) {
     record.failure.message = job.failure.message;
     record.failure.expected_generation = job.failure.expected_generation;
     record.failure.actual_generation = job.failure.actual_generation;
+    record.activation_status = job.activation_status;
+    record.activation_stage = job.activation_stage;
+    record.activation_message = job.activation_message;
     return record;
 }
 
@@ -53,6 +56,9 @@ void apply_job_record_to_job(const PolicyUpdateJobRecord& record, PolicyUpdateJo
     job->failure.message = record.failure.message;
     job->failure.expected_generation = record.failure.expected_generation;
     job->failure.actual_generation = record.failure.actual_generation;
+    job->activation_status = record.activation_status;
+    job->activation_stage = record.activation_stage;
+    job->activation_message = record.activation_message;
 }
 
 PolicyUpdateJobState parse_policy_update_job_state(const std::string& state) {

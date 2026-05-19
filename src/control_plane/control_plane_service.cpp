@@ -680,8 +680,23 @@ ControlPlaneService::get_policy_update_job(const std::string& job_id,
     }
 
     result.ok = true;
-    result.status = PolicyApplyStatus::Applied;
     result.job = *job;
+
+    if (job->activation_status == "policy_active") {
+        result.status = PolicyApplyStatus::PolicyActive;
+    } else if (job->activation_status == "policy_active_cleanup_pending") {
+        result.status = PolicyApplyStatus::PolicyActiveCleanupPending;
+    } else if (job->activation_status == "policy_activation_failed") {
+        result.status = PolicyApplyStatus::PolicyActivationFailed;
+        result.ok = false;
+    } else if (job->activation_status == "policy_activation_in_progress") {
+        result.status = PolicyApplyStatus::PolicyActivationInProgress;
+    } else if (job->state == "committed" && job->activation_status.empty()) {
+        result.status = PolicyApplyStatus::PolicyCommittedNotActivated;
+    } else {
+        result.status = PolicyApplyStatus::Applied;
+    }
+
     return result;
 }
 
