@@ -3,6 +3,7 @@
 
 ARG ROCKSPACK_IMAGE=haluan/rockspack:11.1.1-ubuntu26.04-6cdeb9d-devel
 ARG BYTETAPER_RUNTIME_OS_IMAGE=ubuntu:26.04
+ARG BYTETAPER_RUNTIME_CHANNEL=ubuntu
 
 ARG BYTETAPER_VERSION=dev
 ARG BYTETAPER_GIT_SHA=unknown
@@ -54,13 +55,14 @@ RUN cmake -S . -B /tmp/build -G Ninja \
       -DBYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
  && cmake --build /tmp/build --target bytetaper-extproc-server
 
-# --- Stage 2: Minimal Runtime Image ---
-FROM ${BYTETAPER_RUNTIME_OS_IMAGE} AS runtime
+# --- Stage 2a: Ubuntu Runtime Image ---
+FROM ${BYTETAPER_RUNTIME_OS_IMAGE} AS runtime-ubuntu
 
 ARG BYTETAPER_VERSION=dev
 ARG BYTETAPER_GIT_SHA=unknown
 ARG BYTETAPER_BUILD_DATE=unknown
 ARG BYTETAPER_RUNTIME_OS_IMAGE=ubuntu:26.04
+ARG BYTETAPER_RUNTIME_CHANNEL=ubuntu
 
 LABEL org.opencontainers.image.title="ByteTaper Runtime"
 LABEL org.opencontainers.image.description="ByteTaper API Performance Gateway runtime image"
@@ -71,6 +73,7 @@ LABEL org.opencontainers.image.created="${BYTETAPER_BUILD_DATE}"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-only OR LicenseRef-Commercial"
 LABEL org.opencontainers.image.base.name="${BYTETAPER_RUNTIME_OS_IMAGE}"
 LABEL io.bytetaper.os-image="${BYTETAPER_RUNTIME_OS_IMAGE}"
+LABEL io.bytetaper.runtime-channel="${BYTETAPER_RUNTIME_CHANNEL}"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -94,7 +97,7 @@ COPY --from=builder /tmp/build/bytetaper-extproc-server /usr/local/bin/bytetaper
 COPY LICENSES/ /opt/bytetaper/LICENSES/
 COPY THIRD_PARTY_NOTICES.md /opt/bytetaper/
 
-RUN echo "{\"name\":\"bytetaper\",\"component\":\"bytetaper-extproc-server\",\"version\":\"${BYTETAPER_VERSION}\",\"git_sha\":\"${BYTETAPER_GIT_SHA}\",\"build_date\":\"${BYTETAPER_BUILD_DATE}\",\"build_type\":\"Release\",\"license\":\"AGPL-3.0-only OR LicenseRef-Commercial\"}" \
+RUN echo "{\"name\":\"bytetaper\",\"component\":\"bytetaper-extproc-server\",\"version\":\"${BYTETAPER_VERSION}\",\"git_sha\":\"${BYTETAPER_GIT_SHA}\",\"build_date\":\"${BYTETAPER_BUILD_DATE}\",\"build_type\":\"Release\",\"runtime_channel\":\"${BYTETAPER_RUNTIME_CHANNEL}\",\"license\":\"AGPL-3.0-only OR LicenseRef-Commercial\"}" \
     > /opt/bytetaper/build-info.json
 
 RUN groupadd -r bytetaper && useradd -r -g bytetaper -u 1001 bytetaper
@@ -109,3 +112,62 @@ EXPOSE 18080 18081
 
 ENTRYPOINT ["bytetaper-extproc-server"]
 CMD ["--help"]
+
+# --- Stage 2b: UBI Micro Runtime Image ---
+FROM registry.access.redhat.com/ubi9/ubi-minimal AS ubi-runtime-deps
+
+RUN microdnf install -y \
+    bzip2-libs \
+    gflags \
+    grpc \
+    lz4-libs \
+    openssl-libs \
+    protobuf \
+    snappy \
+    yaml-cpp \
+    zlib \
+    zstd \
+ && microdnf clean all
+
+FROM ${BYTETAPER_RUNTIME_OS_IMAGE} AS runtime-ubi-micro
+
+ARG BYTETAPER_VERSION=dev
+ARG BYTETAPER_GIT_SHA=unknown
+ARG BYTETAPER_BUILD_DATE=unknown
+ARG BYTETAPER_RUNTIME_OS_IMAGE=registry.access.redhat.com/ubi9/ubi-micro
+ARG BYTETAPER_RUNTIME_CHANNEL=ubi-micro
+
+LABEL org.opencontainers.image.title="ByteTaper Runtime"
+LABEL org.opencontainers.image.description="ByteTaper API Performance Gateway runtime image"
+LABEL org.opencontainers.image.source="https://github.com/ByteTaper/bytetaper"
+LABEL org.opencontainers.image.revision="${BYTETAPER_GIT_SHA}"
+LABEL org.opencontainers.image.version="${BYTETAPER_VERSION}"
+LABEL org.opencontainers.image.created="${BYTETAPER_BUILD_DATE}"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only OR LicenseRef-Commercial"
+LABEL org.opencontainers.image.base.name="${BYTETAPER_RUNTIME_OS_IMAGE}"
+LABEL io.bytetaper.os-image="${BYTETAPER_RUNTIME_OS_IMAGE}"
+LABEL io.bytetaper.runtime-channel="${BYTETAPER_RUNTIME_CHANNEL}"
+
+COPY --from=ubi-runtime-deps /usr/lib64/ /usr/lib64/
+COPY --from=ubi-runtime-deps /lib64/ /lib64/
+COPY --from=builder /usr/local/lib/librocksdb.so* /usr/local/lib64/
+COPY --from=builder /tmp/build/bytetaper-extproc-server /usr/local/bin/bytetaper-extproc-server
+
+COPY LICENSES/ /opt/bytetaper/LICENSES/
+COPY THIRD_PARTY_NOTICES.md /opt/bytetaper/
+
+RUN echo "{\"name\":\"bytetaper\",\"component\":\"bytetaper-extproc-server\",\"version\":\"${BYTETAPER_VERSION}\",\"git_sha\":\"${BYTETAPER_GIT_SHA}\",\"build_date\":\"${BYTETAPER_BUILD_DATE}\",\"build_type\":\"Release\",\"runtime_channel\":\"${BYTETAPER_RUNTIME_CHANNEL}\",\"license\":\"AGPL-3.0-only OR LicenseRef-Commercial\"}" \
+    > /opt/bytetaper/build-info.json \
+ && mkdir -p /etc/bytetaper \
+             /var/lib/bytetaper/l2-cache \
+             /var/run/bytetaper \
+ && chown -R 1001:0 /var/lib/bytetaper /var/run/bytetaper
+
+USER 1001
+EXPOSE 18080 18081
+
+ENTRYPOINT ["bytetaper-extproc-server"]
+CMD ["--help"]
+
+# --- Stage 3: Selected Runtime Channel ---
+FROM runtime-${BYTETAPER_RUNTIME_CHANNEL} AS runtime
