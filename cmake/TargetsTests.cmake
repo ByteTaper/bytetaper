@@ -2843,6 +2843,23 @@ if(BUILD_TESTING)
     COMMAND runtime_policy_bootstrap_import_test
   )
 
+  add_executable(control_plane_service_contract_test
+    tests/control_plane_service_contract_test.cpp
+  )
+  set_source_files_properties(tests/control_plane_service_contract_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(control_plane_service_contract_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(control_plane_service_contract_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+            bytetaper_taperquery_apply
+  )
+  add_test(NAME control_plane_service_contract_test
+    COMMAND control_plane_service_contract_test
+  )
+
   # Concurrency and Race Harness tests (BT-RACE-001)
   add_executable(inflight_registry_generation_concurrency_test
     tests/concurrency/inflight_registry_generation_concurrency_test.cpp
