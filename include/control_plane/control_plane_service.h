@@ -5,15 +5,20 @@
 #define BYTETAPER_CONTROL_PLANE_CONTROL_PLANE_SERVICE_H
 
 #include "control_plane/control_plane_config.h"
+#include "control_plane/fleet_status.h"
 #include "control_plane/policy_apply_api.h"
 #include "control_plane/policy_job_query.h"
 #include "control_plane/policy_version_query.h"
+#include "control_plane/runtime_status_report.h"
+
+#include <memory>
 
 namespace bytetaper::control_plane {
 
 class ControlPlaneService {
 public:
     explicit ControlPlaneService(ControlPlaneServiceConfig config);
+    ~ControlPlaneService();
 
     PolicyDryRunResult dry_run(const PolicyDryRunRequest& request);
 
@@ -33,8 +38,13 @@ public:
     PolicyJobQueryResult get_policy_update_job(const std::string& job_id,
                                                const PolicyResourceKey& resource_key);
 
+    RuntimeStatusReportResult report_runtime_status(const RuntimeStatusReport& report);
+
+    FleetStatusResult get_fleet_status(const PolicyResourceKey& resource_key);
+
 private:
     ControlPlaneServiceConfig config_;
+    std::unique_ptr<class FleetStatusService> fleet_status_service_;
 };
 
 } // namespace bytetaper::control_plane

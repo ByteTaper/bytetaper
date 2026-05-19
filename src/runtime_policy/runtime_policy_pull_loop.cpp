@@ -8,6 +8,7 @@
 #include "runtime_policy/policy_mismatch_classifier.h"
 #include "taperquery/policy_ir_from_yaml.h"
 #include "taperquery/policy_ir_identity.h"
+#include "taperquery/policy_ir_yaml_emitter.h"
 #include "taperquery/policy_persistence.h"
 
 #include <chrono>
@@ -25,6 +26,15 @@ std::string normalize_canonical_hash(const std::string& hash) {
         return hash;
     }
     return "sha256:" + hash;
+}
+
+std::string canonical_hash_for_policy_ir(const taperquery::TqPolicyDocument& policy_ir) {
+    const taperquery::PolicyIrYamlEmitResult emit =
+        taperquery::emit_policy_ir_canonical_yaml(policy_ir);
+    if (!emit.ok || emit.yaml.empty()) {
+        return "";
+    }
+    return "sha256:" + taperquery::compute_canonical_yaml_sha256_hex(emit.yaml);
 }
 
 } // namespace
@@ -93,9 +103,50 @@ void RuntimePolicyPullLoop::record_failure(const std::string& code, const std::s
     if (code == kErrControlPlaneUnavailable || code == kErrActivePolicyQueryFailed) {
         status_.control_plane_reachable = false;
         status_.state = RuntimePolicyPullState::DegradedControlPlaneUnavailable;
+        status_.activation_status = "control_plane_unavailable";
     } else {
         status_.state = RuntimePolicyPullState::ActivationFailed;
+        status_.activation_status = "activation_failed";
     }
+}
+
+void RuntimePolicyPullLoop::sync_status_from_local_snapshot() {
+    if (config_.runtime_policy_store == nullptr) {
+        return;
+    }
+
+    const auto snapshot = config_.runtime_policy_store->load();
+    if (snapshot == nullptr) {
+        return;
+    }
+
+    const std::string canonical_hash = canonical_hash_for_policy_ir(snapshot->policy_ir);
+
+    std::lock_guard<std::mutex> lock(status_mu_);
+    status_.active_generation = snapshot->generation;
+    status_.active_policy_id = snapshot->policy_identity;
+    if (!canonical_hash.empty()) {
+        status_.active_canonical_hash = canonical_hash;
+    }
+}
+
+void RuntimePolicyPullLoop::report_status_to_control_plane() {
+    if (config_.client == nullptr) {
+        return;
+    }
+    sync_status_from_local_snapshot();
+    {
+        std::lock_guard<std::mutex> lock(status_mu_);
+        if (status_.activation_status == "policy_inactive") {
+            if (status_.active_policy_id.empty()) {
+                status_.active_policy_id = "policy_inactive";
+            }
+            if (status_.active_canonical_hash.empty()) {
+                status_.active_canonical_hash = "sha256:policy_inactive";
+            }
+        }
+    }
+    (void) config_.client->report_runtime_status(build_report());
 }
 
 void RuntimePolicyPullLoop::reset_failures() {
@@ -125,6 +176,8 @@ RuntimePolicyStatusReport RuntimePolicyPullLoop::build_report() const {
     report.last_activated_at_unix_epoch_ms = st.last_successful_activation_at_unix_epoch_ms;
     report.gateway_adapter = config_.pull.gateway_adapter;
     report.data_path_mode = config_.pull.data_path_mode;
+    report.last_error_code = st.last_error_code;
+    report.last_error_message = st.last_control_plane_error;
     return report;
 }
 
@@ -150,8 +203,13 @@ void RuntimePolicyPullLoop::tick() {
                        active_res.error);
         const auto snapshot = config_.runtime_policy_store->load();
         if (snapshot == nullptr || snapshot->generation == 0) {
+            {
+                std::lock_guard<std::mutex> lock(status_mu_);
+                status_.activation_status = "policy_inactive";
+            }
             update_status(RuntimePolicyPullState::PolicyInactive);
         }
+        report_status_to_control_plane();
         return;
     }
 
@@ -188,7 +246,7 @@ void RuntimePolicyPullLoop::tick() {
             status_.activation_status = "active";
             status_.state = RuntimePolicyPullState::Active;
         }
-        (void) config_.client->report_runtime_status(build_report());
+        report_status_to_control_plane();
         return;
     }
 
@@ -200,6 +258,7 @@ void RuntimePolicyPullLoop::tick() {
         record_failure(version_res.error_code.empty() ? kErrPolicyVersionFetchFailed
                                                       : version_res.error_code,
                        version_res.error);
+        report_status_to_control_plane();
         return;
     }
 
@@ -210,6 +269,7 @@ void RuntimePolicyPullLoop::tick() {
     if (computed_hash != remote_hash) {
         record_failure(kErrPolicyCanonicalHashMismatch,
                        "fetched policy canonical hash does not match active pointer");
+        report_status_to_control_plane();
         return;
     }
 
@@ -217,6 +277,7 @@ void RuntimePolicyPullLoop::tick() {
         version_res.canonical_yaml.data(), version_res.canonical_yaml.size());
     if (!load_res.ok) {
         record_failure(kErrPolicyCompileFailed, load_res.error);
+        report_status_to_control_plane();
         return;
     }
 
@@ -225,18 +286,21 @@ void RuntimePolicyPullLoop::tick() {
     if (computed_policy_id != remote.policy_id) {
         record_failure(kErrPolicyIdMismatch,
                        "fetched policy identity does not match active pointer policy_id");
+        report_status_to_control_plane();
         return;
     }
 
     if (version_res.record.generation != 0 && version_res.record.generation != remote.generation) {
         record_failure(kErrPolicyGenerationMismatch,
                        "fetched policy version record generation does not match active pointer");
+        report_status_to_control_plane();
         return;
     }
 
     if (load_res.policy.generation != 0 && load_res.policy.generation != remote.generation) {
         record_failure(kErrPolicyGenerationMismatch,
                        "parsed policy document generation does not match active pointer");
+        report_status_to_control_plane();
         return;
     }
 
@@ -247,6 +311,7 @@ void RuntimePolicyPullLoop::tick() {
     if (!build_res.ok || build_res.snapshot == nullptr) {
         record_failure(kErrPolicyCompileFailed,
                        build_res.error.empty() ? "runtime snapshot build failed" : build_res.error);
+        report_status_to_control_plane();
         return;
     }
 
@@ -265,6 +330,7 @@ void RuntimePolicyPullLoop::tick() {
     const operational::PolicyActivationResult activation = barrier.activate(activation_req);
     if (!activation.ok) {
         record_failure(kErrPolicyActivationFailed, activation.message);
+        report_status_to_control_plane();
         return;
     }
 
@@ -324,7 +390,7 @@ void RuntimePolicyPullLoop::tick() {
         status_.state = RuntimePolicyPullState::Active;
     }
 
-    (void) config_.client->report_runtime_status(build_report());
+    report_status_to_control_plane();
 }
 
 void RuntimePolicyPullLoop::loop_main() {

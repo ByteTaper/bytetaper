@@ -2895,6 +2895,47 @@ if(BUILD_TESTING)
     COMMAND control_plane_service_contract_test
   )
 
+  add_executable(runtime_convergence_status_test
+    tests/runtime_convergence_status_test.cpp
+  )
+  target_include_directories(runtime_convergence_status_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(runtime_convergence_status_test
+    PRIVATE gtest_main bytetaper_control_plane_service
+  )
+  add_test(NAME runtime_convergence_status_test COMMAND runtime_convergence_status_test)
+
+  add_executable(fleet_status_service_test
+    tests/fleet_status_service_test.cpp
+  )
+  set_source_files_properties(tests/fleet_status_service_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(fleet_status_service_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(fleet_status_service_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+            RocksDB::RocksDB
+  )
+  add_test(NAME fleet_status_service_test COMMAND fleet_status_service_test)
+
+  add_executable(fleet_status_integration_test
+    tests/fleet_status_integration_test.cpp
+  )
+  set_source_files_properties(tests/fleet_status_integration_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(fleet_status_integration_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(fleet_status_integration_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+            bytetaper_taperquery_apply RocksDB::RocksDB
+  )
+  add_test(NAME fleet_status_integration_test COMMAND fleet_status_integration_test)
+
   add_executable(policy_update_queue_test
     tests/policy_update_queue_test.cpp
   )

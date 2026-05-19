@@ -47,6 +47,8 @@ private:
     void update_status(RuntimePolicyPullState state);
     void record_failure(const std::string& code, const std::string& message);
     void reset_failures();
+    void sync_status_from_local_snapshot();
+    void report_status_to_control_plane();
 
     RuntimePolicyPullLoopConfig config_;
     mutable std::mutex status_mu_;

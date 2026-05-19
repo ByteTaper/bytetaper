@@ -3,6 +3,7 @@
 
 #include "control_plane/control_plane_service.h"
 
+#include "control_plane/fleet_status_service.h"
 #include "control_plane/policy_apply_contract.h"
 #include "control_plane/policy_update_queue.h"
 #include "taperquery/policy_ir_from_yaml.h"
@@ -217,7 +218,14 @@ bool is_policy_inactive(const ControlPlaneServiceConfig& config,
 } // namespace
 
 ControlPlaneService::ControlPlaneService(ControlPlaneServiceConfig config)
-    : config_(std::move(config)) {}
+    : config_(std::move(config)) {
+    if (config_.policy_state_store != nullptr) {
+        fleet_status_service_ =
+            std::make_unique<FleetStatusService>(config_.fleet_status, config_.policy_state_store);
+    }
+}
+
+ControlPlaneService::~ControlPlaneService() = default;
 
 PolicyDryRunResult ControlPlaneService::dry_run(const PolicyDryRunRequest& request) {
     PolicyDryRunResult result{};
@@ -724,6 +732,42 @@ ControlPlaneService::get_policy_update_job(const std::string& job_id,
     }
 
     return result;
+}
+
+namespace {
+
+std::int64_t now_unix_epoch_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+} // namespace
+
+RuntimeStatusReportResult
+ControlPlaneService::report_runtime_status(const RuntimeStatusReport& report) {
+    RuntimeStatusReportResult result{};
+    if (fleet_status_service_ == nullptr) {
+        result.error = "fleet status service is not configured";
+        result.error_code = kErrRuntimeStatusInvalid;
+        return result;
+    }
+
+    RuntimeStatusReport stored = report;
+    if (stored.received_at_unix_epoch_ms <= 0) {
+        stored.received_at_unix_epoch_ms = now_unix_epoch_ms();
+    }
+    return fleet_status_service_->ingest(stored, stored.received_at_unix_epoch_ms);
+}
+
+FleetStatusResult ControlPlaneService::get_fleet_status(const PolicyResourceKey& resource_key) {
+    FleetStatusResult result{};
+    if (fleet_status_service_ == nullptr) {
+        result.error = "fleet status service is not configured";
+        result.error_code = kErrFleetStatusActivePointerMissing;
+        return result;
+    }
+    return fleet_status_service_->get_fleet_status(resource_key, now_unix_epoch_ms());
 }
 
 } // namespace bytetaper::control_plane
