@@ -757,6 +757,7 @@ load_persisted_active_policy(const LocalPolicyPersistenceConfig& config) {
     if (actual_sha != expected_hash) {
         res.ok = false;
         res.error = "Active policy file integrity check failed (METADATA_CANONICAL_HASH_MISMATCH)";
+        res.metadata = meta;
         return res;
     }
 
@@ -922,6 +923,10 @@ load_startup_policy_with_persistence(const StartupPolicyLoadConfig& config) {
     res.ok = false;
     res.error = "Persisted active policy file exists but is corrupt: " + recovery.error;
     return res;
+}
+
+std::string compute_canonical_yaml_sha256_hex(const std::string& canonical_yaml) {
+    return compute_sha256(canonical_yaml);
 }
 
 } // namespace bytetaper::taperquery

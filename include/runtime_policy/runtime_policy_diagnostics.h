@@ -20,6 +20,7 @@ struct RuntimePolicyDiagnostics {
     std::string bootstrap_policy_file;
     std::string error_code;
     std::string error_message;
+    bool bootstrap_drift_detected = false;
     // Future: expected_generation, canonical_hash, activation_barrier_stage
 };
 

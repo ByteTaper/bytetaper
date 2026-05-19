@@ -571,6 +571,13 @@ public:
                 if (policy_store != nullptr) {
                     filter_state.active_policy_snapshot = policy_store->load();
                 }
+                if (filter_state.active_policy_snapshot != nullptr &&
+                    filter_state.active_policy_snapshot->reject_requests) {
+                    envoy::service::ext_proc::v3::ProcessingResponse response{};
+                    bytetaper::extproc::map_policy_inactive_reject_immediate_response(&response);
+                    stream->Write(response);
+                    continue;
+                }
                 const auto req_view = apply_request_headers_selection(request, &filter_state);
                 filter_state.matched_policy = nullptr;
                 if (filter_state.active_policy_snapshot != nullptr &&

@@ -50,9 +50,15 @@ target_link_libraries(bytetaper_taperquery_loader PUBLIC
 add_library(bytetaper_runtime_policy STATIC
   src/runtime_policy/startup_policy_loader.cpp
   src/runtime_policy/runtime_policy_plane.cpp
+  src/runtime_policy/policy_mismatch_classifier.cpp
+  src/runtime_policy/startup_policy_validator.cpp
+  src/runtime_policy/policy_inactive_mode.cpp
+  src/runtime_policy/bootstrap_policy_importer.cpp
+  src/runtime_policy/runtime_policy_status.cpp
 )
 target_include_directories(bytetaper_runtime_policy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(bytetaper_runtime_policy PUBLIC
+  bytetaper_control_plane
   bytetaper_taperquery_loader
   bytetaper_taperquery_apply
   bytetaper_runtime

@@ -40,6 +40,13 @@ static void add_header(envoy::service::ext_proc::v3::ImmediateResponse* imm, con
         envoy::config::core::v3::HeaderValueOption::OVERWRITE_IF_EXISTS_OR_ADD);
 }
 
+void map_policy_inactive_reject_immediate_response(
+    envoy::service::ext_proc::v3::ProcessingResponse* response) {
+    auto* imm = response->mutable_immediate_response();
+    imm->mutable_status()->set_code(envoy::type::v3::ServiceUnavailable);
+    add_header(imm, "x-bytetaper-policy-inactive", "reject");
+}
+
 bool map_cache_hit_to_immediate_response(
     apg::ApgTransformContext& ctx, envoy::service::ext_proc::v3::ProcessingResponse* response) {
 

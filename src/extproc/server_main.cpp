@@ -6,6 +6,7 @@
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
+#include "control_plane/rocksdb_policy_state_store.h"
 #include "extproc/grpc_server.h"
 #include "extproc/startup_parse.h"
 #include "hash/hash.h"
@@ -13,6 +14,7 @@
 #include "metrics/prometheus_registry.h"
 #include "observability/logger.h"
 #include "runtime/route_cache_epoch_store.h"
+#include "runtime_policy/policy_inactive_mode.h"
 #include "runtime_policy/runtime_policy_plane.h"
 #include "taperquery/policy_persistence.h"
 #include "taperquery/tq_apply_audit.h"
@@ -48,10 +50,25 @@ struct ServerArgs {
     const char* admin_taperquery_active_policy_file = "active-policy.yaml";
     const char* admin_taperquery_metadata_file = "active-policy.meta.json";
     const char* policy_state_dir = nullptr;
+    const char* policy_state_db = nullptr;
+    const char* policy_inactive_mode = nullptr;
     bool disable_policy_persistence = false;
     bool help = false;
     bool error = false;
 };
+
+bytetaper::runtime_policy::PolicyInactiveMode parse_policy_inactive_mode(const char* value) {
+    if (value == nullptr) {
+        return bytetaper::runtime_policy::PolicyInactiveMode::PassThrough;
+    }
+    if (std::strcmp(value, "reject") == 0) {
+        return bytetaper::runtime_policy::PolicyInactiveMode::Reject;
+    }
+    if (std::strcmp(value, "startup-fail") == 0) {
+        return bytetaper::runtime_policy::PolicyInactiveMode::StartupFail;
+    }
+    return bytetaper::runtime_policy::PolicyInactiveMode::PassThrough;
+}
 
 ServerArgs parse_args(int argc, char** argv) {
     ServerArgs args{};
@@ -201,6 +218,28 @@ ServerArgs parse_args(int argc, char** argv) {
             continue;
         }
 
+        if (std::strcmp(arg, "--policy-state-db") == 0) {
+            if (i + 1 >= argc || argv[i + 1] == nullptr || argv[i + 1][0] == '\0') {
+                std::fprintf(stderr, "missing value for --policy-state-db\n");
+                args.error = true;
+                return args;
+            }
+            args.policy_state_db = argv[i + 1];
+            i += 1;
+            continue;
+        }
+
+        if (std::strcmp(arg, "--policy-inactive-mode") == 0) {
+            if (i + 1 >= argc || argv[i + 1] == nullptr || argv[i + 1][0] == '\0') {
+                std::fprintf(stderr, "missing value for --policy-inactive-mode\n");
+                args.error = true;
+                return args;
+            }
+            args.policy_inactive_mode = argv[i + 1];
+            i += 1;
+            continue;
+        }
+
         if (std::strcmp(arg, "--help") == 0) {
             args.help = true;
             return args;
@@ -256,7 +295,8 @@ int main(int argc, char** argv) {
             "PATH] [--l2-cache-path PATH] [--metrics-address ADDR] [--metrics-port PORT] "
             "[--admin-address ADDR] [--admin-port PORT] [--admin-enable-taperquery] "
             "[--admin-taperquery-state-dir PATH] [--admin-taperquery-active-policy-file FILENAME] "
-            "[--admin-taperquery-metadata-file FILENAME]");
+            "[--admin-taperquery-metadata-file FILENAME] [--policy-state-db PATH] "
+            "[--policy-inactive-mode pass-through|reject|startup-fail]");
         bytetaper::observability::logger_shutdown();
         return 0;
     }
@@ -400,10 +440,36 @@ int main(int argc, char** argv) {
         }
     }
 
+    const char* env_policy_state_db = std::getenv("BYTETAPER_POLICY_STATE_DB");
+    const char* policy_state_db_path = args.policy_state_db;
+    if (policy_state_db_path == nullptr && env_policy_state_db != nullptr &&
+        env_policy_state_db[0] != '\0') {
+        policy_state_db_path = env_policy_state_db;
+    }
+
+    std::unique_ptr<bytetaper::control_plane::RocksDBPolicyStateStore> policy_state_store;
+    if (policy_state_db_path != nullptr && policy_state_db_path[0] != '\0') {
+        policy_state_store = std::make_unique<bytetaper::control_plane::RocksDBPolicyStateStore>(
+            policy_state_db_path);
+        if (!policy_state_store->is_open()) {
+            std::fprintf(stderr, "error: failed to open policy state db at %s: %s\n",
+                         policy_state_db_path, policy_state_store->open_error().c_str());
+            bytetaper::observability::logger_shutdown();
+            return 1;
+        }
+    }
+
+    const char* env_policy_inactive_mode = std::getenv("BYTETAPER_POLICY_INACTIVE_MODE");
+    const char* inactive_mode_value =
+        args.policy_inactive_mode != nullptr ? args.policy_inactive_mode : env_policy_inactive_mode;
+
     bytetaper::runtime_policy::RuntimePolicyPlaneConfig policy_plane_config{};
     policy_plane_config.bootstrap_policy_file = args.policy_file;
     policy_plane_config.persistence_config = persistence_config;
     policy_plane_config.runtime_policy_store = policy_store.get();
+    policy_plane_config.policy_state_store = policy_state_store.get();
+    policy_plane_config.inactive_config.when_inactive =
+        parse_policy_inactive_mode(inactive_mode_value);
 
     bytetaper::runtime_policy::RuntimePolicyPlane policy_plane(policy_plane_config);
     auto policy_start = policy_plane.start();

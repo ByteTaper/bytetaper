@@ -133,6 +133,9 @@ struct StartupPolicyLoadResult {
 
 StartupPolicyLoadResult load_startup_policy_with_persistence(const StartupPolicyLoadConfig& config);
 
+// Lowercase hex SHA-256 digest of canonical policy YAML bytes (no "sha256:" prefix).
+std::string compute_canonical_yaml_sha256_hex(const std::string& canonical_yaml);
+
 } // namespace bytetaper::taperquery
 
 #endif // BYTETAPER_TAPERQUERY_POLICY_PERSISTENCE_H
