@@ -10,8 +10,10 @@
 namespace bytetaper::control_plane {
 
 PolicyUpdateWorker::PolicyUpdateWorker(std::uint32_t worker_id, PolicyUpdateQueue* queue,
-                                       PolicyApplyTransactionConfig tx_config)
-    : worker_id_(worker_id), queue_(queue), tx_config_(std::move(tx_config)) {}
+                                       PolicyApplyTransactionConfig tx_config,
+                                       operational::PolicyActivationBarrierConfig activation_config)
+    : worker_id_(worker_id), queue_(queue), tx_config_(std::move(tx_config)),
+      activation_config_(std::move(activation_config)) {}
 
 PolicyUpdateWorker::~PolicyUpdateWorker() {
     stop();
@@ -80,6 +82,25 @@ void PolicyUpdateWorker::worker_loop() {
             const PolicyApplyTransactionResult tx_result = job_transaction.execute(job);
             if (!tx_result.ok && job.state != PolicyUpdateJobState::Failed) {
                 job.state = tx_result.final_state;
+                queue_->update_job(job);
+            } else if (tx_result.ok && job.state == PolicyUpdateJobState::Committed &&
+                       activation_config_.policy_state_store != nullptr &&
+                       activation_config_.runtime_policy_store != nullptr) {
+                operational::PolicyActivationBarrier barrier(activation_config_);
+                operational::PolicyActivationRequest activation_req{};
+                activation_req.generation = job.candidate_generation;
+                activation_req.policy_id = job.candidate_policy_id;
+                activation_req.previous_generation = job.expected_base_generation;
+
+                const operational::PolicyActivationResult activation =
+                    barrier.activate(activation_req);
+                job.activation_status = operational::to_string(activation.status);
+                job.activation_stage = operational::to_string(activation.stage);
+                job.activation_message = activation.message;
+                if (!activation.ok) {
+                    job.failure.code = activation.error_code;
+                    job.failure.message = activation.message;
+                }
                 queue_->update_job(job);
             }
         }

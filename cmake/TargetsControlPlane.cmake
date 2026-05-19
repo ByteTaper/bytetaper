@@ -27,6 +27,7 @@ target_include_directories(bytetaper_control_plane_service PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(bytetaper_control_plane_service PUBLIC
   bytetaper_control_plane
+  bytetaper_operational
   bytetaper_taperquery_loader
   bytetaper_taperquery
   bytetaper_taperquery_apply

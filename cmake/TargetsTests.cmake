@@ -2905,6 +2905,34 @@ if(BUILD_TESTING)
     COMMAND policy_update_queue_concurrency_test
   )
 
+  add_executable(policy_activation_barrier_test
+    tests/policy_activation_barrier_test.cpp
+  )
+  set_source_files_properties(tests/policy_activation_barrier_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(policy_activation_barrier_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(policy_activation_barrier_test
+    PRIVATE gtest_main bytetaper_operational bytetaper_control_plane_service
+            bytetaper_control_plane bytetaper_taperquery_apply bytetaper_runtime
+            bytetaper_cache bytetaper_extproc_adapter RocksDB::RocksDB
+  )
+  add_test(NAME policy_activation_barrier_test COMMAND policy_activation_barrier_test)
+
+  add_executable(policy_operational_sync_test
+    tests/policy_operational_sync_test.cpp
+  )
+  target_include_directories(policy_operational_sync_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(policy_operational_sync_test
+    PRIVATE gtest_main bytetaper_operational bytetaper_taperquery_apply
+            bytetaper_runtime
+  )
+  add_test(NAME policy_operational_sync_test COMMAND policy_operational_sync_test)
+
   # Concurrency and Race Harness tests (BT-RACE-001)
   add_executable(inflight_registry_generation_concurrency_test
     tests/concurrency/inflight_registry_generation_concurrency_test.cpp

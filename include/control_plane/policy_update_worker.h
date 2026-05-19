@@ -6,6 +6,7 @@
 
 #include "control_plane/policy_apply_transaction.h"
 #include "control_plane/policy_update_queue.h"
+#include "operational/policy_activation_barrier.h"
 
 #include <atomic>
 #include <cstdint>
@@ -16,7 +17,8 @@ namespace bytetaper::control_plane {
 class PolicyUpdateWorker {
 public:
     PolicyUpdateWorker(std::uint32_t worker_id, PolicyUpdateQueue* queue,
-                       PolicyApplyTransactionConfig tx_config);
+                       PolicyApplyTransactionConfig tx_config,
+                       operational::PolicyActivationBarrierConfig activation_config = {});
 
     ~PolicyUpdateWorker();
 
@@ -34,6 +36,7 @@ private:
     std::uint32_t worker_id_;
     PolicyUpdateQueue* queue_;
     PolicyApplyTransactionConfig tx_config_;
+    operational::PolicyActivationBarrierConfig activation_config_;
     std::thread thread_;
     std::atomic<bool> stop_{ false };
     std::atomic<bool> running_{ false };

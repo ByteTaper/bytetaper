@@ -15,6 +15,16 @@ const char* to_string(PolicyApplyStatus status) {
         return "Accepted";
     case PolicyApplyStatus::Applied:
         return "Applied";
+    case PolicyApplyStatus::PolicyCommittedNotActivated:
+        return "PolicyCommittedNotActivated";
+    case PolicyApplyStatus::PolicyActivationInProgress:
+        return "PolicyActivationInProgress";
+    case PolicyApplyStatus::PolicyActivationFailed:
+        return "PolicyActivationFailed";
+    case PolicyApplyStatus::PolicyActiveCleanupPending:
+        return "PolicyActiveCleanupPending";
+    case PolicyApplyStatus::PolicyActive:
+        return "PolicyActive";
     case PolicyApplyStatus::RejectedInvalidRequest:
         return "RejectedInvalidRequest";
     case PolicyApplyStatus::RejectedParseError:
