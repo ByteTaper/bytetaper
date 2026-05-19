@@ -36,6 +36,10 @@ struct PolicyActivationRequest {
     std::uint64_t generation = 0;
     std::string policy_id;
     std::uint64_t previous_generation = 0;
+    // When set, used as committed (after) policy instead of PolicyStateStore reload.
+    const taperquery::TqPolicyDocument* committed_policy_ir = nullptr;
+    // When set, used for swap instead of rebuilding from after_ir.
+    std::shared_ptr<const runtime::RuntimePolicySnapshot> committed_snapshot;
 };
 
 class PolicyActivationBarrier {

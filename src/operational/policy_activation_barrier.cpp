@@ -9,6 +9,7 @@
 #include "operational/policy_operational_diff.h"
 #include "operational/route_epoch_sync.h"
 #include "taperquery/policy_ir_from_yaml.h"
+#include "taperquery/policy_ir_identity.h"
 
 namespace bytetaper::operational {
 
@@ -108,12 +109,23 @@ PolicyActivationResult PolicyActivationBarrier::activate(const PolicyActivationR
         }
     }
 
-    std::string after_load_err;
-    if (!load_policy_ir_from_store(config_.policy_state_store, config_.resource_key,
-                                   request.generation, &after_ir, &after_load_err)) {
-        return make_failure(std::move(result), PolicyActivationStage::Committed,
-                            "POLICY_ACTIVATION_LOAD_COMMITTED_FAILED",
-                            "failed to load committed policy version: " + after_load_err, true);
+    if (request.committed_policy_ir != nullptr) {
+        after_ir = *request.committed_policy_ir;
+        const std::string computed_policy_id =
+            taperquery::compute_policy_document_identity(after_ir);
+        if (computed_policy_id != request.policy_id) {
+            return make_failure(std::move(result), PolicyActivationStage::Committed,
+                                "POLICY_ACTIVATION_POLICY_ID_MISMATCH",
+                                "committed policy identity does not match request policy_id", true);
+        }
+    } else {
+        std::string after_load_err;
+        if (!load_policy_ir_from_store(config_.policy_state_store, config_.resource_key,
+                                       request.generation, &after_ir, &after_load_err)) {
+            return make_failure(std::move(result), PolicyActivationStage::Committed,
+                                "POLICY_ACTIVATION_LOAD_COMMITTED_FAILED",
+                                "failed to load committed policy version: " + after_load_err, true);
+        }
     }
 
     taperquery::TqApplyPlanOptions plan_opts{};
@@ -162,16 +174,23 @@ PolicyActivationResult PolicyActivationBarrier::activate(const PolicyActivationR
     result.stage = PolicyActivationStage::MaterializedVariantsInvalidated;
     (void) count_materialized_variant_invalidations(cleanup.epoch_res);
 
-    const runtime::RuntimePolicySnapshotBuildResult build =
-        config_.snapshot_build_fn != nullptr
-            ? config_.snapshot_build_fn(after_ir, request.generation)
-            : runtime::build_runtime_policy_snapshot_from_ir(after_ir, request.generation);
-    if (!build.ok || build.snapshot == nullptr) {
-        rollback_route_epochs_for_apply(config_.route_cache_epoch_store, epoch_res);
-        return make_failure(std::move(result), PolicyActivationStage::SnapshotBuilt,
-                            "POLICY_ACTIVATION_SNAPSHOT_BUILD_FAILED", build.error, true);
+    std::shared_ptr<const runtime::RuntimePolicySnapshot> snapshot_to_swap;
+    if (request.committed_snapshot != nullptr) {
+        snapshot_to_swap = request.committed_snapshot;
+        result.stage = PolicyActivationStage::SnapshotBuilt;
+    } else {
+        const runtime::RuntimePolicySnapshotBuildResult build =
+            config_.snapshot_build_fn != nullptr
+                ? config_.snapshot_build_fn(after_ir, request.generation)
+                : runtime::build_runtime_policy_snapshot_from_ir(after_ir, request.generation);
+        if (!build.ok || build.snapshot == nullptr) {
+            rollback_route_epochs_for_apply(config_.route_cache_epoch_store, epoch_res);
+            return make_failure(std::move(result), PolicyActivationStage::SnapshotBuilt,
+                                "POLICY_ACTIVATION_SNAPSHOT_BUILD_FAILED", build.error, true);
+        }
+        snapshot_to_swap = build.snapshot;
+        result.stage = PolicyActivationStage::SnapshotBuilt;
     }
-    result.stage = PolicyActivationStage::SnapshotBuilt;
 
     const auto current_snapshot = config_.runtime_policy_store->load();
     const std::string expected_identity =
@@ -179,9 +198,9 @@ PolicyActivationResult PolicyActivationBarrier::activate(const PolicyActivationR
 
     std::string swap_err;
     const bool swapped = expected_identity.empty()
-                             ? config_.runtime_policy_store->swap(build.snapshot, &swap_err)
+                             ? config_.runtime_policy_store->swap(snapshot_to_swap, &swap_err)
                              : config_.runtime_policy_store->swap_if_current(
-                                   expected_identity, build.snapshot, &swap_err);
+                                   expected_identity, snapshot_to_swap, &swap_err);
     if (!swapped) {
         rollback_route_epochs_for_apply(config_.route_cache_epoch_store, epoch_res);
         return make_failure(std::move(result), PolicyActivationStage::SnapshotSwapped,

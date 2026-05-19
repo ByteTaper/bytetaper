@@ -179,6 +179,34 @@ protected:
     PolicyActivationBarrierConfig config_;
 };
 
+TEST_F(PolicyActivationBarrierTest, ActivateUsesCommittedPolicyIrWithoutStoreVersion) {
+    const TqPolicyDocument gen1 = make_policy_doc("route-a", 1, { "id" });
+    store_version(*store_, key_, gen1, 1);
+    promote_active(*store_, key_, gen1, 1);
+
+    const TqPolicyDocument gen2 = make_policy_doc("route-a", 2, { "id", "name" });
+    const RuntimePolicySnapshotBuildResult gen2_build =
+        build_runtime_policy_snapshot_from_ir(gen2, 2);
+    ASSERT_TRUE(gen2_build.ok);
+    ASSERT_NE(gen2_build.snapshot, nullptr);
+
+    PolicyActivationBarrier barrier(config_);
+    PolicyActivationRequest request{};
+    request.generation = 2;
+    request.policy_id = gen2.policy_id;
+    request.previous_generation = 1;
+    request.committed_policy_ir = &gen2;
+    request.committed_snapshot = gen2_build.snapshot;
+
+    const PolicyActivationResult result = barrier.activate(request);
+    ASSERT_TRUE(result.ok) << result.message;
+
+    const auto active = runtime_store_.load();
+    ASSERT_NE(active, nullptr);
+    EXPECT_EQ(active->generation, 2u);
+    EXPECT_EQ(active->policy_identity, gen2.policy_id);
+}
+
 TEST_F(PolicyActivationBarrierTest, SuccessfulActivationSwapsSnapshot) {
     const TqPolicyDocument gen1 = make_policy_doc("route-a", 1, { "id" });
     store_version(*store_, key_, gen1, 1);

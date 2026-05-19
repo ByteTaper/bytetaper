@@ -6,6 +6,7 @@
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
+#include "control_plane/control_plane_service.h"
 #include "control_plane/rocksdb_policy_state_store.h"
 #include "extproc/grpc_server.h"
 #include "extproc/startup_parse.h"
@@ -14,6 +15,7 @@
 #include "metrics/prometheus_registry.h"
 #include "observability/logger.h"
 #include "runtime/route_cache_epoch_store.h"
+#include "runtime_policy/control_plane_policy_client.h"
 #include "runtime_policy/policy_inactive_mode.h"
 #include "runtime_policy/runtime_policy_plane.h"
 #include "taperquery/policy_persistence.h"
@@ -495,6 +497,47 @@ int main(int argc, char** argv) {
             l2_cache, &metrics_registry.cache_metrics);
     route_cache_cleanup_queue->start_worker();
 
+    std::unique_ptr<bytetaper::control_plane::ControlPlaneService> control_plane_service;
+    std::unique_ptr<bytetaper::runtime_policy::InProcessControlPlanePolicyClient> cp_policy_client;
+    bool policy_pull_enabled = policy_state_store != nullptr;
+    if (const char* env_pull = std::getenv("BYTETAPER_POLICY_PULL_ENABLED"); env_pull != nullptr) {
+        const std::string pull_val(env_pull);
+        policy_pull_enabled =
+            pull_val == "1" || pull_val == "true" || pull_val == "yes" || pull_val == "ON";
+    }
+    if (policy_state_store != nullptr && policy_pull_enabled) {
+        bytetaper::control_plane::ControlPlaneServiceConfig cp_config{};
+        cp_config.policy_state_store = policy_state_store.get();
+        control_plane_service =
+            std::make_unique<bytetaper::control_plane::ControlPlaneService>(cp_config);
+        cp_policy_client =
+            std::make_unique<bytetaper::runtime_policy::InProcessControlPlanePolicyClient>(
+                control_plane_service.get());
+
+        bytetaper::runtime_policy::RuntimePolicyPullLoopConfig pull_loop_config{};
+        pull_loop_config.pull.enabled = true;
+        pull_loop_config.pull.resource_key =
+            bytetaper::control_plane::PolicyResourceKey::default_runtime();
+        pull_loop_config.pull.local_mirror = persistence_config;
+        pull_loop_config.client = cp_policy_client.get();
+        pull_loop_config.runtime_policy_store = policy_store.get();
+        pull_loop_config.activation_barrier.policy_state_store = policy_state_store.get();
+        pull_loop_config.activation_barrier.runtime_policy_store = policy_store.get();
+        pull_loop_config.activation_barrier.route_cache_epoch_store = route_cache_epoch_store.get();
+        pull_loop_config.activation_barrier.l1_cache = l1_cache.get();
+        pull_loop_config.activation_barrier.l2_cleanup_queue = route_cache_cleanup_queue.get();
+        pull_loop_config.activation_barrier.resource_key =
+            bytetaper::control_plane::PolicyResourceKey::default_runtime();
+
+        if (const char* env_interval = std::getenv("BYTETAPER_POLICY_PULL_INTERVAL_MS");
+            env_interval != nullptr && env_interval[0] != '\0') {
+            pull_loop_config.pull.pull_interval_ms =
+                static_cast<std::uint32_t>(std::strtoul(env_interval, nullptr, 10));
+        }
+
+        policy_plane.start_pull_loop(pull_loop_config);
+    }
+
     if (args.admin_enable_taperquery) {
         audit_store = std::make_unique<bytetaper::taperquery::TqApplyAuditStore>();
         apply_service = std::make_unique<bytetaper::taperquery::TqApplyService>(
@@ -579,6 +622,7 @@ int main(int argc, char** argv) {
     health_state.not_ready_reason.store("shutting down", std::memory_order_release);
     health_state.ready.store(false, std::memory_order_release);
 
+    policy_plane.stop_pull_loop();
     bytetaper::extproc::stop_grpc_server(&handle);
     if (admin_started) {
         bytetaper::admin::stop_taperquery_admin_http_server(&admin_handle);

@@ -29,6 +29,14 @@ struct PolicyVersionListResult {
     std::string error;
 };
 
+struct PolicyVersionFetchResult {
+    bool ok = false;
+    PolicyApplyStatus status = PolicyApplyStatus::InternalError;
+    PolicyVersionRecord record{};
+    std::string canonical_yaml;
+    std::string error;
+};
+
 } // namespace bytetaper::control_plane
 
 #endif // BYTETAPER_CONTROL_PLANE_POLICY_VERSION_QUERY_H

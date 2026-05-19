@@ -55,10 +55,16 @@ add_library(bytetaper_runtime_policy STATIC
   src/runtime_policy/policy_inactive_mode.cpp
   src/runtime_policy/bootstrap_policy_importer.cpp
   src/runtime_policy/runtime_policy_status.cpp
+  src/runtime_policy/control_plane_policy_client.cpp
+  src/runtime_policy/runtime_policy_pull_loop.cpp
+  src/runtime_policy/runtime_policy_pull_status.cpp
+  src/runtime_policy/runtime_status_report.cpp
 )
 target_include_directories(bytetaper_runtime_policy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(bytetaper_runtime_policy PUBLIC
   bytetaper_control_plane
+  bytetaper_control_plane_service
+  bytetaper_operational
   bytetaper_taperquery_loader
   bytetaper_taperquery_apply
   bytetaper_runtime

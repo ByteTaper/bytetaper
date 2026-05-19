@@ -307,4 +307,31 @@ const RuntimePolicyDiagnostics& RuntimePolicyPlane::diagnostics() const {
     return diagnostics_;
 }
 
+bool RuntimePolicyPlane::start_pull_loop(const RuntimePolicyPullLoopConfig& pull_config) {
+    if (!pull_config.pull.enabled || pull_config.client == nullptr) {
+        return false;
+    }
+    stop_pull_loop();
+    pull_loop_ = std::make_unique<RuntimePolicyPullLoop>(pull_config);
+    if (pull_config.pull.startup_fetch_timeout_ms > 0) {
+        pull_loop_->tick();
+    }
+    pull_loop_->start();
+    return true;
+}
+
+void RuntimePolicyPlane::stop_pull_loop() {
+    if (pull_loop_ != nullptr) {
+        pull_loop_->stop();
+        pull_loop_.reset();
+    }
+}
+
+RuntimePolicyPullStatus RuntimePolicyPlane::pull_status() const {
+    if (pull_loop_ == nullptr) {
+        return RuntimePolicyPullStatus{};
+    }
+    return pull_loop_->status();
+}
+
 } // namespace bytetaper::runtime_policy
