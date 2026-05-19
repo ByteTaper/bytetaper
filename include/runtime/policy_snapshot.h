@@ -28,6 +28,9 @@ struct RuntimePolicySnapshot {
     bool route_matcher_ready = false;
 
     extproc::CompiledRouteRuntimeTable route_runtimes{};
+
+    // When true, the extproc data path rejects requests (policy inactive + reject mode).
+    bool reject_requests = false;
 };
 
 struct RuntimePolicySnapshotBuildResult {

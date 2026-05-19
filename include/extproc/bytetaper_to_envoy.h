@@ -15,6 +15,10 @@ namespace bytetaper::extproc {
 bool map_cache_hit_to_immediate_response(
     apg::ApgTransformContext& ctx, envoy::service::ext_proc::v3::ProcessingResponse* response);
 
+// Fills `response` with 503 ImmediateResponse when policy is inactive in reject mode.
+void map_policy_inactive_reject_immediate_response(
+    envoy::service::ext_proc::v3::ProcessingResponse* response);
+
 // Writes pagination diagnostic headers to common when context.request_mutation.applied.
 // No-op when mutation was not applied (headers absent = no mutation, per contract).
 void apply_pagination_response_headers(const apg::ApgTransformContext& ctx,
