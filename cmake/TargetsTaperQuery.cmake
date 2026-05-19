@@ -46,3 +46,15 @@ target_link_libraries(bytetaper_taperquery_loader PUBLIC
   bytetaper_taperquery
   policy_yaml_loader
 )
+
+add_library(bytetaper_runtime_policy STATIC
+  src/runtime_policy/startup_policy_loader.cpp
+  src/runtime_policy/runtime_policy_plane.cpp
+)
+target_include_directories(bytetaper_runtime_policy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(bytetaper_runtime_policy PUBLIC
+  bytetaper_taperquery_loader
+  bytetaper_taperquery_apply
+  bytetaper_runtime
+  bytetaper_logger
+)
