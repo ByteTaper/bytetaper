@@ -77,6 +77,7 @@ Testing/
 .agents/
 .claude/
 .codex/
+.cursor/
 .gemini/
 graphify-out/
 AGENTS.md

@@ -10,6 +10,7 @@
 #include <array>
 #include <cctype>
 #include <cerrno>
+#include <cinttypes>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
@@ -164,6 +165,23 @@ public:
     }
 };
 
+// Returns e.g. "versions/0000000013-sha256_abcd1234.yaml"
+// policyId is expected in "sha256:abcd1234..." form; only the first 8 hex chars are used.
+static std::string make_versioned_filename(std::uint64_t generation, const std::string& policy_id) {
+    char gen_buf[16];
+    std::snprintf(gen_buf, sizeof(gen_buf), "%010" PRIu64, generation);
+
+    std::string id_part = policy_id;
+    if (id_part.size() >= 7 && id_part.substr(0, 7) == "sha256:") {
+        id_part = id_part.substr(7);
+    }
+    if (id_part.size() > 8) {
+        id_part = id_part.substr(0, 8);
+    }
+
+    return std::string("versions/") + gen_buf + "-sha256_" + id_part + ".yaml";
+}
+
 std::string compute_sha256(const std::string& input) {
     SHA256 ctx;
     ctx.update(reinterpret_cast<const std::uint8_t*>(input.data()), input.size());
@@ -222,7 +240,12 @@ std::string serialize_metadata(const PersistedPolicyMetadata& meta) {
         json += "  \"canonical_yaml_sha256\": \"" + escape_json_string(meta.canonical_yaml_sha256) +
                 "\",\n";
         json +=
-            "  \"active_policy_file\": \"" + escape_json_string(meta.active_policy_file) + "\"\n";
+            "  \"active_policy_file\": \"" + escape_json_string(meta.active_policy_file) + "\",\n";
+        json += "  \"canonical_hash\": \"" + escape_json_string(meta.canonical_hash) + "\",\n";
+        json += "  \"canonical_hash_algorithm\": \"" +
+                escape_json_string(meta.canonical_hash_algorithm) + "\",\n";
+        json += "  \"versioned_policy_file\": \"" + escape_json_string(meta.versioned_policy_file) +
+                "\"\n";
         json += "}\n";
         return json;
     }
@@ -443,11 +466,53 @@ persist_active_policy_canonical_yaml(const LocalPolicyPersistenceConfig& config,
         return res;
     }
 
-    // 2. Compute SHA-256 over raw YAML bytes
+    // 2. Compute SHA-256 over raw YAML bytes (hex, no prefix)
     std::string yaml_sha = compute_sha256(emit_res.yaml);
+    const std::string canonical_hash_full = "sha256:" + yaml_sha;
+    const std::string versioned_rel =
+        make_versioned_filename(metadata.generation, metadata.policy_identity);
+    const std::filesystem::path versions_dir = std::filesystem::path(config.state_dir) / "versions";
+    const std::string versioned_path =
+        (std::filesystem::path(config.state_dir) / versioned_rel).string();
 
-    // 3. Write canonical YAML to .tmp, fsync, rename, fsync dir
+    std::error_code ec_mk;
+    std::filesystem::create_directories(versions_dir, ec_mk);
+    if (ec_mk) {
+        res.ok = false;
+        res.error =
+            "Failed to create versions directory (VERSIONED_POLICY_DIRECTORY_CREATE_FAILED): " +
+            ec_mk.message();
+        return res;
+    }
+
     std::string err;
+    if (std::filesystem::exists(versioned_path)) {
+        std::ifstream existing(versioned_path);
+        if (!existing.is_open()) {
+            res.ok = false;
+            res.error =
+                "Failed to open existing versioned policy file (VERSIONED_POLICY_WRITE_FAILED)";
+            return res;
+        }
+        std::stringstream ebuf;
+        ebuf << existing.rdbuf();
+        const std::string existing_bytes = ebuf.str();
+        const std::string existing_sha = compute_sha256(existing_bytes);
+        if (existing_sha != yaml_sha) {
+            res.ok = false;
+            res.error = "Versioned policy generation conflict (VERSIONED_POLICY_CONFLICT)";
+            return res;
+        }
+        // Idempotent: same bytes — skip re-write
+    } else {
+        if (!write_atomic_posix(versioned_path, emit_res.yaml, err)) {
+            res.ok = false;
+            res.error = "Versioned policy write failed (VERSIONED_POLICY_WRITE_FAILED): " + err;
+            return res;
+        }
+    }
+    fsync_directory(versions_dir.string());
+
     if (!write_atomic_posix(yaml_path, emit_res.yaml, err)) {
         res.ok = false;
         res.error = err;
@@ -455,15 +520,14 @@ persist_active_policy_canonical_yaml(const LocalPolicyPersistenceConfig& config,
     }
     fsync_directory(config.state_dir);
 
-    // 4. Update metadata and serialize
     PersistedPolicyMetadata updated_meta = metadata;
     updated_meta.canonical_yaml_sha256 = yaml_sha;
-    if (updated_meta.metadata_schema_version >= 1) {
-        updated_meta.canonical_hash = "sha256:" + yaml_sha;
-    }
+    updated_meta.canonical_hash = canonical_hash_full;
+    updated_meta.canonical_hash_algorithm = "sha256";
+    updated_meta.versioned_policy_file = versioned_rel;
     std::string meta_json = serialize_metadata(updated_meta);
 
-    // 5. Write metadata to .tmp, fsync, rename, fsync dir
+    // Write metadata to .tmp, fsync, rename, fsync dir
     if (!write_atomic_posix(meta_path, meta_json, err)) {
         res.ok = false;
         res.error = err;
@@ -603,6 +667,10 @@ load_persisted_active_policy(const LocalPolicyPersistenceConfig& config) {
         meta.request_id = get_json_string_field(meta_json, "request_id");
         meta.canonical_yaml_sha256 = get_json_string_field(meta_json, "canonical_yaml_sha256");
         meta.active_policy_file = get_json_string_field(meta_json, "active_policy_file");
+        meta.canonical_hash = get_json_string_field(meta_json, "canonical_hash");
+        meta.canonical_hash_algorithm =
+            get_json_string_field(meta_json, "canonical_hash_algorithm");
+        meta.versioned_policy_file = get_json_string_field(meta_json, "versioned_policy_file");
     }
 
     if (meta.metadata_schema_version > 1) {
@@ -690,6 +758,40 @@ load_persisted_active_policy(const LocalPolicyPersistenceConfig& config) {
         res.ok = false;
         res.error = "Active policy file integrity check failed (METADATA_CANONICAL_HASH_MISMATCH)";
         return res;
+    }
+
+    if (!meta.versioned_policy_file.empty()) {
+        const std::string versioned_abs =
+            (std::filesystem::path(config.state_dir) / meta.versioned_policy_file).string();
+
+        if (!std::filesystem::exists(versioned_abs)) {
+            res.ok = false;
+            res.error =
+                "Versioned policy file missing (VERSIONED_POLICY_MISSING): " + versioned_abs;
+            return res;
+        }
+
+        std::ifstream vf(versioned_abs);
+        if (!vf.is_open()) {
+            res.ok = false;
+            res.error = "Failed to open versioned policy file: " + versioned_abs;
+            return res;
+        }
+        std::stringstream vbuf;
+        vbuf << vf.rdbuf();
+        const std::string versioned_content = vbuf.str();
+        vf.close();
+
+        const std::string versioned_hash = compute_sha256(versioned_content);
+        std::string expected_versioned = meta.canonical_hash;
+        if (expected_versioned.size() >= 7 && expected_versioned.substr(0, 7) == "sha256:") {
+            expected_versioned = expected_versioned.substr(7);
+        }
+        if (!expected_versioned.empty() && versioned_hash != expected_versioned) {
+            res.ok = false;
+            res.error = "Versioned policy hash mismatch (VERSIONED_POLICY_HASH_MISMATCH)";
+            return res;
+        }
     }
 
     // 4. Parse YAML using load_policy_ir_from_yaml_file

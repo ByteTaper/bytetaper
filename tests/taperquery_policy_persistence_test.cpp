@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <iomanip>
+#include <sstream>
 
 using namespace bytetaper::taperquery;
 namespace fs = std::filesystem;
@@ -33,6 +35,19 @@ TqPolicyDocument create_sample_policy() {
     doc.routes.push_back(r);
 
     return doc;
+}
+
+std::string expected_versioned_policy_rel(std::uint64_t gen, const std::string& policy_id) {
+    std::ostringstream gen_s;
+    gen_s << std::setw(10) << std::setfill('0') << gen;
+    std::string id_part = policy_id;
+    if (id_part.size() >= 7 && id_part.substr(0, 7) == "sha256:") {
+        id_part = id_part.substr(7);
+    }
+    if (id_part.size() > 8) {
+        id_part = id_part.substr(0, 8);
+    }
+    return std::string("versions/") + gen_s.str() + "-sha256_" + id_part + ".yaml";
 }
 
 } // namespace
@@ -226,6 +241,7 @@ TEST(TaperQueryPolicyPersistenceTest, SuccessfulApplyPersistsThenSwaps) {
     // Verify files were actually written to disk
     EXPECT_TRUE(fs::exists(test_dir / "active-policy.yaml"));
     EXPECT_TRUE(fs::exists(test_dir / "active-policy.meta.json"));
+    EXPECT_TRUE(fs::exists(test_dir / "versions"));
 
     fs::remove_all(test_dir);
 }
@@ -370,6 +386,7 @@ TEST(TaperQueryPolicyPersistenceTest, ExtendedMetadataWritesRequiredFields) {
     EXPECT_NE(content.find("\"metadataSchemaVersion\": 1"), std::string::npos);
     EXPECT_NE(content.find("\"resourceKey\": \"policy/default/runtime\""), std::string::npos);
     EXPECT_NE(content.find("\"canonicalHash\": \"sha256:"), std::string::npos);
+    EXPECT_NE(content.find("\"versionedPolicyFile\": \"versions/"), std::string::npos);
 
     // Verify recovery load
     auto recovery = load_persisted_active_policy(config);
@@ -384,6 +401,8 @@ TEST(TaperQueryPolicyPersistenceTest, ExtendedMetadataWritesRequiredFields) {
     EXPECT_EQ(recovery.metadata.kind, "RuntimePolicy");
     EXPECT_EQ(recovery.metadata.active_policy_file, "active.yaml");
     EXPECT_EQ(recovery.metadata.canonical_hash_algorithm, "sha256");
+    EXPECT_FALSE(recovery.metadata.versioned_policy_file.empty());
+    EXPECT_EQ(recovery.metadata.versioned_policy_file.rfind("versions/", 0), 0u);
     EXPECT_EQ(recovery.metadata.bootstrap.file, "bootstrap.yaml");
     EXPECT_EQ(recovery.metadata.bootstrap.role, "initial-default-only");
     EXPECT_TRUE(recovery.metadata.bootstrap.overwrite_protection);
@@ -417,7 +436,8 @@ TEST(TaperQueryPolicyPersistenceTest, LegacyMetadataReadsMissingSchemaVersion) {
     ASSERT_TRUE(recovery.ok) << "Recovery failed: " << recovery.error;
     EXPECT_EQ(recovery.metadata.metadata_schema_version, 0u);
     EXPECT_EQ(recovery.metadata.generation, 5u);
-    EXPECT_TRUE(recovery.metadata.canonical_hash.empty());
+    EXPECT_FALSE(recovery.metadata.canonical_hash.empty());
+    EXPECT_FALSE(recovery.metadata.versioned_policy_file.empty());
 
     fs::remove_all(test_dir);
 }
@@ -861,6 +881,591 @@ TEST(TaperQueryPolicyPersistenceTest, InvalidSourceTypeRejected) {
     auto recovery = load_persisted_active_policy(config);
     EXPECT_FALSE(recovery.ok);
     EXPECT_NE(recovery.error.find("sourceType is invalid"), std::string::npos);
+
+    fs::remove_all(test_dir);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, SuccessfulApplyWritesVersionedYaml) {
+    fs::path test_dir = fs::current_path() / "test_persistence_versioned_write";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 2;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 2;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    auto persist_res = persist_active_policy_canonical_yaml(config, doc, metadata);
+    ASSERT_TRUE(persist_res.ok) << persist_res.error;
+
+    const std::string rel = expected_versioned_policy_rel(2, doc.policy_id);
+    EXPECT_TRUE(fs::exists(test_dir / rel)) << "missing " << rel;
+}
+
+TEST(TaperQueryPolicyPersistenceTest, VersionedFilenameHasGenerationAndPolicyId) {
+    fs::path test_dir = fs::current_path() / "test_persistence_versioned_name";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 7;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 7;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+
+    auto recovery = load_persisted_active_policy(config);
+    ASSERT_TRUE(recovery.ok);
+    EXPECT_EQ(recovery.metadata.versioned_policy_file,
+              expected_versioned_policy_rel(7, doc.policy_id));
+}
+
+TEST(TaperQueryPolicyPersistenceTest, MetadataReferencesVersionedPolicyFile) {
+    fs::path test_dir = fs::current_path() / "test_persistence_meta_versioned_ref";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 1;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 1;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+
+    std::ifstream meta_in(test_dir / "active.meta.json");
+    std::string json((std::istreambuf_iterator<char>(meta_in)), std::istreambuf_iterator<char>());
+    meta_in.close();
+    EXPECT_NE(json.find("\"versionedPolicyFile\": \"versions/"), std::string::npos);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, VersionedYamlHashMatchesMetadata) {
+    fs::path test_dir = fs::current_path() / "test_persistence_versioned_hash";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 3;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 3;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+
+    auto recovery = load_persisted_active_policy(config);
+    ASSERT_TRUE(recovery.ok);
+
+    std::ifstream vf(test_dir / recovery.metadata.versioned_policy_file);
+    ASSERT_TRUE(vf.is_open());
+    std::stringstream vbuf;
+    vbuf << vf.rdbuf();
+    const std::string vyaml = vbuf.str();
+    vf.close();
+
+    std::ifstream af(test_dir / "active.yaml");
+    ASSERT_TRUE(af.is_open());
+    std::stringstream abuf;
+    abuf << af.rdbuf();
+    const std::string ayaml = abuf.str();
+    af.close();
+
+    EXPECT_EQ(vyaml, ayaml);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, IdempotentVersionedWriteSucceeds) {
+    fs::path test_dir = fs::current_path() / "test_persistence_versioned_idempotent";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 4;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 4;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+
+    auto recovery = load_persisted_active_policy(config);
+    ASSERT_TRUE(recovery.ok);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, ConflictingVersionedFileContentFails) {
+    fs::path test_dir = fs::current_path() / "test_persistence_versioned_conflict";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 4;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 4;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    fs::create_directories(test_dir / "versions");
+    const std::string rel = expected_versioned_policy_rel(4, doc.policy_id);
+    {
+        std::ofstream bogus(test_dir / rel);
+        bogus << "not the canonical yaml content\n";
+    }
+
+    auto persist_res = persist_active_policy_canonical_yaml(config, doc, metadata);
+    EXPECT_FALSE(persist_res.ok);
+    EXPECT_NE(persist_res.error.find("VERSIONED_POLICY_CONFLICT"), std::string::npos);
+
+    fs::remove_all(test_dir);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, MissingVersionsDirIsCreated) {
+    fs::path test_dir = fs::current_path() / "test_persistence_versions_mkdir";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 1;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 1;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    ASSERT_FALSE(fs::exists(test_dir / "versions"));
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+    EXPECT_TRUE(fs::is_directory(test_dir / "versions"));
+
+    fs::remove_all(test_dir);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, InvalidVersionsDirectoryPathFailsClearly) {
+    fs::path test_dir = fs::current_path() / "test_persistence_versions_path_invalid";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 1;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 1;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    // Block versions/ creation: a regular file at that path is not a directory.
+    {
+        std::ofstream blocker(test_dir / "versions");
+        blocker << "not a directory\n";
+    }
+    ASSERT_TRUE(fs::is_regular_file(test_dir / "versions"));
+
+    auto persist_res = persist_active_policy_canonical_yaml(config, doc, metadata);
+    EXPECT_FALSE(persist_res.ok);
+    EXPECT_NE(persist_res.error.find("VERSIONED_POLICY_DIRECTORY_CREATE_FAILED"),
+              std::string::npos);
+    EXPECT_FALSE(fs::exists(test_dir / "active.yaml"));
+    EXPECT_FALSE(fs::exists(test_dir / "active.meta.json"));
+
+    fs::remove_all(test_dir);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, RecoveryValidatesVersionedFileWhenPresent) {
+    fs::path test_dir = fs::current_path() / "test_persistence_recovery_versioned_ok";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 1;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 1;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+    ASSERT_TRUE(load_persisted_active_policy(config).ok);
+
+    fs::remove_all(test_dir);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, RecoveryFailsOnMissingVersionedFile) {
+    fs::path test_dir = fs::current_path() / "test_persistence_versioned_missing";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 1;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 1;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+    auto recovery_meta = load_persisted_active_policy(config);
+    ASSERT_TRUE(recovery_meta.ok);
+    fs::remove(test_dir / recovery_meta.metadata.versioned_policy_file);
+
+    auto recovery = load_persisted_active_policy(config);
+    EXPECT_FALSE(recovery.ok);
+    EXPECT_NE(recovery.error.find("VERSIONED_POLICY_MISSING"), std::string::npos);
+
+    fs::remove_all(test_dir);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, RecoveryFailsOnVersionedHashMismatch) {
+    fs::path test_dir = fs::current_path() / "test_persistence_versioned_hash_bad";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 1;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 1;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+    auto recovery_meta = load_persisted_active_policy(config);
+    ASSERT_TRUE(recovery_meta.ok);
+    {
+        std::ofstream tampered(test_dir / recovery_meta.metadata.versioned_policy_file,
+                               std::ios::trunc);
+        tampered << "# tampered versioned copy\n";
+    }
+
+    auto recovery = load_persisted_active_policy(config);
+    EXPECT_FALSE(recovery.ok);
+    EXPECT_NE(recovery.error.find("VERSIONED_POLICY_HASH_MISMATCH"), std::string::npos);
+
+    fs::remove_all(test_dir);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, CorruptedActiveMirrorNotAutoRestoredFromVersioned) {
+    fs::path test_dir = fs::current_path() / "test_persistence_active_corrupt_not_restore";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    doc.generation = 1;
+    doc.api_version = "bytetaper.io/v1alpha1";
+    doc.kind = "RuntimePolicy";
+    doc.schema_version_num = 1;
+    doc.policy_id = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = doc.policy_id;
+    metadata.generation = 1;
+    metadata.source_type = "taperql-apply";
+    metadata.metadata_schema_version = 1;
+    metadata.resource_key = "policy/default/runtime";
+    metadata.schema_version = 1;
+    metadata.api_version = "bytetaper.io/v1alpha1";
+    metadata.kind = "RuntimePolicy";
+    metadata.active_policy_file = "active.yaml";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.canonical_hash_algorithm = "sha256";
+
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+    auto before = load_persisted_active_policy(config);
+    ASSERT_TRUE(before.ok);
+    const std::string versioned_rel = before.metadata.versioned_policy_file;
+    ASSERT_FALSE(versioned_rel.empty());
+
+    {
+        std::ofstream tampered(test_dir / "active.yaml", std::ios::trunc);
+        tampered << "corrupt active mirror\n";
+    }
+
+    auto recovery = load_persisted_active_policy(config);
+    EXPECT_FALSE(recovery.ok);
+    EXPECT_NE(recovery.error.find("integrity check failed"), std::string::npos);
+    EXPECT_TRUE(fs::exists(test_dir / versioned_rel));
+
+    fs::remove_all(test_dir);
+}
+
+TEST(TaperQueryPolicyPersistenceTest, LegacyMetadataWithoutVersionedFileLoadsNormally) {
+    fs::path test_dir = fs::current_path() / "test_persistence_legacy_no_versioned";
+    fs::remove_all(test_dir);
+    fs::create_directories(test_dir);
+
+    LocalPolicyPersistenceConfig config;
+    config.enabled = true;
+    config.state_dir = test_dir.string();
+    config.active_policy_filename = "active.yaml";
+    config.metadata_filename = "active.meta.json";
+
+    TqPolicyDocument doc = create_sample_policy();
+    std::string policy_identity = compute_policy_document_identity(doc);
+
+    PersistedPolicyMetadata metadata;
+    metadata.policy_identity = policy_identity;
+    metadata.generation = 5;
+    metadata.source_type = "admin-api";
+    metadata.written_at_unix_epoch_ms = 123456789;
+    metadata.operator_id = "op";
+    metadata.request_id = "req";
+
+    ASSERT_TRUE(persist_active_policy_canonical_yaml(config, doc, metadata).ok);
+
+    std::ifstream meta_in(test_dir / "active.meta.json");
+    std::string json((std::istreambuf_iterator<char>(meta_in)), std::istreambuf_iterator<char>());
+    meta_in.close();
+
+    // Strip BT-CP-005 optional legacy keys so metadata matches pre-versioned deployments.
+    for (const char* key :
+         { "\"canonical_hash\"", "\"canonical_hash_algorithm\"", "\"versioned_policy_file\"" }) {
+        std::size_t p = json.find(key);
+        if (p != std::string::npos) {
+            std::size_t line_start = json.rfind('\n', p);
+            if (line_start == std::string::npos) {
+                line_start = 0;
+            } else {
+                line_start++;
+            }
+            std::size_t line_end = json.find('\n', p);
+            if (line_end != std::string::npos) {
+                json.erase(line_start, line_end - line_start + 1);
+            }
+        }
+    }
+    {
+        std::size_t closing = json.rfind('}');
+        if (closing != std::string::npos && closing > 0) {
+            std::size_t scan = closing;
+            while (scan > 0 &&
+                   (json[scan - 1] == ' ' || json[scan - 1] == '\n' || json[scan - 1] == '\r')) {
+                --scan;
+            }
+            if (scan > 0 && json[scan - 1] == ',') {
+                json.erase(scan - 1, 1);
+            }
+        }
+    }
+    {
+        std::ofstream out(test_dir / "active.meta.json", std::ios::trunc);
+        out << json;
+    }
+
+    auto recovery = load_persisted_active_policy(config);
+    ASSERT_TRUE(recovery.ok) << recovery.error;
+    EXPECT_TRUE(recovery.metadata.versioned_policy_file.empty());
 
     fs::remove_all(test_dir);
 }
