@@ -25,6 +25,9 @@ public:
 
     ActivePolicyResult get_active_policy(const PolicyResourceKey& resource_key);
 
+    PolicyVersionFetchResult get_policy_version(const PolicyResourceKey& resource_key,
+                                                std::uint64_t generation);
+
     PolicyVersionListResult list_policy_versions(const PolicyResourceKey& resource_key);
 
     PolicyJobQueryResult get_policy_update_job(const std::string& job_id,

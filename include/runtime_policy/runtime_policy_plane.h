@@ -6,7 +6,10 @@
 
 #include "runtime_policy/runtime_policy_config.h"
 #include "runtime_policy/runtime_policy_diagnostics.h"
+#include "runtime_policy/runtime_policy_pull_loop.h"
 #include "runtime_policy/runtime_policy_status.h"
+
+#include <memory>
 
 namespace bytetaper::runtime_policy {
 
@@ -31,10 +34,15 @@ public:
     const RuntimePolicyStatus& status() const;
     const RuntimePolicyDiagnostics& diagnostics() const;
 
+    bool start_pull_loop(const RuntimePolicyPullLoopConfig& pull_config);
+    void stop_pull_loop();
+    RuntimePolicyPullStatus pull_status() const;
+
 private:
     RuntimePolicyPlaneConfig config_;
     RuntimePolicyStatus status_;
     RuntimePolicyDiagnostics diagnostics_;
+    std::unique_ptr<RuntimePolicyPullLoop> pull_loop_;
 };
 
 } // namespace bytetaper::runtime_policy

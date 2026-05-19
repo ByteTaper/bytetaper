@@ -610,6 +610,32 @@ ActivePolicyResult ControlPlaneService::get_active_policy(const PolicyResourceKe
     return result;
 }
 
+PolicyVersionFetchResult
+ControlPlaneService::get_policy_version(const PolicyResourceKey& resource_key,
+                                        std::uint64_t generation) {
+    PolicyVersionFetchResult result{};
+
+    if (config_.policy_state_store == nullptr) {
+        result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        result.error = "policy state store is not configured";
+        return result;
+    }
+
+    const auto version_res =
+        config_.policy_state_store->load_policy_version(resource_key, generation);
+    if (!version_res.ok) {
+        result.status = PolicyApplyStatus::RejectedInvalidRequest;
+        result.error = version_res.error.empty() ? "policy version not found" : version_res.error;
+        return result;
+    }
+
+    result.ok = true;
+    result.status = PolicyApplyStatus::Applied;
+    result.record = version_res.record;
+    result.canonical_yaml = version_res.canonical_yaml;
+    return result;
+}
+
 PolicyVersionListResult
 ControlPlaneService::list_policy_versions(const PolicyResourceKey& resource_key) {
     PolicyVersionListResult result{};
