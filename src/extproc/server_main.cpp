@@ -12,8 +12,8 @@
 #include "metrics/metrics_http_server.h"
 #include "metrics/prometheus_registry.h"
 #include "observability/logger.h"
-#include "policy/yaml_loader.h"
 #include "runtime/route_cache_epoch_store.h"
+#include "runtime_policy/runtime_policy_plane.h"
 #include "taperquery/policy_persistence.h"
 #include "taperquery/tq_apply_audit.h"
 
@@ -400,117 +400,22 @@ int main(int argc, char** argv) {
         }
     }
 
-    bool loaded_from_persistence = false;
-    std::shared_ptr<const bytetaper::runtime::RuntimePolicySnapshot> initial_snapshot;
+    bytetaper::runtime_policy::RuntimePolicyPlaneConfig policy_plane_config{};
+    policy_plane_config.bootstrap_policy_file = args.policy_file;
+    policy_plane_config.persistence_config = persistence_config;
+    policy_plane_config.runtime_policy_store = policy_store.get();
 
-    if (persistence_config.enabled) {
-        bytetaper::observability::log_info("checking for persisted active policy...");
+    bytetaper::runtime_policy::RuntimePolicyPlane policy_plane(policy_plane_config);
+    auto policy_start = policy_plane.start();
 
-        bytetaper::taperquery::StartupPolicyLoadConfig startup_cfg;
-        startup_cfg.bootstrap_policy_file = args.policy_file ? args.policy_file : "";
-        startup_cfg.policy_state_dir = persistence_config.state_dir;
-        startup_cfg.active_policy_filename = persistence_config.active_policy_filename;
-        startup_cfg.metadata_filename = persistence_config.metadata_filename;
-        startup_cfg.policy_persistence_enabled = persistence_config.enabled;
-        startup_cfg.fallback_to_bootstrap_on_persisted_policy_error = false;
-
-        auto startup_res = bytetaper::taperquery::load_startup_policy_with_persistence(startup_cfg);
-        if (!startup_res.ok) {
-            std::fprintf(stderr,
-                         "error: persisted active policy recovery failed due to corruption or "
-                         "invalid configuration: %s\n",
-                         startup_res.error.c_str());
-            bytetaper::observability::logger_shutdown();
-            return 1;
-        }
-
-        if (startup_res.loaded_source == "persisted") {
-            char log_msg[512];
-            std::snprintf(log_msg, sizeof(log_msg),
-                          "restored active policy from disk: identity=%s, generation=%zu",
-                          startup_res.policy_identity.c_str(),
-                          static_cast<std::size_t>(startup_res.generation));
-            bytetaper::observability::log_info(log_msg);
-
-            auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_ir(
-                startup_res.policy_ir, startup_res.generation);
-            if (build_res.ok) {
-                initial_snapshot = build_res.snapshot;
-                loaded_from_persistence = true;
-            } else {
-                std::fprintf(stderr, "error: failed to build snapshot from recovered policy: %s\n",
-                             build_res.error.c_str());
-                bytetaper::observability::logger_shutdown();
-                return 1;
-            }
-        } else {
-            char log_msg[512];
-            std::snprintf(log_msg, sizeof(log_msg),
-                          "no persisted active policy found (will fall back to bootstrap policy)");
-            bytetaper::observability::log_info(log_msg);
-        }
-    }
-
-    if (!loaded_from_persistence) {
-        bytetaper::policy::PolicyFileResult policy_result{};
-        if (args.policy_file != nullptr) {
-            if (!bytetaper::policy::load_policy_from_file(args.policy_file, &policy_result)) {
-                std::fprintf(stderr, "failed to load policy file %s: %s\n", args.policy_file,
-                             policy_result.error ? policy_result.error : "unknown error");
-                health_state.not_ready_reason.store("policy loading error",
-                                                    std::memory_order_release);
-                bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
-                if (l2_cache != nullptr) {
-                    bytetaper::cache::l2_close(&l2_cache);
-                }
-                bytetaper::observability::logger_shutdown();
-                return 3;
-            }
-            if (policy_result.warning[0] != '\0') {
-                std::fprintf(stderr, "policy warning: %s\n", policy_result.warning);
-            }
-            char buf[512];
-            std::snprintf(buf, sizeof(buf), "loaded %zu routes from %s", policy_result.count,
-                          args.policy_file);
-            bytetaper::observability::log_info(buf);
-        }
-
-        if (policy_result.ok) {
-            auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_routes(
-                policy_result.policies, policy_result.count, args.policy_file,
-                policy_store->next_generation());
-            if (!build_res.ok) {
-                std::fprintf(stderr, "failed to build initial policy snapshot: %s\n",
-                             build_res.error.c_str());
-                health_state.not_ready_reason.store("initial policy snapshot build error",
-                                                    std::memory_order_release);
-                bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
-                if (l2_cache != nullptr) {
-                    bytetaper::cache::l2_close(&l2_cache);
-                }
-                bytetaper::observability::logger_shutdown();
-                return 5;
-            }
-            initial_snapshot = build_res.snapshot;
-        } else {
-            auto build_res = bytetaper::runtime::build_runtime_policy_snapshot_from_routes(
-                nullptr, 0, "none", policy_store->next_generation());
-            initial_snapshot = build_res.snapshot;
-        }
-    }
-
-    std::string install_err;
-    if (!policy_store->install_initial(initial_snapshot, &install_err)) {
-        std::fprintf(stderr, "failed to install initial policy snapshot: %s\n",
-                     install_err.c_str());
-        health_state.not_ready_reason.store("initial policy snapshot install error",
-                                            std::memory_order_release);
+    if (!policy_start.ok) {
+        health_state.not_ready_reason.store("policy startup failed", std::memory_order_release);
         bytetaper::metrics::stop_metrics_http_server(&metrics_handle);
         if (l2_cache != nullptr) {
             bytetaper::cache::l2_close(&l2_cache);
         }
         bytetaper::observability::logger_shutdown();
-        return 6;
+        return 1;
     }
 
     std::unique_ptr<bytetaper::taperquery::TqApplyService> apply_service;

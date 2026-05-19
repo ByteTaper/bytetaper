@@ -2788,6 +2788,13 @@ if(BUILD_TESTING)
   target_link_libraries(runtime_policy_startup_recovery_test PRIVATE gtest_main bytetaper_taperquery_apply bytetaper_taperquery_loader bytetaper_runtime)
   add_test(NAME runtime_policy_startup_recovery_test COMMAND runtime_policy_startup_recovery_test)
 
+  add_executable(runtime_policy_plane_test
+    tests/runtime_policy_plane_test.cpp
+  )
+  target_include_directories(runtime_policy_plane_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(runtime_policy_plane_test PRIVATE gtest_main bytetaper_runtime_policy bytetaper_taperquery_loader bytetaper_runtime bytetaper_extproc_adapter)
+  add_test(NAME runtime_policy_plane_test COMMAND runtime_policy_plane_test)
+
   # Concurrency and Race Harness tests (BT-RACE-001)
   add_executable(inflight_registry_generation_concurrency_test
     tests/concurrency/inflight_registry_generation_concurrency_test.cpp

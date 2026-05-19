@@ -203,6 +203,7 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
     PRIVATE
       bytetaper_extproc_grpc_server
       bytetaper_extproc_grpc
+      bytetaper_runtime_policy
       policy_yaml_loader
       bytetaper_metrics_http_server
       bytetaper_prometheus_registry
