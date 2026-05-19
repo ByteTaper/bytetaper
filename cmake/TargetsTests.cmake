@@ -2781,6 +2781,20 @@ if(BUILD_TESTING)
   target_link_libraries(taperquery_policy_persistence_test PRIVATE gtest_main bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter)
   add_test(NAME taperquery_policy_persistence_test COMMAND taperquery_policy_persistence_test)
 
+  add_executable(rocksdb_policy_state_store_test
+    tests/rocksdb_policy_state_store_test.cpp
+  )
+  set_source_files_properties(tests/rocksdb_policy_state_store_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(rocksdb_policy_state_store_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(rocksdb_policy_state_store_test
+    PRIVATE gtest_main bytetaper_control_plane
+  )
+  add_test(NAME rocksdb_policy_state_store_test COMMAND rocksdb_policy_state_store_test)
+
   add_executable(runtime_policy_startup_recovery_test
     tests/runtime_policy_startup_recovery_test.cpp
   )
