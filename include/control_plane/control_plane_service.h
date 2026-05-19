@@ -6,6 +6,7 @@
 
 #include "control_plane/control_plane_config.h"
 #include "control_plane/policy_apply_api.h"
+#include "control_plane/policy_job_query.h"
 #include "control_plane/policy_version_query.h"
 
 namespace bytetaper::control_plane {
@@ -25,6 +26,9 @@ public:
     ActivePolicyResult get_active_policy(const PolicyResourceKey& resource_key);
 
     PolicyVersionListResult list_policy_versions(const PolicyResourceKey& resource_key);
+
+    PolicyJobQueryResult get_policy_update_job(const std::string& job_id,
+                                               const PolicyResourceKey& resource_key);
 
 private:
     ControlPlaneServiceConfig config_;

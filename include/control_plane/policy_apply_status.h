@@ -18,6 +18,7 @@ enum class PolicyApplyStatus {
     RejectedCasMismatch,
     RejectedNoChanges,
     RejectedPolicyInactive,
+    RejectedQueueFull,
     RejectedStorageUnavailable,
     RollbackPlanReady,
     InternalError,

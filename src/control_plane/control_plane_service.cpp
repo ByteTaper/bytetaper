@@ -4,6 +4,7 @@
 #include "control_plane/control_plane_service.h"
 
 #include "control_plane/policy_apply_contract.h"
+#include "control_plane/policy_update_queue.h"
 #include "taperquery/policy_ir_from_yaml.h"
 #include "taperquery/policy_ir_identity.h"
 #include "taperquery/policy_ir_normalize.h"
@@ -427,9 +428,61 @@ PolicyApplySubmitResult ControlPlaneService::apply(const PolicyApplyRequest& req
         return result;
     }
 
+    if (config_.policy_update_queue == nullptr) {
+        result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        result.error = "policy update queue is not configured";
+        result.message = result.error;
+        return result;
+    }
+
+    if (!config_.policy_update_queue->has_durable_job_store()) {
+        result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        result.error = "policy update queue job store is not configured";
+        result.message = result.error;
+        return result;
+    }
+
+    PolicyUpdateJob job;
+    job.job_id = make_job_id(request.request_id);
+    job.resource_key = request.resource_key.to_string();
+    job.source_type = request.source_type == PolicyApplySourceType::Yaml ? "yaml" : "taperquery";
+    job.operator_id = request.operator_id;
+    job.request_id = request.request_id;
+    job.expected_base_generation = request.expected_base_generation;
+    job.expected_base_policy_id = request.expected_base_policy_id;
+    job.apply_request.source_type = taperquery::TqApplySourceType::TaperQuery;
+    job.apply_request.mode = taperquery::TqApplyMode::Apply;
+    job.apply_request.source = request.source;
+    job.apply_request.expected_base_identity = request.expected_base_policy_id;
+    job.apply_request.operator_id = request.operator_id;
+    job.apply_request.request_id = request.request_id;
+    job.apply_request.include_unchanged_routes = request.include_unchanged_routes;
+    job.apply_request.include_field_level_changes = request.include_field_level_changes;
+    job.apply_request.strict_production = request.strict_production;
+
+    const EnqueueJobResult enqueue_res = config_.policy_update_queue->enqueue(std::move(job));
+    if (!enqueue_res.ok) {
+        if (enqueue_res.error == "POLICY_JOB_QUEUE_FULL") {
+            result.status = PolicyApplyStatus::RejectedQueueFull;
+        } else {
+            result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        }
+        result.logical_shard_id = enqueue_res.logical_shard_id;
+        result.error = enqueue_res.error;
+        if (!enqueue_res.message.empty()) {
+            result.message = enqueue_res.message;
+        } else if (enqueue_res.error == "POLICY_JOB_QUEUE_FULL") {
+            result.message = "Policy update queue for this resource is full.";
+        } else {
+            result.message = enqueue_res.error;
+        }
+        return result;
+    }
+
     result.ok = true;
     result.status = PolicyApplyStatus::Accepted;
-    result.job_id = make_job_id(request.request_id);
+    result.job_id = enqueue_res.job_id;
+    result.logical_shard_id = enqueue_res.logical_shard_id;
     result.message = "Policy apply request accepted by Control Plane.";
     return result;
 }
@@ -598,6 +651,37 @@ ControlPlaneService::list_policy_versions(const PolicyResourceKey& resource_key)
 
     result.ok = true;
     result.status = PolicyApplyStatus::Applied;
+    return result;
+}
+
+PolicyJobQueryResult
+ControlPlaneService::get_policy_update_job(const std::string& job_id,
+                                           const PolicyResourceKey& resource_key) {
+    PolicyJobQueryResult result{};
+
+    if (job_id.empty()) {
+        result.status = PolicyApplyStatus::RejectedInvalidRequest;
+        result.error = "job id is required";
+        return result;
+    }
+
+    if (config_.policy_update_queue == nullptr) {
+        result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        result.error = "policy update queue is not configured";
+        return result;
+    }
+
+    const std::optional<PolicyUpdateJobRecord> job =
+        config_.policy_update_queue->get_job(job_id, resource_key);
+    if (!job.has_value()) {
+        result.status = PolicyApplyStatus::RejectedInvalidRequest;
+        result.error = "policy update job not found";
+        return result;
+    }
+
+    result.ok = true;
+    result.status = PolicyApplyStatus::Applied;
+    result.job = *job;
     return result;
 }
 

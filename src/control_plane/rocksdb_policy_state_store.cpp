@@ -67,6 +67,25 @@ AppendAuditResult make_audit_error(PolicyStateErrorCode code, const std::string&
     return res;
 }
 
+StorePolicyUpdateJobResult make_store_job_error(PolicyStateErrorCode code,
+                                                const std::string& error) {
+    StorePolicyUpdateJobResult res;
+    res.ok = false;
+    res.code = code;
+    res.error = error;
+    return res;
+}
+
+LoadPolicyUpdateJobResult make_load_job_error(PolicyStateErrorCode code, const std::string& error,
+                                              bool not_found = false) {
+    LoadPolicyUpdateJobResult res;
+    res.ok = false;
+    res.not_found = not_found;
+    res.code = code;
+    res.error = error;
+    return res;
+}
+
 } // namespace
 
 RocksDBPolicyStateStore::RocksDBPolicyStateStore(const char* db_path)
@@ -340,6 +359,68 @@ AppendAuditResult RocksDBPolicyStateStore::append_audit_record(const PolicyResou
     }
 
     AppendAuditResult res;
+    res.ok = true;
+    res.code = PolicyStateErrorCode::Ok;
+    return res;
+}
+
+StorePolicyUpdateJobResult
+RocksDBPolicyStateStore::store_policy_update_job(const PolicyResourceKey& key,
+                                                 const PolicyUpdateJobRecord& job) {
+    if (!open_ || impl_->db == nullptr) {
+        return make_store_job_error(PolicyStateErrorCode::DbOpenFailed,
+                                    "policy state db is not open");
+    }
+
+    if (job.job_id.empty()) {
+        return make_store_job_error(PolicyStateErrorCode::JobWriteFailed, "job id is empty");
+    }
+
+    PolicyUpdateJobRecord to_store = job;
+    to_store.resource_key = key.to_string();
+
+    const std::string job_key = make_job_key(key, job.job_id);
+    const rocksdb::Status status =
+        impl_->db->Put(impl_->sync_write, job_key, serialize_policy_update_job_record(to_store));
+    if (!status.ok()) {
+        return make_store_job_error(PolicyStateErrorCode::JobWriteFailed, status.ToString());
+    }
+
+    StorePolicyUpdateJobResult res;
+    res.ok = true;
+    res.code = PolicyStateErrorCode::Ok;
+    return res;
+}
+
+LoadPolicyUpdateJobResult
+RocksDBPolicyStateStore::load_policy_update_job(const PolicyResourceKey& key,
+                                                const std::string& job_id) {
+    if (!open_ || impl_->db == nullptr) {
+        return make_load_job_error(PolicyStateErrorCode::DbOpenFailed,
+                                   "policy state db is not open");
+    }
+
+    if (job_id.empty()) {
+        return make_load_job_error(PolicyStateErrorCode::JobNotFound, "job id is empty", true);
+    }
+
+    const std::string job_key = make_job_key(key, job_id);
+    std::string json;
+    const rocksdb::Status status = impl_->db->Get(rocksdb::ReadOptions{}, job_key, &json);
+    if (status.IsNotFound()) {
+        return make_load_job_error(PolicyStateErrorCode::JobNotFound, "policy update job not found",
+                                   true);
+    }
+    if (!status.ok()) {
+        return make_load_job_error(PolicyStateErrorCode::DbReadFailed, status.ToString());
+    }
+
+    LoadPolicyUpdateJobResult res;
+    if (!deserialize_policy_update_job_record(json, &res.record)) {
+        return make_load_job_error(PolicyStateErrorCode::DbReadFailed,
+                                   "policy update job record is invalid");
+    }
+
     res.ok = true;
     res.code = PolicyStateErrorCode::Ok;
     return res;

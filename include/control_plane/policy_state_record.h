@@ -59,6 +59,34 @@ struct PolicyAuditRecord {
     std::uint64_t recorded_at_unix_epoch_ms = 0;
 };
 
+struct PolicyUpdateJobFailureRecord {
+    std::string stage;
+    std::string code;
+    std::string message;
+    std::uint64_t expected_generation = 0;
+    std::uint64_t actual_generation = 0;
+};
+
+struct PolicyUpdateJobRecord {
+    std::string record_type = "PolicyUpdateJobRecord";
+    std::uint32_t record_version = 1;
+    std::string job_id;
+    std::string resource_key;
+    std::uint32_t logical_shard_id = 0;
+    std::string state;
+    std::string source_type;
+    std::string operator_id;
+    std::string request_id;
+    std::uint64_t expected_base_generation = 0;
+    std::string expected_base_policy_id;
+    std::uint64_t candidate_generation = 0;
+    std::string candidate_policy_id;
+    std::string candidate_canonical_hash;
+    std::uint64_t submitted_at_unix_epoch_ms = 0;
+    std::uint64_t updated_at_unix_epoch_ms = 0;
+    PolicyUpdateJobFailureRecord failure{};
+};
+
 struct ExpectedActivePolicy {
     std::uint64_t generation = 0;
     std::string policy_id;
@@ -72,6 +100,9 @@ bool deserialize_version_record(const std::string& json, PolicyVersionRecord* ou
 
 std::string serialize_audit_record(const PolicyAuditRecord& record);
 bool deserialize_audit_record(const std::string& json, PolicyAuditRecord* out);
+
+std::string serialize_policy_update_job_record(const PolicyUpdateJobRecord& record);
+bool deserialize_policy_update_job_record(const std::string& json, PolicyUpdateJobRecord* out);
 
 } // namespace bytetaper::control_plane
 
