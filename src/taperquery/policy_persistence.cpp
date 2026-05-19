@@ -202,24 +202,80 @@ static std::string escape_json_string(const std::string& input) {
 }
 
 std::string serialize_metadata(const PersistedPolicyMetadata& meta) {
+    if (meta.metadata_schema_version == 0) {
+        std::string json = "{\n";
+        json += "  \"policy_identity\": \"" + escape_json_string(meta.policy_identity) + "\",\n";
+        json += "  \"candidate_policy_identity\": \"" +
+                escape_json_string(meta.candidate_policy_identity) + "\",\n";
+        json += "  \"persisted_policy_identity\": \"" +
+                escape_json_string(meta.persisted_policy_identity) + "\",\n";
+        json += "  \"previous_policy_identity\": \"" +
+                escape_json_string(meta.previous_policy_identity) + "\",\n";
+        json += "  \"expected_base_identity\": \"" +
+                escape_json_string(meta.expected_base_identity) + "\",\n";
+        json += "  \"generation\": " + std::to_string(meta.generation) + ",\n";
+        json += "  \"source_type\": \"" + escape_json_string(meta.source_type) + "\",\n";
+        json += "  \"written_at_unix_epoch_ms\": " + std::to_string(meta.written_at_unix_epoch_ms) +
+                ",\n";
+        json += "  \"operator_id\": \"" + escape_json_string(meta.operator_id) + "\",\n";
+        json += "  \"request_id\": \"" + escape_json_string(meta.request_id) + "\",\n";
+        json += "  \"canonical_yaml_sha256\": \"" + escape_json_string(meta.canonical_yaml_sha256) +
+                "\",\n";
+        json +=
+            "  \"active_policy_file\": \"" + escape_json_string(meta.active_policy_file) + "\"\n";
+        json += "}\n";
+        return json;
+    }
+
     std::string json = "{\n";
-    json += "  \"policy_identity\": \"" + escape_json_string(meta.policy_identity) + "\",\n";
-    json += "  \"candidate_policy_identity\": \"" +
-            escape_json_string(meta.candidate_policy_identity) + "\",\n";
-    json += "  \"persisted_policy_identity\": \"" +
-            escape_json_string(meta.persisted_policy_identity) + "\",\n";
-    json += "  \"previous_policy_identity\": \"" +
-            escape_json_string(meta.previous_policy_identity) + "\",\n";
-    json += "  \"expected_base_identity\": \"" + escape_json_string(meta.expected_base_identity) +
-            "\",\n";
+    json += "  \"metadataSchemaVersion\": " + std::to_string(meta.metadata_schema_version) + ",\n";
+    json += "  \"resourceKey\": \"" + escape_json_string(meta.resource_key) + "\",\n";
     json += "  \"generation\": " + std::to_string(meta.generation) + ",\n";
-    json += "  \"source_type\": \"" + escape_json_string(meta.source_type) + "\",\n";
+    json += "  \"policyId\": \"" + escape_json_string(meta.policy_identity) + "\",\n";
+    json += "  \"candidatePolicyIdentity\": \"" +
+            escape_json_string(meta.candidate_policy_identity) + "\",\n";
+    json += "  \"persistedPolicyIdentity\": \"" +
+            escape_json_string(meta.persisted_policy_identity) + "\",\n";
+    json += "  \"previousPolicyIdentity\": \"" + escape_json_string(meta.previous_policy_identity) +
+            "\",\n";
+    json += "  \"expectedBaseIdentity\": \"" + escape_json_string(meta.expected_base_identity) +
+            "\",\n";
+    json += "  \"sourceType\": \"" + escape_json_string(meta.source_type) + "\",\n";
+    json += "  \"writtenAtUnixEpochMs\": " + std::to_string(meta.written_at_unix_epoch_ms) + ",\n";
+    json += "  \"operatorId\": \"" + escape_json_string(meta.operator_id) + "\",\n";
+    json += "  \"requestId\": \"" + escape_json_string(meta.request_id) + "\",\n";
+    json += "  \"applyId\": \"" + escape_json_string(meta.apply_id) + "\",\n";
+    json += "  \"previousGeneration\": " + std::to_string(meta.previous_generation) + ",\n";
+    json += "  \"previousPolicyId\": \"" + escape_json_string(meta.previous_policy_id) + "\",\n";
+    json += "  \"schemaVersion\": " + std::to_string(meta.schema_version) + ",\n";
+    json += "  \"apiVersion\": \"" + escape_json_string(meta.api_version) + "\",\n";
+    json += "  \"kind\": \"" + escape_json_string(meta.kind) + "\",\n";
+    json += "  \"activePolicyFile\": \"" + escape_json_string(meta.active_policy_file) + "\",\n";
     json +=
-        "  \"written_at_unix_epoch_ms\": " + std::to_string(meta.written_at_unix_epoch_ms) + ",\n";
-    json += "  \"operator_id\": \"" + escape_json_string(meta.operator_id) + "\",\n";
-    json += "  \"request_id\": \"" + escape_json_string(meta.request_id) + "\",\n";
+        "  \"versionedPolicyFile\": \"" + escape_json_string(meta.versioned_policy_file) + "\",\n";
     json +=
-        "  \"canonical_yaml_sha256\": \"" + escape_json_string(meta.canonical_yaml_sha256) + "\"\n";
+        "  \"committedAtUnixEpochMs\": " + std::to_string(meta.committed_at_unix_epoch_ms) + ",\n";
+    json += "  \"canonicalHash\": \"" + escape_json_string(meta.canonical_hash) + "\",\n";
+    json += "  \"canonicalHashAlgorithm\": \"" + escape_json_string(meta.canonical_hash_algorithm) +
+            "\",\n";
+    json += "  \"bootstrap\": {\n";
+    json += "    \"file\": \"" + escape_json_string(meta.bootstrap.file) + "\",\n";
+    json += "    \"role\": \"" + escape_json_string(meta.bootstrap.role) + "\",\n";
+    json += "    \"overwriteProtection\": " +
+            std::string(meta.bootstrap.overwrite_protection ? "true" : "false") + "\n";
+    json += "  },\n";
+    json += "  \"compatibility\": {\n";
+    json += "    \"policyIrVersion\": \"" +
+            escape_json_string(meta.compatibility.policy_ir_version) + "\",\n";
+    json += "    \"identityVersion\": \"" +
+            escape_json_string(meta.compatibility.identity_version) + "\",\n";
+    json += "    \"emitterVersion\": \"" + escape_json_string(meta.compatibility.emitter_version) +
+            "\",\n";
+    json += "    \"runtimeMinVersion\": \"" +
+            escape_json_string(meta.compatibility.runtime_min_version) + "\",\n";
+    json += "    \"runtimeCapabilityProfile\": \"" +
+            escape_json_string(meta.compatibility.runtime_capability_profile) + "\"\n";
+    json += "  }\n";
     json += "}\n";
     return json;
 }
@@ -402,6 +458,9 @@ persist_active_policy_canonical_yaml(const LocalPolicyPersistenceConfig& config,
     // 4. Update metadata and serialize
     PersistedPolicyMetadata updated_meta = metadata;
     updated_meta.canonical_yaml_sha256 = yaml_sha;
+    if (updated_meta.metadata_schema_version >= 1) {
+        updated_meta.canonical_hash = "sha256:" + yaml_sha;
+    }
     std::string meta_json = serialize_metadata(updated_meta);
 
     // 5. Write metadata to .tmp, fsync, rename, fsync dir
@@ -464,22 +523,147 @@ load_persisted_active_policy(const LocalPolicyPersistenceConfig& config) {
     meta_file.close();
 
     PersistedPolicyMetadata meta;
-    meta.policy_identity = get_json_string_field(meta_json, "policy_identity");
-    meta.candidate_policy_identity = get_json_string_field(meta_json, "candidate_policy_identity");
-    meta.persisted_policy_identity = get_json_string_field(meta_json, "persisted_policy_identity");
-    meta.previous_policy_identity = get_json_string_field(meta_json, "previous_policy_identity");
-    meta.expected_base_identity = get_json_string_field(meta_json, "expected_base_identity");
-    meta.generation = get_json_uint64_field(meta_json, "generation");
-    meta.source_type = get_json_string_field(meta_json, "source_type");
-    meta.written_at_unix_epoch_ms = get_json_uint64_field(meta_json, "written_at_unix_epoch_ms");
-    meta.operator_id = get_json_string_field(meta_json, "operator_id");
-    meta.request_id = get_json_string_field(meta_json, "request_id");
-    meta.canonical_yaml_sha256 = get_json_string_field(meta_json, "canonical_yaml_sha256");
 
-    if (meta.policy_identity.empty() || meta.canonical_yaml_sha256.empty()) {
+    bool has_new_schema = (meta_json.find("\"metadataSchemaVersion\"") != std::string::npos);
+
+    if (has_new_schema) {
+        meta.metadata_schema_version =
+            static_cast<std::uint32_t>(get_json_uint64_field(meta_json, "metadataSchemaVersion"));
+        meta.resource_key = get_json_string_field(meta_json, "resourceKey");
+        meta.generation = get_json_uint64_field(meta_json, "generation");
+        meta.policy_identity = get_json_string_field(meta_json, "policyId");
+
+        meta.candidate_policy_identity =
+            get_json_string_field(meta_json, "candidatePolicyIdentity");
+        meta.persisted_policy_identity =
+            get_json_string_field(meta_json, "persistedPolicyIdentity");
+        meta.previous_policy_identity = get_json_string_field(meta_json, "previousPolicyIdentity");
+        meta.expected_base_identity = get_json_string_field(meta_json, "expectedBaseIdentity");
+
+        meta.source_type = get_json_string_field(meta_json, "sourceType");
+        meta.written_at_unix_epoch_ms = get_json_uint64_field(meta_json, "writtenAtUnixEpochMs");
+        meta.operator_id = get_json_string_field(meta_json, "operatorId");
+        meta.request_id = get_json_string_field(meta_json, "requestId");
+        meta.canonical_hash = get_json_string_field(meta_json, "canonicalHash");
+        meta.canonical_hash_algorithm = get_json_string_field(meta_json, "canonicalHashAlgorithm");
+
+        meta.apply_id = get_json_string_field(meta_json, "applyId");
+        meta.previous_generation = get_json_uint64_field(meta_json, "previousGeneration");
+        meta.previous_policy_id = get_json_string_field(meta_json, "previousPolicyId");
+        meta.schema_version =
+            static_cast<std::uint32_t>(get_json_uint64_field(meta_json, "schemaVersion"));
+        meta.api_version = get_json_string_field(meta_json, "apiVersion");
+        meta.kind = get_json_string_field(meta_json, "kind");
+        meta.active_policy_file = get_json_string_field(meta_json, "activePolicyFile");
+        meta.versioned_policy_file = get_json_string_field(meta_json, "versionedPolicyFile");
+        meta.committed_at_unix_epoch_ms =
+            get_json_uint64_field(meta_json, "committedAtUnixEpochMs");
+
+        meta.bootstrap.file = get_json_string_field(meta_json, "file");
+        meta.bootstrap.role = get_json_string_field(meta_json, "role");
+
+        std::size_t op_pos = meta_json.find("\"overwriteProtection\"");
+        if (op_pos != std::string::npos) {
+            std::size_t colon = meta_json.find(':', op_pos);
+            if (colon != std::string::npos) {
+                std::size_t true_pos = meta_json.find("true", colon);
+                std::size_t false_pos = meta_json.find("false", colon);
+                if (true_pos != std::string::npos &&
+                    (false_pos == std::string::npos || true_pos < false_pos)) {
+                    meta.bootstrap.overwrite_protection = true;
+                } else if (false_pos != std::string::npos) {
+                    meta.bootstrap.overwrite_protection = false;
+                }
+            }
+        }
+
+        meta.compatibility.policy_ir_version = get_json_string_field(meta_json, "policyIrVersion");
+        meta.compatibility.identity_version = get_json_string_field(meta_json, "identityVersion");
+        meta.compatibility.emitter_version = get_json_string_field(meta_json, "emitterVersion");
+        meta.compatibility.runtime_min_version =
+            get_json_string_field(meta_json, "runtimeMinVersion");
+        meta.compatibility.runtime_capability_profile =
+            get_json_string_field(meta_json, "runtimeCapabilityProfile");
+    } else {
+        // Fall back to legacy snake_case fields
+        meta.metadata_schema_version = 0;
+        meta.policy_identity = get_json_string_field(meta_json, "policy_identity");
+        meta.candidate_policy_identity =
+            get_json_string_field(meta_json, "candidate_policy_identity");
+        meta.persisted_policy_identity =
+            get_json_string_field(meta_json, "persisted_policy_identity");
+        meta.previous_policy_identity =
+            get_json_string_field(meta_json, "previous_policy_identity");
+        meta.expected_base_identity = get_json_string_field(meta_json, "expected_base_identity");
+        meta.generation = get_json_uint64_field(meta_json, "generation");
+        meta.source_type = get_json_string_field(meta_json, "source_type");
+        meta.written_at_unix_epoch_ms =
+            get_json_uint64_field(meta_json, "written_at_unix_epoch_ms");
+        meta.operator_id = get_json_string_field(meta_json, "operator_id");
+        meta.request_id = get_json_string_field(meta_json, "request_id");
+        meta.canonical_yaml_sha256 = get_json_string_field(meta_json, "canonical_yaml_sha256");
+        meta.active_policy_file = get_json_string_field(meta_json, "active_policy_file");
+    }
+
+    if (meta.metadata_schema_version > 1) {
         res.ok = false;
-        res.error = "Metadata is missing required fields";
+        res.error = "Metadata schema version unsupported (METADATA_SCHEMA_UNSUPPORTED)";
         return res;
+    }
+
+    // Strict validation for new-schema version 1 required fields
+    if (meta.metadata_schema_version == 1) {
+        if (meta.resource_key.empty() || meta.generation == 0 || meta.policy_identity.empty() ||
+            meta.canonical_hash.empty() || meta.canonical_hash_algorithm.empty() ||
+            meta.source_type.empty() || meta.schema_version == 0 || meta.api_version.empty() ||
+            meta.kind.empty() || meta.active_policy_file.empty() ||
+            meta.written_at_unix_epoch_ms == 0) {
+
+            res.ok = false;
+            res.error = "Metadata is missing required fields (METADATA_REQUIRED_FIELD_MISSING)";
+            return res;
+        }
+        if (meta.source_type != "bootstrap-import" && meta.source_type != "taperql-apply" &&
+            meta.source_type != "rollback" && meta.source_type != "manual-repair" &&
+            meta.source_type != "manual-adopt" && meta.source_type != "unknown") {
+
+            res.ok = false;
+            res.error = "Metadata sourceType is invalid (METADATA_REQUIRED_FIELD_MISSING)";
+            return res;
+        }
+    } else {
+        // Legacy validation
+        if (meta.policy_identity.empty() && meta.canonical_hash.empty()) {
+            res.ok = false;
+            res.error = "Metadata missing policy identity";
+            return res;
+        }
+
+        const std::string& integrity_hash =
+            meta.canonical_hash.empty() ? meta.canonical_yaml_sha256 : meta.canonical_hash;
+        if (integrity_hash.empty()) {
+            res.ok = false;
+            res.error = "Metadata missing integrity hash (METADATA_REQUIRED_FIELD_MISSING)";
+            return res;
+        }
+    }
+
+    // Path safety checks
+    if (!meta.active_policy_file.empty()) {
+        if (meta.active_policy_file.find("..") != std::string::npos ||
+            meta.active_policy_file.front() == '/') {
+            res.ok = false;
+            res.error = "Metadata active_policy_file path invalid (METADATA_PATH_INVALID)";
+            return res;
+        }
+    }
+    if (!meta.versioned_policy_file.empty()) {
+        if (meta.versioned_policy_file.find("..") != std::string::npos ||
+            meta.versioned_policy_file.front() == '/') {
+            res.ok = false;
+            res.error = "Metadata versioned_policy_file path invalid (METADATA_PATH_INVALID)";
+            return res;
+        }
     }
 
     // 3. Read and verify YAML file integrity
@@ -495,9 +679,16 @@ load_persisted_active_policy(const LocalPolicyPersistenceConfig& config) {
     yaml_file.close();
 
     std::string actual_sha = compute_sha256(yaml_content);
-    if (actual_sha != meta.canonical_yaml_sha256) {
+    std::string expected_hash =
+        meta.metadata_schema_version == 1
+            ? meta.canonical_hash
+            : (meta.canonical_hash.empty() ? meta.canonical_yaml_sha256 : meta.canonical_hash);
+    if (expected_hash.substr(0, 7) == "sha256:") {
+        expected_hash = expected_hash.substr(7);
+    }
+    if (actual_sha != expected_hash) {
         res.ok = false;
-        res.error = "Active policy file integrity check failed (SHA-256 mismatch)";
+        res.error = "Active policy file integrity check failed (METADATA_CANONICAL_HASH_MISMATCH)";
         return res;
     }
 
@@ -509,7 +700,41 @@ load_persisted_active_policy(const LocalPolicyPersistenceConfig& config) {
         return res;
     }
 
-    // 5. Verify computed identity matches metadata
+    // 5. Cross-validate against YAML contents for schema version 1
+    if (meta.metadata_schema_version == 1) {
+        if (yaml_load.policy.generation != meta.generation) {
+            res.ok = false;
+            res.error =
+                "Generation mismatch between YAML and metadata (METADATA_GENERATION_MISMATCH)";
+            return res;
+        }
+
+        if (yaml_load.policy.policy_id != meta.policy_identity) {
+            res.ok = false;
+            res.error = "PolicyId mismatch between YAML and metadata (METADATA_POLICY_ID_MISMATCH)";
+            return res;
+        }
+
+        if (yaml_load.policy.schema_version_num != meta.schema_version) {
+            res.ok = false;
+            res.error = "Schema version mismatch between YAML and metadata";
+            return res;
+        }
+
+        if (yaml_load.policy.api_version != meta.api_version) {
+            res.ok = false;
+            res.error = "API version unsupported or mismatch (METADATA_API_VERSION_UNSUPPORTED)";
+            return res;
+        }
+
+        if (yaml_load.policy.kind != meta.kind) {
+            res.ok = false;
+            res.error = "Kind unsupported or mismatch (METADATA_KIND_UNSUPPORTED)";
+            return res;
+        }
+    }
+
+    // 6. Verify computed identity matches metadata
     std::string computed_identity = compute_policy_document_identity(yaml_load.policy);
     if (computed_identity != meta.policy_identity) {
         res.ok = false;

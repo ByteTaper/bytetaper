@@ -396,12 +396,30 @@ TqApplyResult TqApplyService::execute_impl(const TqApplyRequest& request) {
         meta.previous_policy_identity = current_snapshot->policy_identity;
         meta.expected_base_identity = request.expected_base_identity;
         meta.generation = final_build_res.snapshot->generation;
-        meta.source_type = "taperquery";
+        meta.source_type = "taperql-apply";
         meta.written_at_unix_epoch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                             std::chrono::system_clock::now().time_since_epoch())
                                             .count();
         meta.operator_id = request.operator_id;
         meta.request_id = request.request_id;
+
+        meta.metadata_schema_version = 1;
+        meta.resource_key = "policy/default/runtime";
+        meta.apply_id = request.request_id;
+        meta.previous_generation = current_snapshot->generation;
+        meta.previous_policy_id = current_snapshot->policy_identity;
+        meta.schema_version = 1;
+        meta.api_version = "bytetaper.io/v1alpha1";
+        meta.kind = "RuntimePolicy";
+        meta.active_policy_file = persistence_config_.active_policy_filename;
+        meta.canonical_hash_algorithm = "sha256";
+
+        // Populate metadata fields on the Policy IR document so they are written to YAML
+        roundtrip.parsed_policy_ir.generation = meta.generation;
+        roundtrip.parsed_policy_ir.policy_id = meta.policy_identity;
+        roundtrip.parsed_policy_ir.api_version = meta.api_version;
+        roundtrip.parsed_policy_ir.kind = meta.kind;
+        roundtrip.parsed_policy_ir.schema_version_num = meta.schema_version;
 
         auto persist_res = persist_active_policy_canonical_yaml(persistence_config_,
                                                                 roundtrip.parsed_policy_ir, meta);
