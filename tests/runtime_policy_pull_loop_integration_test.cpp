@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
 #include "control_plane/control_plane_service.h"
+#include "control_plane/fleet_status.h"
 #include "control_plane/policy_state_key.h"
 #include "control_plane/rocksdb_policy_state_store.h"
+#include "control_plane/runtime_convergence_status.h"
 #include "runtime/policy_snapshot.h"
 #include "runtime/route_cache_epoch_store.h"
 #include "runtime_policy/control_plane_policy_client.h"
@@ -404,6 +406,23 @@ TEST(RuntimePolicyPullLoopIntegrationTest, CorruptedPolicyPointerRefusesActivati
     EXPECT_EQ(loop.status().last_error_code, kErrPolicyCanonicalHashMismatch);
     EXPECT_EQ(loop.status().state, RuntimePolicyPullState::ActivationFailed);
     EXPECT_FALSE(loop.status().last_control_plane_error.empty());
+
+    PolicyIrYamlEmitResult emit1 = emit_policy_ir_canonical_yaml(gen1);
+    ASSERT_TRUE(emit1.ok);
+    const std::string expected_active_hash = canonical_hash_for_yaml(emit1.yaml);
+    EXPECT_FALSE(loop.status().active_canonical_hash.empty());
+    EXPECT_EQ(loop.status().active_canonical_hash, expected_active_hash);
+
+    const FleetStatusResult fleet = cp_service.get_fleet_status(key);
+    ASSERT_TRUE(fleet.ok) << fleet.error;
+    ASSERT_EQ(fleet.status.runtimes.size(), 1u);
+    const RuntimeFleetEntry& entry = fleet.status.runtimes.front();
+    EXPECT_EQ(entry.runtime_id, pull_config.pull.runtime_id);
+    EXPECT_EQ(entry.active_generation, 1u);
+    EXPECT_EQ(entry.active_canonical_hash, expected_active_hash);
+    EXPECT_EQ(entry.activation_status, "activation_failed");
+    EXPECT_EQ(entry.convergence_status, RuntimeConvergenceStatus::Failed);
+    EXPECT_EQ(fleet.status.fleet.failed_count, 1u);
 
     destroy_db(db_path);
 }

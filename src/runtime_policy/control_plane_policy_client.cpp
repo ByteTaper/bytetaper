@@ -4,9 +4,42 @@
 #include "runtime_policy/control_plane_policy_client.h"
 
 #include "control_plane/control_plane_service.h"
+#include "control_plane/runtime_status_report.h"
 #include "runtime_policy/runtime_policy_pull_status.h"
 
+#include <chrono>
+
 namespace bytetaper::runtime_policy {
+
+namespace {
+
+std::int64_t now_unix_epoch_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+control_plane::RuntimeStatusReport
+to_control_plane_report(const RuntimePolicyStatusReport& report) {
+    control_plane::RuntimeStatusReport out{};
+    out.runtime_id = report.runtime_id;
+    out.resource_key = report.resource_key;
+    out.gateway_adapter = report.gateway_adapter;
+    out.active_generation = report.active_generation;
+    out.active_policy_id = report.active_policy_id;
+    out.active_canonical_hash = report.active_canonical_hash;
+    out.activation_status = report.activation_status;
+    out.control_plane_reachable = report.control_plane_reachable;
+    out.data_path_mode = report.data_path_mode;
+    out.last_pull_at_unix_epoch_ms = report.last_pull_at_unix_epoch_ms;
+    out.last_activated_at_unix_epoch_ms = report.last_activated_at_unix_epoch_ms;
+    out.last_error_code = report.last_error_code;
+    out.last_error_message = report.last_error_message;
+    out.received_at_unix_epoch_ms = now_unix_epoch_ms();
+    return out;
+}
+
+} // namespace
 
 InProcessControlPlanePolicyClient::InProcessControlPlanePolicyClient(
     control_plane::ControlPlaneService* service)
@@ -60,7 +93,17 @@ RuntimeStatusReportResult
 InProcessControlPlanePolicyClient::report_runtime_status(const RuntimePolicyStatusReport& report) {
     last_report_ = report;
     RuntimeStatusReportResult out{};
-    out.ok = true;
+    if (service_ == nullptr) {
+        out.error = "control plane service is not configured";
+        out.error_code = kErrControlPlaneUnavailable;
+        return out;
+    }
+
+    const control_plane::RuntimeStatusReportResult cp_result =
+        service_->report_runtime_status(to_control_plane_report(report));
+    out.ok = cp_result.ok;
+    out.error = cp_result.error;
+    out.error_code = cp_result.error_code;
     return out;
 }
 

@@ -21,6 +21,8 @@ struct RuntimePolicyStatusReport {
     std::int64_t last_activated_at_unix_epoch_ms = 0;
     std::string gateway_adapter;
     std::string data_path_mode;
+    std::string last_error_code;
+    std::string last_error_message;
 };
 
 std::string serialize_runtime_status_report(const RuntimePolicyStatusReport& report);

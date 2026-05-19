@@ -296,6 +296,17 @@ TEST_F(RuntimePolicyPullLoopTest, HashMismatchRejectsActivation) {
     ASSERT_NE(active, nullptr);
     EXPECT_EQ(active->generation, 1u);
     EXPECT_EQ(loop.status().last_error_code, kErrPolicyCanonicalHashMismatch);
+    EXPECT_GE(fake_client_->report_calls, 1);
+    EXPECT_EQ(fake_client_->last_report.activation_status, "activation_failed");
+    EXPECT_EQ(fake_client_->last_report.active_generation, 1u);
+    EXPECT_EQ(fake_client_->last_report.last_error_code, kErrPolicyCanonicalHashMismatch);
+
+    const TqPolicyDocument gen1 = make_policy_doc("route-a", 1);
+    PolicyIrYamlEmitResult emit1 = emit_policy_ir_canonical_yaml(gen1);
+    ASSERT_TRUE(emit1.ok);
+    EXPECT_FALSE(fake_client_->last_report.active_canonical_hash.empty());
+    EXPECT_EQ(fake_client_->last_report.active_canonical_hash, canonical_hash_for_yaml(emit1.yaml));
+    EXPECT_EQ(fake_client_->last_report.active_policy_id, gen1.policy_id);
 }
 
 TEST_F(RuntimePolicyPullLoopTest, GenerationMismatchRejectsActivation) {
@@ -435,6 +446,8 @@ TEST_F(RuntimePolicyPullLoopTest, ActivationBarrierFailurePreservesOldSnapshot) 
     const auto active = runtime_store_.load();
     EXPECT_EQ(active->generation, 1u);
     EXPECT_EQ(loop.status().last_error_code, kErrPolicyActivationFailed);
+    EXPECT_GE(fake_client_->report_calls, 1);
+    EXPECT_EQ(fake_client_->last_report.activation_status, "activation_failed");
 }
 
 TEST_F(RuntimePolicyPullLoopTest, SuccessfulActivationWritesLocalMirrorMetadata) {
@@ -472,6 +485,8 @@ TEST_F(RuntimePolicyPullLoopTest, ControlPlaneUnavailableContinuesLastKnownGood)
     EXPECT_EQ(active->generation, 1u);
     EXPECT_FALSE(loop.status().control_plane_reachable);
     EXPECT_EQ(loop.status().state, RuntimePolicyPullState::DegradedControlPlaneUnavailable);
+    EXPECT_GE(fake_client_->report_calls, 1);
+    EXPECT_EQ(fake_client_->last_report.activation_status, "control_plane_unavailable");
 }
 
 TEST_F(RuntimePolicyPullLoopTest, NoLocalPolicyAndControlPlaneUnavailable) {

@@ -22,6 +22,9 @@ add_library(bytetaper_control_plane_service STATIC
   src/control_plane/policy_update_queue.cpp
   src/control_plane/policy_update_worker.cpp
   src/control_plane/policy_apply_transaction.cpp
+  src/control_plane/runtime_status_report.cpp
+  src/control_plane/runtime_convergence_status.cpp
+  src/control_plane/fleet_status_service.cpp
 )
 target_include_directories(bytetaper_control_plane_service PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include)
