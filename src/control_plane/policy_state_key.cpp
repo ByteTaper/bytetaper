@@ -49,4 +49,26 @@ std::string make_audit_key(const PolicyResourceKey& key, const std::string& appl
     return policy_prefix(key) + "/audit/" + apply_id;
 }
 
+std::string make_job_key(const PolicyResourceKey& key, const std::string& job_id) {
+    return policy_prefix(key) + "/jobs/" + job_id;
+}
+
+bool parse_resource_key(const std::string& resource_key, PolicyResourceKey* out) {
+    if (out == nullptr) {
+        return false;
+    }
+    const std::string prefix = "policy/";
+    if (resource_key.rfind(prefix, 0) != 0) {
+        return false;
+    }
+    const std::string remainder = resource_key.substr(prefix.size());
+    const std::size_t slash = remainder.find('/');
+    if (slash == std::string::npos || slash == 0 || slash + 1 >= remainder.size()) {
+        return false;
+    }
+    out->namespace_name = remainder.substr(0, slash);
+    out->policy_name = remainder.substr(slash + 1);
+    return !out->namespace_name.empty() && !out->policy_name.empty();
+}
+
 } // namespace bytetaper::control_plane

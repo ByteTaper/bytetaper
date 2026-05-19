@@ -71,6 +71,7 @@ struct PolicyApplySubmitResult {
     PolicyApplyStatus status = PolicyApplyStatus::InternalError;
     std::string resource_key;
     std::string job_id;
+    std::uint32_t logical_shard_id = 0;
     std::uint64_t expected_base_generation = 0;
     std::uint64_t actual_base_generation = 0;
     std::string expected_base_policy_id;

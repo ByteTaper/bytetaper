@@ -29,6 +29,12 @@ public:
 
     virtual AppendAuditResult append_audit_record(const PolicyResourceKey& key,
                                                   const PolicyAuditRecord& record) = 0;
+
+    virtual StorePolicyUpdateJobResult
+    store_policy_update_job(const PolicyResourceKey& key, const PolicyUpdateJobRecord& job) = 0;
+
+    virtual LoadPolicyUpdateJobResult load_policy_update_job(const PolicyResourceKey& key,
+                                                             const std::string& job_id) = 0;
 };
 
 } // namespace bytetaper::control_plane

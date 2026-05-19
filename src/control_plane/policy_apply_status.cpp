@@ -29,6 +29,8 @@ const char* to_string(PolicyApplyStatus status) {
         return "RejectedNoChanges";
     case PolicyApplyStatus::RejectedPolicyInactive:
         return "RejectedPolicyInactive";
+    case PolicyApplyStatus::RejectedQueueFull:
+        return "RejectedQueueFull";
     case PolicyApplyStatus::RejectedStorageUnavailable:
         return "RejectedStorageUnavailable";
     case PolicyApplyStatus::RollbackPlanReady:

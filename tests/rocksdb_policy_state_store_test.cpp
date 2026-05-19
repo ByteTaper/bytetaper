@@ -524,6 +524,114 @@ TEST_F(RocksDBPolicyStateStoreTest, AuditRecordAppendSucceeds) {
     EXPECT_EQ(loaded.operator_id, "operator-1");
 }
 
+TEST_F(RocksDBPolicyStateStoreTest, StoreAndLoadPolicyUpdateJob) {
+    const PolicyResourceKey key = PolicyResourceKey::default_runtime();
+
+    {
+        RocksDBPolicyStateStore store(db_path_.c_str());
+        ASSERT_TRUE(store.is_open());
+
+        PolicyUpdateJobRecord job;
+        job.job_id = "policy-job-test-001";
+        job.resource_key = key.to_string();
+        job.logical_shard_id = 7;
+        job.state = "failed";
+        job.source_type = "yaml";
+        job.operator_id = "operator-1";
+        job.request_id = "req-1";
+        job.expected_base_generation = 1;
+        job.expected_base_policy_id = "sha256:base";
+        job.failure.stage = "compare_and_promote";
+        job.failure.code = "POLICY_APPLY_PROMOTE_CONFLICT";
+        job.failure.message = "active policy pointer conflict";
+        job.failure.expected_generation = 1;
+        job.failure.actual_generation = 2;
+        ASSERT_TRUE(store.store_policy_update_job(key, job).ok);
+    }
+
+    RocksDBPolicyStateStore reopened(db_path_.c_str());
+    ASSERT_TRUE(reopened.is_open());
+    const auto loaded = reopened.load_policy_update_job(key, "policy-job-test-001");
+    ASSERT_TRUE(loaded.ok) << loaded.error;
+    EXPECT_EQ(loaded.record.job_id, "policy-job-test-001");
+    EXPECT_EQ(loaded.record.logical_shard_id, 7u);
+    EXPECT_EQ(loaded.record.state, "failed");
+    EXPECT_EQ(loaded.record.failure.code, "POLICY_APPLY_PROMOTE_CONFLICT");
+    EXPECT_EQ(loaded.record.failure.stage, "compare_and_promote");
+    EXPECT_EQ(loaded.record.failure.actual_generation, 2u);
+}
+
+TEST(PolicyUpdateJobRecordSerializationTest, CommittedRecordUsesFailureNull) {
+    PolicyUpdateJobRecord record;
+    record.job_id = "policy-job-committed";
+    record.resource_key = "policy/default/runtime";
+    record.state = "committed";
+
+    const std::string json = serialize_policy_update_job_record(record);
+    EXPECT_NE(json.find("\"failure\": null"), std::string::npos);
+
+    PolicyUpdateJobRecord loaded;
+    ASSERT_TRUE(deserialize_policy_update_job_record(json, &loaded));
+    EXPECT_EQ(loaded.state, "committed");
+    EXPECT_TRUE(loaded.failure.code.empty());
+    EXPECT_TRUE(loaded.failure.stage.empty());
+}
+
+TEST(PolicyUpdateJobRecordSerializationTest, FailedRecordUsesNestedFailureObject) {
+    PolicyUpdateJobRecord record;
+    record.job_id = "policy-job-failed";
+    record.resource_key = "policy/default/runtime";
+    record.state = "failed";
+    record.failure.stage = "compare_and_promote";
+    record.failure.code = "POLICY_APPLY_PROMOTE_CONFLICT";
+    record.failure.message = "active policy pointer conflict";
+    record.failure.expected_generation = 1;
+    record.failure.actual_generation = 2;
+
+    const std::string json = serialize_policy_update_job_record(record);
+    EXPECT_NE(json.find("\"failure\": {"), std::string::npos);
+    EXPECT_EQ(json.find("\"failureStage\""), std::string::npos);
+
+    PolicyUpdateJobRecord loaded;
+    ASSERT_TRUE(deserialize_policy_update_job_record(json, &loaded));
+    EXPECT_EQ(loaded.failure.code, "POLICY_APPLY_PROMOTE_CONFLICT");
+    EXPECT_EQ(loaded.failure.stage, "compare_and_promote");
+    EXPECT_EQ(loaded.failure.actual_generation, 2u);
+}
+
+TEST(PolicyUpdateJobRecordSerializationTest, DeserializesLegacyFlatFailureFields) {
+    const std::string legacy_json = R"({
+  "recordType": "PolicyUpdateJobRecord",
+  "recordVersion": 1,
+  "jobId": "policy-job-legacy",
+  "resourceKey": "policy/default/runtime",
+  "logicalShardId": 1,
+  "state": "failed",
+  "sourceType": "yaml",
+  "operatorId": "operator-1",
+  "requestId": "req-1",
+  "expectedBaseGeneration": 1,
+  "expectedBasePolicyId": "sha256:base",
+  "candidateGeneration": 0,
+  "candidatePolicyId": "",
+  "candidateCanonicalHash": "",
+  "submittedAtUnixEpochMs": 1,
+  "updatedAtUnixEpochMs": 2,
+  "failureStage": "compare_and_promote",
+  "failureCode": "POLICY_APPLY_PROMOTE_CONFLICT",
+  "failureMessage": "active policy pointer conflict",
+  "failureExpectedGeneration": 1,
+  "failureActualGeneration": 2
+}
+)";
+
+    PolicyUpdateJobRecord loaded;
+    ASSERT_TRUE(deserialize_policy_update_job_record(legacy_json, &loaded));
+    EXPECT_EQ(loaded.failure.code, "POLICY_APPLY_PROMOTE_CONFLICT");
+    EXPECT_EQ(loaded.failure.stage, "compare_and_promote");
+    EXPECT_EQ(loaded.failure.actual_generation, 2u);
+}
+
 TEST_F(RocksDBPolicyStateStoreTest, StoreSurvivesCloseReopen) {
     const PolicyResourceKey key = PolicyResourceKey::default_runtime();
     const std::string yaml = "generation: 1\n";

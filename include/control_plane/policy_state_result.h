@@ -22,6 +22,8 @@ enum class PolicyStateErrorCode {
     ActivePointerInvalid,
     ActivePointerTargetMissing,
     AuditWriteFailed,
+    JobNotFound,
+    JobWriteFailed,
 };
 
 struct StorePolicyVersionResult {
@@ -55,6 +57,20 @@ struct PromoteActiveResult {
 
 struct AppendAuditResult {
     bool ok = false;
+    PolicyStateErrorCode code = PolicyStateErrorCode::Ok;
+    std::string error;
+};
+
+struct StorePolicyUpdateJobResult {
+    bool ok = false;
+    PolicyStateErrorCode code = PolicyStateErrorCode::Ok;
+    std::string error;
+};
+
+struct LoadPolicyUpdateJobResult {
+    bool ok = false;
+    bool not_found = false;
+    PolicyUpdateJobRecord record;
     PolicyStateErrorCode code = PolicyStateErrorCode::Ok;
     std::string error;
 };

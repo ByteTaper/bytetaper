@@ -5,17 +5,22 @@
 #include "control_plane/control_plane_service.h"
 #include "control_plane/policy_apply_api.h"
 #include "control_plane/policy_apply_status.h"
+#include "control_plane/policy_apply_transaction.h"
+#include "control_plane/policy_update_queue.h"
+#include "control_plane/policy_update_worker.h"
 #include "control_plane/rocksdb_policy_state_store.h"
 #include "taperquery/policy_ir_identity.h"
 #include "taperquery/policy_ir_yaml_emitter.h"
 #include "taperquery/policy_persistence.h"
 
+#include <chrono>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
 #include <random>
 #include <rocksdb/db.h>
+#include <thread>
 
 namespace fs = std::filesystem;
 using namespace bytetaper::control_plane;
@@ -106,19 +111,68 @@ protected:
         key_ = PolicyResourceKey::default_runtime();
 
         config_.policy_state_store = &*store_;
+
+        PolicyUpdateQueueConfig queue_config;
+        queue_config.logical_shard_count = 16;
+        queue_config.job_store = &*store_;
+        queue_ = std::make_unique<PolicyUpdateQueue>(queue_config);
+        config_.policy_update_queue = queue_.get();
+
+        tx_config_.policy_state_store = &*store_;
+        tx_config_.resource_key = key_;
+
         service_ = std::make_unique<ControlPlaneService>(config_);
     }
 
     void TearDown() override {
+        stop_workers();
         service_.reset();
+        queue_.reset();
         store_.reset();
         destroy_db(db_path_);
+    }
+
+    void start_workers(std::size_t count = 1) {
+        workers_.clear();
+        for (std::size_t i = 0; i < count; ++i) {
+            auto worker = std::make_unique<PolicyUpdateWorker>(static_cast<std::uint32_t>(i),
+                                                               queue_.get(), tx_config_);
+            worker->start();
+            workers_.push_back(std::move(worker));
+        }
+    }
+
+    void stop_workers() {
+        for (auto& worker : workers_) {
+            if (worker != nullptr) {
+                worker->stop();
+            }
+        }
+        workers_.clear();
+    }
+
+    bool wait_for_job_state(const std::string& job_id, PolicyUpdateJobState target) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::chrono::steady_clock::now() < deadline) {
+            const PolicyUpdateJobState state = queue_->get_job_state(job_id);
+            if (state == target) {
+                return true;
+            }
+            if (state == PolicyUpdateJobState::Failed) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return queue_->get_job_state(job_id) == target;
     }
 
     std::string db_path_;
     PolicyResourceKey key_;
     ControlPlaneServiceConfig config_;
+    PolicyApplyTransactionConfig tx_config_;
     std::optional<RocksDBPolicyStateStore> store_;
+    std::unique_ptr<PolicyUpdateQueue> queue_;
+    std::vector<std::unique_ptr<PolicyUpdateWorker>> workers_;
     std::unique_ptr<ControlPlaneService> service_;
 };
 
@@ -224,6 +278,7 @@ TEST_F(ControlPlaneServiceContractTest, ApplyRejectsStaleExpectedBase) {
 TEST_F(ControlPlaneServiceContractTest, ApplyAcceptedWithValidCas) {
     TqPolicyDocument base = make_policy_doc("route-base", 1);
     seed_active_policy(*store_, key_, base, 1);
+    start_workers(1);
 
     TqPolicyDocument candidate = make_policy_doc("route-candidate", 2, base.policy_id);
     PolicyIrYamlEmitResult candidate_emit = emit_policy_ir_canonical_yaml(candidate);
@@ -242,6 +297,86 @@ TEST_F(ControlPlaneServiceContractTest, ApplyAcceptedWithValidCas) {
     EXPECT_EQ(result.status, PolicyApplyStatus::Accepted);
     EXPECT_FALSE(result.job_id.empty());
     EXPECT_EQ(result.job_id, "policy-job-req-apply-001");
+    EXPECT_EQ(result.logical_shard_id, queue_->compute_shard_id(key_.to_string()));
+
+    ASSERT_TRUE(wait_for_job_state(result.job_id, PolicyUpdateJobState::Committed));
+
+    const auto job_query = service_->get_policy_update_job(result.job_id, key_);
+    ASSERT_TRUE(job_query.ok) << job_query.error;
+    EXPECT_EQ(job_query.job.state, "committed");
+    EXPECT_EQ(job_query.job.job_id, result.job_id);
+    EXPECT_EQ(job_query.job.logical_shard_id, result.logical_shard_id);
+
+    const auto active = store_->load_active_pointer(key_);
+    ASSERT_TRUE(active.ok);
+    EXPECT_EQ(active.pointer.generation, 2u);
+    EXPECT_NE(active.pointer.policy_id, base.policy_id);
+}
+
+TEST_F(ControlPlaneServiceContractTest, ApplyRejectsQueueFull) {
+    TqPolicyDocument base = make_policy_doc("route-base", 1);
+    seed_active_policy(*store_, key_, base, 1);
+
+    PolicyUpdateQueueConfig queue_config;
+    queue_config.logical_shard_count = 16;
+    queue_config.max_queue_depth_per_shard = 1;
+    queue_config.job_store = &*store_;
+    queue_ = std::make_unique<PolicyUpdateQueue>(queue_config);
+    config_.policy_update_queue = queue_.get();
+    service_ = std::make_unique<ControlPlaneService>(config_);
+
+    TqPolicyDocument candidate = make_policy_doc("route-candidate", 2, base.policy_id);
+    PolicyIrYamlEmitResult candidate_emit = emit_policy_ir_canonical_yaml(candidate);
+    ASSERT_TRUE(candidate_emit.ok);
+
+    PolicyApplyRequest first{};
+    first.resource_key = key_;
+    first.source_type = PolicyApplySourceType::Yaml;
+    first.source = candidate_emit.yaml;
+    first.expected_base_generation = 1;
+    first.expected_base_policy_id = base.policy_id;
+    first.request_id = "req-queue-full-1";
+    ASSERT_TRUE(service_->apply(first).ok);
+
+    PolicyApplyRequest second = first;
+    second.request_id = "req-queue-full-2";
+    const auto result = service_->apply(second);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.status, PolicyApplyStatus::RejectedQueueFull);
+    EXPECT_EQ(result.error, "POLICY_JOB_QUEUE_FULL");
+    EXPECT_EQ(result.logical_shard_id, queue_->compute_shard_id(key_.to_string()));
+    EXPECT_EQ(result.message, "Policy update queue for this resource is full.");
+
+    const auto orphan = store_->load_policy_update_job(key_, "policy-job-req-queue-full-2");
+    EXPECT_TRUE(orphan.not_found);
+}
+
+TEST_F(ControlPlaneServiceContractTest, ApplyRejectsWithoutQueueJobStore) {
+    TqPolicyDocument base = make_policy_doc("route-base", 1);
+    seed_active_policy(*store_, key_, base, 1);
+
+    PolicyUpdateQueueConfig queue_config;
+    queue_config.logical_shard_count = 16;
+    queue_ = std::make_unique<PolicyUpdateQueue>(queue_config);
+    config_.policy_update_queue = queue_.get();
+    service_ = std::make_unique<ControlPlaneService>(config_);
+
+    TqPolicyDocument candidate = make_policy_doc("route-candidate", 2, base.policy_id);
+    PolicyIrYamlEmitResult candidate_emit = emit_policy_ir_canonical_yaml(candidate);
+    ASSERT_TRUE(candidate_emit.ok);
+
+    PolicyApplyRequest request{};
+    request.resource_key = key_;
+    request.source_type = PolicyApplySourceType::Yaml;
+    request.source = candidate_emit.yaml;
+    request.expected_base_generation = 1;
+    request.expected_base_policy_id = base.policy_id;
+    request.request_id = "req-no-job-store";
+
+    const auto result = service_->apply(request);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.status, PolicyApplyStatus::RejectedStorageUnavailable);
+    EXPECT_EQ(result.error, "policy update queue job store is not configured");
 }
 
 TEST_F(ControlPlaneServiceContractTest, ApplyRejectsWhenPolicyInactive) {
@@ -300,6 +435,7 @@ TEST_F(ControlPlaneServiceContractTest, RollbackPlanReadyWhenTargetExists) {
 TEST(ControlPlaneServiceContract, StatusToStringCoversKnownValues) {
     EXPECT_STREQ(to_string(PolicyApplyStatus::DryRunReady), "DryRunReady");
     EXPECT_STREQ(to_string(PolicyApplyStatus::RejectedCasMismatch), "RejectedCasMismatch");
+    EXPECT_STREQ(to_string(PolicyApplyStatus::RejectedQueueFull), "RejectedQueueFull");
     EXPECT_STREQ(to_string(PolicyApplyStatus::Accepted), "Accepted");
     EXPECT_STREQ(to_string(PolicyApplyStatus::RollbackPlanReady), "RollbackPlanReady");
 }

@@ -11,8 +11,11 @@
 
 namespace bytetaper::control_plane {
 
+class PolicyUpdateQueue;
+
 struct ControlPlaneServiceConfig {
     PolicyStateStore* policy_state_store = nullptr;
+    PolicyUpdateQueue* policy_update_queue = nullptr;
 
     // Optional hook for runtime policy inactive state (BT-CP-013 will replace this).
     std::function<bool(const PolicyResourceKey&)> is_policy_inactive;

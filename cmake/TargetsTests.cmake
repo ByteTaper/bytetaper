@@ -2854,10 +2854,55 @@ if(BUILD_TESTING)
   )
   target_link_libraries(control_plane_service_contract_test
     PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
-            bytetaper_taperquery_apply
+            bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter
+            Threads::Threads
   )
   add_test(NAME control_plane_service_contract_test
     COMMAND control_plane_service_contract_test
+  )
+
+  add_executable(policy_update_queue_test
+    tests/policy_update_queue_test.cpp
+  )
+  target_include_directories(policy_update_queue_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(policy_update_queue_test
+    PRIVATE gtest_main bytetaper_control_plane_service Threads::Threads
+  )
+  add_test(NAME policy_update_queue_test COMMAND policy_update_queue_test)
+
+  add_executable(policy_apply_transaction_test
+    tests/policy_apply_transaction_test.cpp
+  )
+  set_source_files_properties(tests/policy_apply_transaction_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(policy_apply_transaction_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(policy_apply_transaction_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+            bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter
+  )
+  add_test(NAME policy_apply_transaction_test COMMAND policy_apply_transaction_test)
+
+  add_executable(policy_update_queue_concurrency_test
+    tests/policy_update_queue_concurrency_test.cpp
+  )
+  set_source_files_properties(tests/policy_update_queue_concurrency_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(policy_update_queue_concurrency_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(policy_update_queue_concurrency_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+            bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter
+            Threads::Threads
+  )
+  add_test(NAME policy_update_queue_concurrency_test
+    COMMAND policy_update_queue_concurrency_test
   )
 
   # Concurrency and Race Harness tests (BT-RACE-001)
