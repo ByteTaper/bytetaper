@@ -149,6 +149,24 @@ PolicyIrLoadResult load_policy_ir_from_yaml_file(const char* path) {
         if (root["expected_base_sha"] && root["expected_base_sha"].IsScalar()) {
             res.policy.expected_base_sha = root["expected_base_sha"].as<std::string>();
         }
+        if (root["apiVersion"] && root["apiVersion"].IsScalar()) {
+            res.policy.api_version = root["apiVersion"].as<std::string>();
+        }
+        if (root["kind"] && root["kind"].IsScalar()) {
+            res.policy.kind = root["kind"].as<std::string>();
+        }
+        if (root["metadata"] && root["metadata"].IsMap()) {
+            YAML::Node metadata_node = root["metadata"];
+            if (metadata_node["generation"] && metadata_node["generation"].IsScalar()) {
+                res.policy.generation = metadata_node["generation"].as<std::uint64_t>();
+            }
+            if (metadata_node["policyId"] && metadata_node["policyId"].IsScalar()) {
+                res.policy.policy_id = metadata_node["policyId"].as<std::string>();
+            }
+            if (metadata_node["schemaVersion"] && metadata_node["schemaVersion"].IsScalar()) {
+                res.policy.schema_version_num = metadata_node["schemaVersion"].as<std::uint32_t>();
+            }
+        }
     } catch (...) {
         // Ignore parsing errors for non-existent or malformed root elements, fallback to empty
         // defaults

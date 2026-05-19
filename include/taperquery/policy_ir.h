@@ -216,6 +216,13 @@ struct TqPolicyDocument {
     std::string source_name;
     std::string expected_base_sha;
     std::vector<TqRoutePolicy> routes;
+
+    // Extended canonical policy fields
+    std::string api_version;
+    std::string kind;
+    std::uint64_t generation = 0;
+    std::string policy_id;
+    std::uint32_t schema_version_num = 0;
 };
 
 } // namespace bytetaper::taperquery

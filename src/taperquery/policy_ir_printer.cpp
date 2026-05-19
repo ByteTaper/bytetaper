@@ -7,6 +7,24 @@ namespace bytetaper::taperquery {
 
 std::string print_canonical_policy_ir(const TqPolicyDocument& policy) {
     std::string out;
+    if (!policy.api_version.empty()) {
+        out += "apiVersion: " + policy.api_version + "\n";
+    }
+    if (!policy.kind.empty()) {
+        out += "kind: " + policy.kind + "\n";
+    }
+    if (policy.generation > 0 || !policy.policy_id.empty() || policy.schema_version_num > 0) {
+        out += "metadata:\n";
+        if (policy.generation > 0) {
+            out += "  generation: " + std::to_string(policy.generation) + "\n";
+        }
+        if (!policy.policy_id.empty()) {
+            out += "  policyId: " + policy.policy_id + "\n";
+        }
+        if (policy.schema_version_num > 0) {
+            out += "  schemaVersion: " + std::to_string(policy.schema_version_num) + "\n";
+        }
+    }
     if (!policy.version.source_schema_version.empty()) {
         out += "source_schema_version: " + policy.version.source_schema_version + "\n";
     }
