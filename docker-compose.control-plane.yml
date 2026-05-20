@@ -1,0 +1,112 @@
+# BT-CP-016: Control Plane + Runtime profile (merge with docker-compose.yml).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.control-plane.yml up -d --build
+
+services:
+  # Avoid host port 18080 clash if monolithic extproc is started alongside the profile.
+  bytetaper-extproc:
+    ports: !reset []
+
+  bytetaper-control-plane:
+    image: bytetaper-dev:latest
+    depends_on:
+      bytetaper-build-server:
+        condition: service_completed_successfully
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - bt-build:/workspace/build
+      - bt-ccache:/home/bytetaper/.cache/ccache
+      - bytetaper-policy-state:/var/lib/bytetaper/policy-state-db
+    environment:
+      - BYTETAPER_RUNTIME_ROLE=control-plane
+      - BYTETAPER_DEPLOYMENT_MODE=local-dev
+      - BYTETAPER_CONTROL_PLANE_ENABLED=1
+      - BYTETAPER_POLICY_STATE_DB=/var/lib/bytetaper/policy-state-db
+      - BYTETAPER_CONTROL_PLANE_BIND_ADDRESS=0.0.0.0
+      - BYTETAPER_CONTROL_PLANE_PORT=19090
+      - BYTETAPER_BOOTSTRAP_POLICY_FILE=examples/policies/bootstrap-policy.yaml
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        mkdir -p /var/lib/bytetaper/policy-state-db
+        exec ./build/bytetaper-extproc-server \
+          --metrics-address 0.0.0.0 \
+          --metrics-port 18081 \
+          --policy-state-db /var/lib/bytetaper/policy-state-db
+    ports:
+      - "19090:19090"
+      - "19091:18081"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/19090 && printf \"GET /healthz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+
+  bytetaper-runtime:
+    image: bytetaper-dev:latest
+    depends_on:
+      bytetaper-build-server:
+        condition: service_completed_successfully
+      bytetaper-control-plane:
+        condition: service_healthy
+      mock-api:
+        condition: service_healthy
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - bt-build:/workspace/build
+      - bt-ccache:/home/bytetaper/.cache/ccache
+      - bytetaper-runtime-policy:/var/lib/bytetaper/policies
+    environment:
+      - BYTETAPER_RUNTIME_ROLE=runtime-only
+      - BYTETAPER_DEPLOYMENT_MODE=multi-runtime
+      - BYTETAPER_CONTROL_PLANE_ENABLED=1
+      - BYTETAPER_CONTROL_PLANE_ENDPOINT=http://bytetaper-control-plane:19090
+      - BYTETAPER_POLICY_PULL_ENABLED=1
+      - BYTETAPER_POLICY_PULL_INTERVAL_MS=2000
+      - BYTETAPER_RUNTIME_ID=bytetaper-runtime-0
+      - BYTETAPER_POLICY_PERSISTENCE_ENABLED=1
+      - BYTETAPER_POLICY_STATE_DIR=/var/lib/bytetaper/policies
+      - BYTETAPER_POLICY_INACTIVE_MODE=pass-through
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        mkdir -p /var/lib/bytetaper/policies /tmp/bytetaper-cache-cp-demo
+        exec ./build/bytetaper-extproc-server \
+          --listen-address 0.0.0.0:18080 \
+          --policy-file examples/policies/control-plane-demo-policy.yaml \
+          --l2-cache-path /tmp/bytetaper-cache-cp-demo \
+          --metrics-address 0.0.0.0 \
+          --metrics-port 18081
+    ports:
+      - "18080:18080"
+      - "18081:18081"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 20s
+
+  envoy:
+    depends_on:
+      # Override base (service_healthy): do not gate Envoy on monolithic extproc readiness.
+      bytetaper-extproc:
+        condition: service_started
+      bytetaper-runtime:
+        condition: service_healthy
+      mock-api:
+        condition: service_healthy
+    ports:
+      - "10000:10000"
+    volumes:
+      - ./examples/envoy/control-plane-demo.yaml:/etc/envoy/envoy.yaml:ro
+
+volumes:
+  bytetaper-policy-state:
+  bytetaper-runtime-policy:

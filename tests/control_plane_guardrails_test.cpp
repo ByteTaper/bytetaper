@@ -154,6 +154,17 @@ TEST(ControlPlaneGuardrailsTest, MultiRuntimeRuntimeOnlyRequiresControlPlaneEndp
     EXPECT_FALSE(result.ok);
 }
 
+TEST(ControlPlaneGuardrailsTest, MultiRuntimeRuntimeOnlyAllowsRemoteControlPlaneWithoutLocalStore) {
+    ControlPlaneSecurityConfig security{};
+    security.enabled = true;
+    security.deployment_mode = ControlPlaneDeploymentMode::MultiRuntime;
+    security.runtime_role = RuntimeProcessRole::RuntimeOnly;
+    security.control_plane_endpoint = "http://control-plane:19090";
+
+    const StartupValidationResult result = validate_startup(security, false);
+    EXPECT_TRUE(result.ok);
+}
+
 TEST(ControlPlaneGuardrailsTest, SingleNodeRuntimeOnlyAllowsMissingControlPlaneEndpoint) {
     ControlPlaneSecurityConfig security{};
     security.enabled = true;

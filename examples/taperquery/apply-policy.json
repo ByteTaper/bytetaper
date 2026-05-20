@@ -1,0 +1,7 @@
+{
+  "source": "routes:\n  - id: small-json\n    match:\n      kind: exact\n      prefix: /api/v1/small\n    mutation: full\n    cache:\n      behavior: store\n      ttl_seconds: 120\n      field_variant:\n        enabled: true\n        max_variants_per_route: 4\n        admission_threshold: 1\n        ttl_max_ms: 10000\n        include_fields:\n          - id\n          - name\n          - status\n",
+  "request_id": "cp-demo-apply-1",
+  "operator_id": "control-plane-demo",
+  "expected_base_generation": 1,
+  "expected_base_policy_id": "f6da237dce3441c0"
+}
