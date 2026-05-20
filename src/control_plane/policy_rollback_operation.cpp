@@ -84,10 +84,9 @@ PolicyRollbackResult PolicyRollbackOperation::execute(const PolicyRollbackReques
     commit_input.request_id = request.request_id;
 
     PolicyAuditRecord audit = make_manual_resolution_audit_record(
-        request.resource_key, "rollback", "rollback", request.operator_id, request.request_id);
-    audit.before_generation = active_res.pointer.generation;
-    audit.target_generation = request.target_generation;
-    audit.result = "success";
+        PolicyLifecycleEventType::PolicyRollbackCompleted, request.resource_key, "rollback",
+        "rollback", request.operator_id, request.request_id, "success", "", "", "",
+        active_res.pointer.generation, request.target_generation, request.target_generation);
 
     const PolicyGenerationCommitResult commit_res =
         commit_policy_generation(store_, commit_input, &audit);

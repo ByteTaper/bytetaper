@@ -4,12 +4,19 @@
 #ifndef BYTETAPER_CONTROL_PLANE_CONTROL_PLANE_CONFIG_H
 #define BYTETAPER_CONTROL_PLANE_CONTROL_PLANE_CONFIG_H
 
+#include "control_plane/audit_retention_config.h"
+#include "control_plane/control_plane_metrics.h"
 #include "control_plane/fleet_status_config.h"
 #include "control_plane/manual_resolution_api.h"
+#include "control_plane/policy_lifecycle_emitter.h"
 #include "control_plane/policy_state_key.h"
 #include "control_plane/policy_state_store.h"
 
 #include <functional>
+
+namespace bytetaper::runtime_policy {
+struct RuntimePolicyMetrics;
+}
 
 namespace bytetaper::control_plane {
 
@@ -19,6 +26,11 @@ struct ControlPlaneServiceConfig {
     PolicyStateStore* policy_state_store = nullptr;
     PolicyUpdateQueue* policy_update_queue = nullptr;
     FleetStatusConfig fleet_status{};
+    ControlPlaneMetrics* control_plane_metrics = nullptr;
+    runtime_policy::RuntimePolicyMetrics* runtime_policy_metrics = nullptr;
+    PolicyLifecycleEmitter* lifecycle_emitter = nullptr;
+    AuditRetentionConfig audit_retention{};
+    bool lifecycle_observability_enabled = true;
 
     std::function<bool(const PolicyResourceKey&)> is_policy_inactive;
 

@@ -4,6 +4,7 @@
 #ifndef BYTETAPER_RUNTIME_POLICY_STARTUP_POLICY_VALIDATOR_H
 #define BYTETAPER_RUNTIME_POLICY_STARTUP_POLICY_VALIDATOR_H
 
+#include "control_plane/policy_lifecycle_emitter.h"
 #include "control_plane/policy_state_store.h"
 #include "runtime_policy/policy_mismatch_classifier.h"
 #include "taperquery/policy_persistence.h"
@@ -15,6 +16,8 @@ struct StartupValidationInput {
     const control_plane::ActivePolicyPointer* active_pointer = nullptr;
     const taperquery::PolicyPersistenceLoadResult* local_load_result = nullptr;
     control_plane::PolicyStateStore* store = nullptr;
+    control_plane::PolicyLifecycleEmitter* lifecycle_emitter = nullptr;
+    RuntimePolicyMetrics* runtime_policy_metrics = nullptr;
     bool validate_local_mirror = false;
 };
 

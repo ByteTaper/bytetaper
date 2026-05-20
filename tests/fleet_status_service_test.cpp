@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
+#include "control_plane/control_plane_metrics.h"
 #include "control_plane/fleet_status_service.h"
 #include "control_plane/rocksdb_policy_state_store.h"
 
@@ -182,6 +183,14 @@ TEST(FleetStatusServiceTest, FleetSummaryCountsAreCorrect) {
             EXPECT_EQ(entry.convergence_error_code, kErrRuntimeStatusPolicyMismatch);
         }
     }
+
+    ControlPlaneMetrics metrics{};
+    update_fleet_metrics(&metrics, fleet.status.fleet.runtime_count,
+                         fleet.status.fleet.converged_count, fleet.status.fleet.stale_count,
+                         fleet.status.fleet.failed_count, fleet.status.fleet.unreachable_count,
+                         fleet.status.fleet.degraded_count, fleet.status.fleet.converged);
+    EXPECT_EQ(metrics.fleet_stale_count.load(), 1u);
+    EXPECT_EQ(metrics.fleet_runtime_count.load(), 3u);
 
     destroy_db(db_path);
 }

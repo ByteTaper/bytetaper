@@ -3,6 +3,7 @@
 
 #include "control_plane/policy_update_queue.h"
 
+#include "control_plane/control_plane_metrics.h"
 #include "control_plane/policy_state_key.h"
 #include "control_plane/policy_update_job_record.h"
 
@@ -116,6 +117,7 @@ EnqueueJobResult PolicyUpdateQueue::enqueue(PolicyUpdateJob job) {
         if (shard.jobs.size() >= config_.max_queue_depth_per_shard) {
             result.error = "POLICY_JOB_QUEUE_FULL";
             result.message = "Policy update queue for this resource is full.";
+            record_queue_rejection(config_.control_plane_metrics);
             return result;
         }
 
@@ -143,12 +145,30 @@ EnqueueJobResult PolicyUpdateQueue::enqueue(PolicyUpdateJob job) {
         }
 
         ready_cv_.notify_all();
+        last_enqueued_job_id_ = job_id;
     }
 
     result.ok = true;
     result.logical_shard_id = shard_id;
     result.job_id = job_id;
+
+    sync_queue_metrics();
+
     return result;
+}
+
+void PolicyUpdateQueue::sync_queue_metrics() {
+    if (config_.control_plane_metrics == nullptr) {
+        return;
+    }
+    config_.control_plane_metrics->policy_update_queue_depth.store(depth(),
+                                                                   std::memory_order_relaxed);
+    config_.control_plane_metrics->policy_update_queue_capacity.store(capacity(),
+                                                                      std::memory_order_relaxed);
+}
+
+void PolicyUpdateQueue::record_job_dequeued() {
+    sync_queue_metrics();
 }
 
 PolicyUpdateShard* PolicyUpdateQueue::try_claim_shard() {
@@ -262,6 +282,28 @@ void PolicyUpdateQueue::wait_for_ready_shard(std::unique_lock<std::mutex>& lock)
 
 std::mutex& PolicyUpdateQueue::queue_mutex() {
     return queue_mu_;
+}
+
+std::uint64_t PolicyUpdateQueue::depth() const {
+    std::uint64_t total = 0;
+    for (const auto& shard : shards_) {
+        std::lock_guard<std::mutex> shard_lock(shard->mu);
+        total += shard->jobs.size();
+    }
+    return total;
+}
+
+std::uint64_t PolicyUpdateQueue::capacity() const {
+    return static_cast<std::uint64_t>(config_.logical_shard_count) *
+           static_cast<std::uint64_t>(config_.max_queue_depth_per_shard);
+}
+
+std::optional<std::string> PolicyUpdateQueue::last_enqueued_job_id() const {
+    std::lock_guard<std::mutex> lock(queue_mu_);
+    if (last_enqueued_job_id_.empty()) {
+        return std::nullopt;
+    }
+    return last_enqueued_job_id_;
 }
 
 } // namespace bytetaper::control_plane

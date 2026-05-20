@@ -719,10 +719,10 @@ TEST_F(ManualResolutionServiceTest, SuccessfulManualOperationsAppendAuditRecords
     const PolicyRepairLocalResult repair_result = service_->repair_local(repair);
     ASSERT_TRUE(repair_result.ok) << repair_result.error;
 
-    EXPECT_EQ(audit_store->audit_count(), 4u);
+    EXPECT_EQ(audit_store->audit_count(), 7u);
 
     const std::optional<PolicyAuditRecord> rollback_audit =
-        audit_store->find_audit(rollback.request_id);
+        audit_store->find_last_audit(rollback.request_id);
     ASSERT_TRUE(rollback_audit.has_value());
     EXPECT_EQ(rollback_audit->operation, "rollback");
     EXPECT_EQ(rollback_audit->source_type, "rollback");
@@ -732,8 +732,11 @@ TEST_F(ManualResolutionServiceTest, SuccessfulManualOperationsAppendAuditRecords
     EXPECT_EQ(rollback_audit->target_generation, 1u);
     EXPECT_EQ(rollback_audit->after_generation, rollback_result.new_generation);
     EXPECT_GE(rollback_audit->recorded_at_unix_epoch_ms, 0u);
+    EXPECT_EQ(rollback_audit->record_version, 3u);
+    EXPECT_EQ(rollback_audit->event_type, "policy_rollback_completed");
 
-    const std::optional<PolicyAuditRecord> adopt_audit = audit_store->find_audit(adopt.request_id);
+    const std::optional<PolicyAuditRecord> adopt_audit =
+        audit_store->find_last_audit(adopt.request_id);
     ASSERT_TRUE(adopt_audit.has_value());
     EXPECT_EQ(adopt_audit->operation, "adopt-local");
     EXPECT_EQ(adopt_audit->source_type, "manual-adopt");
@@ -744,6 +747,8 @@ TEST_F(ManualResolutionServiceTest, SuccessfulManualOperationsAppendAuditRecords
     EXPECT_EQ(adopt_audit->policy_id, adopt_result.new_policy_id);
     EXPECT_EQ(adopt_audit->target_generation, 2u);
     EXPECT_EQ(adopt_result.resolved_local_generation, 2u);
+    EXPECT_EQ(adopt_audit->record_version, 3u);
+    EXPECT_EQ(adopt_audit->event_type, "manual_adopt_completed");
 
     const std::optional<PolicyAuditRecord> repair_audit =
         audit_store->find_last_audit(repair.request_id);
@@ -756,6 +761,8 @@ TEST_F(ManualResolutionServiceTest, SuccessfulManualOperationsAppendAuditRecords
     EXPECT_TRUE(repair_audit->failure_reason.empty());
     EXPECT_EQ(repair_audit->before_generation, active_after_adopt.pointer.generation);
     EXPECT_EQ(repair_audit->after_generation, active_after_adopt.pointer.generation);
+    EXPECT_EQ(repair_audit->record_version, 3u);
+    EXPECT_EQ(repair_audit->event_type, "manual_repair_completed");
 }
 
 TEST_F(ManualResolutionServiceTest, AdoptLocalAuditTargetGenerationFromFetchedPolicy) {
@@ -839,13 +846,15 @@ TEST_F(ManualResolutionServiceTest, FailedManualOperationStillAppendsAuditRecord
     const PolicyRollbackResult result = service_->rollback(request);
     EXPECT_FALSE(result.ok);
 
-    EXPECT_EQ(audit_store->audit_count(), 1u);
+    EXPECT_EQ(audit_store->audit_count(), 2u);
 
-    const std::optional<PolicyAuditRecord> audit = audit_store->find_audit(request.request_id);
+    const std::optional<PolicyAuditRecord> audit = audit_store->find_last_audit(request.request_id);
     ASSERT_TRUE(audit.has_value());
     EXPECT_EQ(audit->operation, "rollback");
     EXPECT_EQ(audit->result, "failure");
     EXPECT_FALSE(audit->failure_reason.empty());
+    EXPECT_EQ(audit->record_version, 3u);
+    EXPECT_EQ(audit->event_type, "policy_rollback_completed");
 }
 
 } // namespace

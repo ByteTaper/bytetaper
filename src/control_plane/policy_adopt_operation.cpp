@@ -280,12 +280,11 @@ PolicyAdoptLocalResult PolicyAdoptOperation::execute(const PolicyAdoptLocalReque
     commit_input.candidate_generation_override = resolve_adopt_candidate_generation(
         store_, request.resource_key, active_res.pointer.generation, fetched.local_generation_hint);
 
-    PolicyAuditRecord audit =
-        make_manual_resolution_audit_record(request.resource_key, "adopt-local", "manual-adopt",
-                                            request.operator_id, request.request_id);
-    audit.before_generation = request.expected_current_generation;
-    audit.target_generation = fetched.resolved_local_generation;
-    audit.result = "success";
+    PolicyAuditRecord audit = make_manual_resolution_audit_record(
+        PolicyLifecycleEventType::ManualAdoptCompleted, request.resource_key, "adopt-local",
+        "manual-adopt", request.operator_id, request.request_id, "success", "", "", "",
+        request.expected_current_generation, fetched.resolved_local_generation,
+        fetched.resolved_local_generation);
 
     const PolicyGenerationCommitResult commit_res =
         commit_policy_generation(store_, commit_input, &audit);

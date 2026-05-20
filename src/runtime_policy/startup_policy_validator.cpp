@@ -3,6 +3,9 @@
 
 #include "runtime_policy/startup_policy_validator.h"
 
+#include "control_plane/policy_lifecycle_event.h"
+#include "runtime_policy/runtime_policy_log_events.h"
+#include "runtime_policy/runtime_policy_metrics.h"
 #include "taperquery/policy_persistence.h"
 
 namespace bytetaper::runtime_policy {
@@ -16,6 +19,45 @@ bool metadata_is_valid(const taperquery::PersistedPolicyMetadata& meta) {
     }
     return meta.generation != 0 &&
            (!meta.policy_identity.empty() || !meta.canonical_yaml_sha256.empty());
+}
+
+const char* mismatch_reason_for_health(RuntimePolicyHealth health) {
+    switch (health) {
+    case RuntimePolicyHealth::InactiveCorruptedLocal:
+        return "corrupted";
+    case RuntimePolicyHealth::InactiveStaleLocal:
+        return "stale";
+    case RuntimePolicyHealth::InactiveDivergedLocal:
+        return "diverged";
+    case RuntimePolicyHealth::InactiveMissingLocal:
+        return "missing";
+    case RuntimePolicyHealth::InactiveUnparseableLocal:
+        return "unparseable";
+    case RuntimePolicyHealth::BootstrapDriftDetected:
+        return "bootstrap_drift";
+    default:
+        return "unknown";
+    }
+}
+
+void emit_mismatch_if_needed(const StartupValidationInput& input,
+                             const StartupValidationResult& result) {
+    if (result.health == RuntimePolicyHealth::Active) {
+        return;
+    }
+    control_plane::PolicyLifecycleEvent event{};
+    event.event_type = control_plane::PolicyLifecycleEventType::PolicyMismatchDetected;
+    event.resource_key = input.resource_key != nullptr ? input.resource_key->to_string() : "";
+    event.before_generation = result.mismatch_detail.committed_generation;
+    event.after_generation = result.mismatch_detail.local_generation;
+    event.status = "failure";
+    event.message = mismatch_reason_for_health(result.health);
+    event.error_code = result.message;
+    if (input.lifecycle_emitter != nullptr) {
+        (void) input.lifecycle_emitter->emit(event);
+    }
+    record_mismatch(input.runtime_policy_metrics, event.message.c_str());
+    log_runtime_policy_lifecycle_event(event);
 }
 
 std::string metadata_canonical_hash(const taperquery::PersistedPolicyMetadata& meta) {
@@ -88,6 +130,7 @@ validate_startup_against_active_pointer(const StartupValidationInput& input) {
         } else {
             result.valid = false;
             result.message = "active pointer does not match committed store policy";
+            emit_mismatch_if_needed(input, result);
         }
         return result;
     }
@@ -129,6 +172,7 @@ validate_startup_against_active_pointer(const StartupValidationInput& input) {
 
     result.valid = false;
     result.message = "active pointer does not match local mirror";
+    emit_mismatch_if_needed(input, result);
     return result;
 }
 

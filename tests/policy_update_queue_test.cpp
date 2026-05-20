@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
+#include "control_plane/control_plane_metrics.h"
 #include "control_plane/policy_state_key.h"
 #include "control_plane/policy_update_queue.h"
 #include "control_plane/policy_update_shard.h"
@@ -265,5 +266,36 @@ TEST(PolicyUpdateQueueTest, DrainingShardProcessesRemainingJobs) {
     queue.release_shard(shard);
     EXPECT_EQ(shard->state, PolicyUpdateShardState::Idle);
 
+    destroy_db(db_path);
+}
+
+TEST(PolicyUpdateQueueTest, RecordJobDequeuedRefreshesDepthMetric) {
+    const std::string db_path = make_temp_db_path();
+    destroy_db(db_path);
+    RocksDBPolicyStateStore store(db_path.c_str());
+    ASSERT_TRUE(store.is_open());
+
+    ControlPlaneMetrics metrics{};
+    PolicyUpdateQueueConfig config;
+    config.logical_shard_count = 8;
+    config.job_store = &store;
+    config.control_plane_metrics = &metrics;
+    PolicyUpdateQueue queue(config);
+    const std::string key = "policy/default/runtime";
+
+    ASSERT_TRUE(queue.enqueue(make_job("job-1", key)).ok);
+    ASSERT_TRUE(queue.enqueue(make_job("job-2", key)).ok);
+    EXPECT_EQ(metrics.policy_update_queue_depth.load(), 2u);
+
+    PolicyUpdateShard* shard = queue.try_claim_shard();
+    ASSERT_NE(shard, nullptr);
+    {
+        std::lock_guard<std::mutex> lock(shard->mu);
+        shard->jobs.pop_front();
+    }
+    queue.record_job_dequeued();
+    EXPECT_EQ(metrics.policy_update_queue_depth.load(), 1u);
+
+    queue.release_shard(shard);
     destroy_db(db_path);
 }

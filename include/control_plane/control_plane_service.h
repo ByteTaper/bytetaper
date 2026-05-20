@@ -5,12 +5,15 @@
 #define BYTETAPER_CONTROL_PLANE_CONTROL_PLANE_SERVICE_H
 
 #include "control_plane/control_plane_config.h"
+#include "control_plane/control_plane_metrics.h"
 #include "control_plane/fleet_status.h"
 #include "control_plane/manual_resolution_api.h"
 #include "control_plane/policy_apply_api.h"
 #include "control_plane/policy_job_query.h"
+#include "control_plane/policy_lifecycle_emitter.h"
 #include "control_plane/policy_version_query.h"
 #include "control_plane/runtime_status_report.h"
+#include "runtime_policy/runtime_policy_metrics.h"
 
 #include <memory>
 
@@ -54,7 +57,13 @@ public:
     PolicyRollbackResult rollback(const PolicyRollbackRequest& request);
 
 private:
+    void setup_lifecycle_observability();
+
     ControlPlaneServiceConfig config_;
+    ControlPlaneMetrics owned_control_plane_metrics_{};
+    runtime_policy::RuntimePolicyMetrics owned_runtime_policy_metrics_{};
+    PolicyLifecycleEmitterConfig emitter_config_{};
+    std::unique_ptr<PolicyLifecycleEmitter> lifecycle_emitter_;
     std::unique_ptr<class FleetStatusService> fleet_status_service_;
     std::unique_ptr<class ManualResolutionService> manual_resolution_service_;
 };

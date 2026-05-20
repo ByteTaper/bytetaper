@@ -48,7 +48,7 @@ struct PolicyVersionRecord {
 
 struct PolicyAuditRecord {
     std::string record_type = "PolicyAuditRecord";
-    std::uint32_t record_version = 2;
+    std::uint32_t record_version = 3;
     std::string apply_id;
     std::string resource_key;
     std::uint64_t generation = 0;
@@ -63,6 +63,16 @@ struct PolicyAuditRecord {
     std::uint64_t target_generation = 0;
     std::string result;
     std::string failure_reason;
+    std::string event_id;
+    std::string event_type;
+    std::string job_id;
+    std::string before_policy_id;
+    std::string after_policy_id;
+    std::string canonical_hash;
+    std::string lifecycle_status;
+    std::string failure_code;
+    std::string failure_stage;
+    std::string message;
 };
 
 struct PolicyUpdateJobFailureRecord {

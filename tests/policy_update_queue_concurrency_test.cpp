@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
+#include "control_plane/control_plane_metrics.h"
 #include "control_plane/policy_apply_transaction.h"
 #include "control_plane/policy_state_key.h"
 #include "control_plane/policy_update_queue.h"
@@ -380,4 +381,21 @@ TEST_F(PolicyUpdateQueueConcurrencyTest, FifoOrderPerResourceWithFourWorkers) {
     for (std::size_t i = 0; i < observed_generations.size(); ++i) {
         EXPECT_EQ(observed_generations[i], 2u + i);
     }
+}
+
+TEST(PolicyUpdateWorkerTest, StartStopUpdatesActiveWorkerMetric) {
+    ControlPlaneMetrics metrics{};
+    PolicyUpdateQueueConfig queue_config;
+    queue_config.logical_shard_count = 4;
+    PolicyUpdateQueue queue(queue_config);
+
+    PolicyApplyTransactionConfig tx_config{};
+    tx_config.control_plane_metrics = &metrics;
+
+    PolicyUpdateWorker worker(0, &queue, tx_config);
+    EXPECT_EQ(metrics.policy_update_worker_active.load(), 0u);
+    worker.start();
+    EXPECT_EQ(metrics.policy_update_worker_active.load(), 1u);
+    worker.stop();
+    EXPECT_EQ(metrics.policy_update_worker_active.load(), 0u);
 }
