@@ -3,6 +3,7 @@
 
 #include "control_plane/policy_adopt_operation.h"
 
+#include "control_plane/control_plane_guardrails.h"
 #include "control_plane/manual_resolution_audit.h"
 #include "control_plane/policy_generation_commit.h"
 #include "taperquery/policy_ir_from_yaml.h"
@@ -223,11 +224,13 @@ PolicyAdoptLocalResult PolicyAdoptOperation::execute(const PolicyAdoptLocalReque
         return result;
     }
 
-    if (!request.confirm_divergent_adoption) {
-        result.status = PolicyApplyStatus::RejectedInvalidRequest;
-        result.error_code = kErrAdoptLocalConfirmationRequired;
-        result.error = "adopt-local requires confirmDivergentAdoption=true";
-        result.message = result.error;
+    const GuardrailResult confirm_guard = check_dangerous_operation_confirmation(
+        DangerousOperationKind::AdoptLocal, false, request.confirm_divergent_adoption);
+    if (!confirm_guard.allowed) {
+        result.status = confirm_guard.status;
+        result.error_code = confirm_guard.error_code;
+        result.error = confirm_guard.message;
+        result.message = confirm_guard.message;
         return result;
     }
 

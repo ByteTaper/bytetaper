@@ -3,6 +3,7 @@
 
 #include "control_plane/policy_rollback_operation.h"
 
+#include "control_plane/control_plane_guardrails.h"
 #include "control_plane/manual_resolution_audit.h"
 #include "control_plane/policy_generation_commit.h"
 
@@ -24,11 +25,13 @@ PolicyRollbackResult PolicyRollbackOperation::execute(const PolicyRollbackReques
         return result;
     }
 
-    if (!request.confirm) {
-        result.status = PolicyApplyStatus::RejectedInvalidRequest;
-        result.error_code = kErrRollbackConfirmationRequired;
-        result.error = "rollback requires confirm=true";
-        result.message = result.error;
+    const GuardrailResult confirm_guard =
+        check_dangerous_operation_confirmation(DangerousOperationKind::Rollback, request.confirm);
+    if (!confirm_guard.allowed) {
+        result.status = confirm_guard.status;
+        result.error_code = confirm_guard.error_code;
+        result.error = confirm_guard.message;
+        result.message = confirm_guard.message;
         return result;
     }
 

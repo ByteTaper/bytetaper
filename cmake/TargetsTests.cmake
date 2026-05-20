@@ -2949,6 +2949,52 @@ if(BUILD_TESTING)
   )
   add_test(NAME control_plane_metrics_test COMMAND control_plane_metrics_test)
 
+  add_executable(control_plane_guardrails_test
+    tests/control_plane_guardrails_test.cpp
+  )
+  set_source_files_properties(tests/control_plane_guardrails_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(control_plane_guardrails_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(control_plane_guardrails_test
+    PRIVATE gtest_main bytetaper_control_plane
+  )
+  add_test(NAME control_plane_guardrails_test COMMAND control_plane_guardrails_test)
+
+  add_executable(control_plane_security_test
+    tests/control_plane_security_test.cpp
+  )
+  set_source_files_properties(tests/control_plane_security_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(control_plane_security_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(control_plane_security_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+  )
+  add_test(NAME control_plane_security_test COMMAND control_plane_security_test)
+
+  add_executable(control_plane_security_integration_test
+    tests/control_plane_security_integration_test.cpp
+  )
+  set_source_files_properties(tests/control_plane_security_integration_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(control_plane_security_integration_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(control_plane_security_integration_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+  )
+  if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
+    add_dependencies(control_plane_security_integration_test bytetaper-extproc-server)
+  endif()
+  add_test(NAME control_plane_security_integration_test
+    COMMAND control_plane_security_integration_test)
+
   add_executable(policy_lifecycle_logging_test
     tests/policy_lifecycle_logging_test.cpp
   )

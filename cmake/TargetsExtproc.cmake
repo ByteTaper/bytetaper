@@ -204,6 +204,7 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
       bytetaper_extproc_grpc_server
       bytetaper_extproc_grpc
       bytetaper_runtime_policy
+      bytetaper_control_plane
       policy_yaml_loader
       bytetaper_metrics_http_server
       bytetaper_prometheus_registry

@@ -6,6 +6,8 @@
 #include "cache/l1_cache.h"
 #include "cache/l2_disk_cache.h"
 #include "coalescing/inflight_registry.h"
+#include "control_plane/control_plane_guardrails.h"
+#include "control_plane/control_plane_security_config.h"
 #include "control_plane/control_plane_service.h"
 #include "control_plane/rocksdb_policy_state_store.h"
 #include "extproc/grpc_server.h"
@@ -303,6 +305,39 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    const bytetaper::control_plane::ControlPlaneSecurityConfig security_config =
+        bytetaper::control_plane::load_control_plane_security_from_env(args.admin_address);
+    const bool policy_state_db_configured =
+        (args.policy_state_db != nullptr && args.policy_state_db[0] != '\0') ||
+        (std::getenv("BYTETAPER_POLICY_STATE_DB") != nullptr);
+    const bytetaper::control_plane::StartupValidationResult startup_validation =
+        bytetaper::control_plane::validate_startup(security_config, policy_state_db_configured);
+    const bytetaper::control_plane::BindValidationResult bind_validation =
+        bytetaper::control_plane::validate_bind_address(security_config, args.admin_address,
+                                                        nullptr);
+
+    for (const std::string& warning : startup_validation.warnings) {
+        std::fprintf(stderr, "control plane startup warning: %s\n", warning.c_str());
+    }
+    if (!bind_validation.ok) {
+        std::fprintf(stderr, "control plane bind validation failed: %s\n",
+                     bind_validation.message.c_str());
+        bytetaper::observability::logger_shutdown();
+        return 1;
+    }
+    if (bind_validation.warning_only) {
+        std::fprintf(stderr, "control plane bind warning: %s\n", bind_validation.message.c_str());
+    }
+    if (!startup_validation.ok &&
+        bytetaper::control_plane::should_fail_startup_on_validation_errors(
+            security_config.deployment_mode)) {
+        for (const std::string& error : startup_validation.errors) {
+            std::fprintf(stderr, "control plane startup error: %s\n", error.c_str());
+        }
+        bytetaper::observability::logger_shutdown();
+        return 1;
+    }
+
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
 
@@ -505,9 +540,16 @@ int main(int argc, char** argv) {
         policy_pull_enabled =
             pull_val == "1" || pull_val == "true" || pull_val == "yes" || pull_val == "ON";
     }
-    if (policy_state_store != nullptr && policy_pull_enabled) {
+    const bool runtime_only_role =
+        security_config.runtime_role == bytetaper::control_plane::RuntimeProcessRole::RuntimeOnly;
+    if (runtime_only_role) {
+        args.admin_enable_taperquery = false;
+    }
+    if (policy_state_store != nullptr && policy_pull_enabled && !runtime_only_role) {
         bytetaper::control_plane::ControlPlaneServiceConfig cp_config{};
         cp_config.policy_state_store = policy_state_store.get();
+        cp_config.security = security_config;
+        cp_config.default_internal_auth = true;
         control_plane_service =
             std::make_unique<bytetaper::control_plane::ControlPlaneService>(cp_config);
         cp_policy_client =

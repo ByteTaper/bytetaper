@@ -53,6 +53,13 @@ struct ControlPlaneMetrics {
     std::atomic<std::uint32_t> fleet_unreachable_count{ 0 };
     std::atomic<std::uint32_t> fleet_degraded_count{ 0 };
     std::atomic<std::uint32_t> fleet_converged{ 0 };
+
+    std::atomic<std::uint64_t> auth_requests_total{ 0 };
+    std::atomic<std::uint64_t> auth_denied_total{ 0 };
+    std::atomic<std::uint64_t> mutation_rejected_total{ 0 };
+    std::atomic<std::uint64_t> public_bind_rejected_total{ 0 };
+    std::atomic<std::uint64_t> unsafe_config_total{ 0 };
+    std::atomic<std::uint64_t> runtime_only_mutation_rejected_total{ 0 };
 };
 
 void record_policy_apply_success(ControlPlaneMetrics* metrics, std::uint64_t duration_ms);
@@ -70,6 +77,7 @@ void update_fleet_metrics(ControlPlaneMetrics* metrics, std::uint32_t runtime_co
                           std::uint32_t converged_count, std::uint32_t stale_count,
                           std::uint32_t failed_count, std::uint32_t unreachable_count,
                           std::uint32_t degraded_count, bool fleet_converged);
+void record_unsafe_config(ControlPlaneMetrics* metrics);
 
 std::size_t render_control_plane_metrics_prometheus(const ControlPlaneMetrics& metrics, char* buf,
                                                     std::size_t buf_size);

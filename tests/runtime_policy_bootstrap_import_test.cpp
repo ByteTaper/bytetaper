@@ -135,7 +135,9 @@ TEST_F(BootstrapImportFixture, ActivePointerExistsMatchingBootstrapSkippedWithou
     ASSERT_TRUE(import_bootstrap_policy(make_input(bootstrap_path)).ok);
     const std::uint64_t gen_before = store_->load_active_pointer(key_).pointer.generation;
 
-    auto second = import_bootstrap_policy(make_input(bootstrap_path));
+    BootstrapImportInput second_input = make_input(bootstrap_path);
+    second_input.confirm_import = true;
+    auto second = import_bootstrap_policy(second_input);
     EXPECT_FALSE(second.ok);
     EXPECT_EQ(second.health, RuntimePolicyHealth::Active);
     EXPECT_NE(second.health, RuntimePolicyHealth::BootstrapDriftDetected);
@@ -155,7 +157,9 @@ TEST_F(BootstrapImportFixture, ChangedBootstrapDoesNotOverwriteCommitted) {
 
     TqPolicyDocument bootstrap_b = make_policy_doc("bootstrap-b");
     const std::string path_b = write_bootstrap_file(state_dir_, bootstrap_b, "bootstrap-b.yaml");
-    auto blocked = import_bootstrap_policy(make_input(path_b));
+    BootstrapImportInput blocked_input = make_input(path_b);
+    blocked_input.confirm_import = true;
+    auto blocked = import_bootstrap_policy(blocked_input);
     EXPECT_FALSE(blocked.ok);
     EXPECT_EQ(blocked.health, RuntimePolicyHealth::BootstrapDriftDetected);
 

@@ -8,6 +8,11 @@ add_library(bytetaper_control_plane STATIC
   src/control_plane/control_plane_log_events.cpp
   src/control_plane/policy_lifecycle_emitter.cpp
   src/control_plane/manual_resolution_audit.cpp
+  src/control_plane/control_plane_deployment_mode.cpp
+  src/control_plane/control_plane_security_config.cpp
+  src/control_plane/static_token_auth_provider.cpp
+  src/control_plane/control_plane_security_log_events.cpp
+  src/control_plane/control_plane_guardrails.cpp
   src/control_plane/rocksdb_policy_state_store.cpp
 )
 set_source_files_properties(src/control_plane/rocksdb_policy_state_store.cpp

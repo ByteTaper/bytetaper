@@ -5,6 +5,7 @@
 #define BYTETAPER_CONTROL_PLANE_CONTROL_PLANE_SERVICE_H
 
 #include "control_plane/control_plane_config.h"
+#include "control_plane/control_plane_guardrails.h"
 #include "control_plane/control_plane_metrics.h"
 #include "control_plane/fleet_status.h"
 #include "control_plane/manual_resolution_api.h"
@@ -13,6 +14,7 @@
 #include "control_plane/policy_lifecycle_emitter.h"
 #include "control_plane/policy_version_query.h"
 #include "control_plane/runtime_status_report.h"
+#include "control_plane/static_token_auth_provider.h"
 #include "runtime_policy/runtime_policy_metrics.h"
 
 #include <memory>
@@ -56,10 +58,16 @@ public:
 
     PolicyRollbackResult rollback(const PolicyRollbackRequest& request);
 
+    const StartupValidationResult& startup_validation() const;
+
 private:
     void setup_lifecycle_observability();
+    void setup_security();
+    GuardrailResult guard_mutation(const char* operation, const PolicyResourceKey& key);
 
     ControlPlaneServiceConfig config_;
+    StartupValidationResult startup_validation_{};
+    std::unique_ptr<ControlPlaneAuthProvider> owned_auth_provider_;
     ControlPlaneMetrics owned_control_plane_metrics_{};
     runtime_policy::RuntimePolicyMetrics owned_runtime_policy_metrics_{};
     PolicyLifecycleEmitterConfig emitter_config_{};

@@ -19,6 +19,7 @@ struct BootstrapImportInput {
     control_plane::PolicyStateStore* store = nullptr;
     const taperquery::LocalPolicyPersistenceConfig* persistence_config = nullptr;
     const control_plane::PolicyResourceKey* resource_key = nullptr;
+    bool confirm_import = false;
 };
 
 struct BootstrapImportResult {

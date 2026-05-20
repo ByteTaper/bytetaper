@@ -111,7 +111,17 @@ The following items are explicitly out of scope for this architecture phase:
 * Addition of new Admin HTTP endpoints.
 * Integration or implementation of the RocksDB state store database.
 
-## 10. Future Extension Points
+## 10. Security and Deployment Guardrails (BT-CP-015)
+
+Control Plane mutation endpoints are guarded at the service boundary and at process startup:
+
+* **Listener separation**: ext_proc gRPC (data path), optional TaperQuery Admin HTTP (default `127.0.0.1:18082`), and a reserved dedicated Control Plane admin port (`19090`) for future HTTP mutation APIs.
+* **Deployment modes**: `local-dev`, `single-node`, `multi-runtime`, `production` — production enforces auth and rejects unsafe public bind without `allow_public_bind=true`.
+* **Runtime-only role**: runtime pods pull committed policy; in-process mutation and admin apply are disabled.
+* **Auth**: pluggable `ControlPlaneAuthProvider`; optional static bearer token via `BYTETAPER_CONTROL_PLANE_TOKEN` (never logged).
+* **Dangerous operations**: repair, adopt, rollback, and bootstrap import when active policy exists require explicit confirmation flags.
+
+## 11. Future Extension Points
 
 Storage mechanisms are designed behind abstract interfaces:
 * The `PolicyStateStore` abstraction will support future backends such as etcd, relational databases (PostgreSQL), object storage (S3/GCS), or external managed control systems without modifying runtime loader logic.
