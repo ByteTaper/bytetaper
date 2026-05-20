@@ -3,12 +3,15 @@
 
 #include "control_plane/control_plane_service.h"
 
+#include "control_plane/control_plane_guardrails.h"
 #include "control_plane/control_plane_metrics.h"
+#include "control_plane/control_plane_security_log_events.h"
 #include "control_plane/fleet_status_service.h"
 #include "control_plane/manual_resolution_service.h"
 #include "control_plane/policy_apply_contract.h"
 #include "control_plane/policy_lifecycle_event.h"
 #include "control_plane/policy_update_queue.h"
+#include "control_plane/static_token_auth_provider.h"
 #include "taperquery/policy_ir_from_yaml.h"
 #include "taperquery/policy_ir_identity.h"
 #include "taperquery/policy_ir_normalize.h"
@@ -242,9 +245,50 @@ void ControlPlaneService::setup_lifecycle_observability() {
     config_.lifecycle_emitter = lifecycle_emitter_.get();
 }
 
+void ControlPlaneService::setup_security() {
+    if (config_.auth_provider == nullptr &&
+        config_.security.auth.mode == ControlPlaneAuthMode::StaticToken) {
+        owned_auth_provider_ =
+            make_auth_provider(config_.security.auth, config_.security.deployment_mode);
+        config_.auth_provider = owned_auth_provider_.get();
+    }
+
+    if (config_.mutation_auth_context.deployment_mode == ControlPlaneDeploymentMode::LocalDev &&
+        config_.security.deployment_mode != ControlPlaneDeploymentMode::LocalDev) {
+        config_.mutation_auth_context.deployment_mode = config_.security.deployment_mode;
+    }
+    if (config_.default_internal_auth) {
+        config_.mutation_auth_context.internal_call = true;
+    }
+
+    startup_validation_ = validate_startup(config_.security, config_.policy_state_store != nullptr);
+    if (config_.control_plane_metrics != nullptr) {
+        for (const std::string& warning : startup_validation_.warnings) {
+            if (warning.find("unsafe") != std::string::npos) {
+                record_unsafe_config(config_.control_plane_metrics);
+            }
+        }
+    }
+}
+
+GuardrailResult ControlPlaneService::guard_mutation(const char* operation,
+                                                    const PolicyResourceKey& key) {
+    ControlPlaneAuthContext context = config_.mutation_auth_context;
+    context.operation = operation != nullptr ? operation : "";
+    context.resource_key = key.to_string();
+    context.deployment_mode = config_.security.deployment_mode;
+    return check_mutation_allowed(config_.security, config_.auth_provider, context,
+                                  config_.control_plane_metrics);
+}
+
+const StartupValidationResult& ControlPlaneService::startup_validation() const {
+    return startup_validation_;
+}
+
 ControlPlaneService::ControlPlaneService(ControlPlaneServiceConfig config)
     : config_(std::move(config)) {
     setup_lifecycle_observability();
+    setup_security();
     if (config_.policy_state_store != nullptr) {
         fleet_status_service_ =
             std::make_unique<FleetStatusService>(config_.fleet_status, config_.policy_state_store);
@@ -383,6 +427,14 @@ PolicyApplySubmitResult ControlPlaneService::apply(const PolicyApplyRequest& req
     result.resource_key = request.resource_key.to_string();
     result.expected_base_generation = request.expected_base_generation;
     result.expected_base_policy_id = request.expected_base_policy_id;
+
+    const GuardrailResult guard = guard_mutation("policy_apply", request.resource_key);
+    if (!guard.allowed) {
+        result.status = guard.status;
+        result.error = guard.message;
+        result.message = guard.message;
+        return result;
+    }
 
     PolicyApplyValidationError validation_error{};
     if (!validate_apply_request(request, &validation_error)) {
@@ -871,6 +923,14 @@ ControlPlaneService::plan_repair_local(const PolicyRepairLocalPlanRequest& reque
 
 PolicyRepairLocalResult ControlPlaneService::repair_local(const PolicyRepairLocalRequest& request) {
     PolicyRepairLocalResult result{};
+    const GuardrailResult guard = guard_mutation("repair-local", request.resource_key);
+    if (!guard.allowed) {
+        result.status = guard.status;
+        result.error = guard.message;
+        result.message = guard.message;
+        result.error_code = guard.error_code;
+        return result;
+    }
     if (manual_resolution_service_ == nullptr) {
         result.status = PolicyApplyStatus::RejectedStorageUnavailable;
         result.error = "manual resolution service is not configured";
@@ -894,6 +954,14 @@ ControlPlaneService::plan_adopt_local(const PolicyAdoptLocalPlanRequest& request
 
 PolicyAdoptLocalResult ControlPlaneService::adopt_local(const PolicyAdoptLocalRequest& request) {
     PolicyAdoptLocalResult result{};
+    const GuardrailResult guard = guard_mutation("adopt-local", request.resource_key);
+    if (!guard.allowed) {
+        result.status = guard.status;
+        result.error = guard.message;
+        result.message = guard.message;
+        result.error_code = guard.error_code;
+        return result;
+    }
     if (manual_resolution_service_ == nullptr) {
         result.status = PolicyApplyStatus::RejectedStorageUnavailable;
         result.error = "manual resolution service is not configured";
@@ -905,6 +973,14 @@ PolicyAdoptLocalResult ControlPlaneService::adopt_local(const PolicyAdoptLocalRe
 
 PolicyRollbackResult ControlPlaneService::rollback(const PolicyRollbackRequest& request) {
     PolicyRollbackResult result{};
+    const GuardrailResult guard = guard_mutation("rollback", request.resource_key);
+    if (!guard.allowed) {
+        result.status = guard.status;
+        result.error = guard.message;
+        result.message = guard.message;
+        result.error_code = guard.error_code;
+        return result;
+    }
     if (manual_resolution_service_ == nullptr) {
         result.status = PolicyApplyStatus::RejectedStorageUnavailable;
         result.error = "manual resolution service is not configured";

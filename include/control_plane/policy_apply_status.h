@@ -25,6 +25,7 @@ enum class PolicyApplyStatus {
     RejectedPolicyInactive,
     RejectedQueueFull,
     RejectedStorageUnavailable,
+    RejectedConfirmationRequired,
     RollbackPlanReady,
     RollbackAccepted,
     RepairLocalAccepted,

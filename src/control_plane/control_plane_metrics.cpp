@@ -127,6 +127,13 @@ void record_manual_operation(ControlPlaneMetrics* metrics, const char* operation
     }
 }
 
+void record_unsafe_config(ControlPlaneMetrics* metrics) {
+    if (metrics == nullptr) {
+        return;
+    }
+    metrics->unsafe_config_total.fetch_add(1, std::memory_order_relaxed);
+}
+
 void update_fleet_metrics(ControlPlaneMetrics* metrics, std::uint32_t runtime_count,
                           std::uint32_t converged_count, std::uint32_t stale_count,
                           std::uint32_t failed_count, std::uint32_t unreachable_count,
@@ -219,6 +226,19 @@ std::size_t render_control_plane_metrics_prometheus(const ControlPlaneMetrics& m
                                metrics.policy_apply_stage_duration_ms[i].total.load());
         }
     }
+    append_metric_line(buf, buf_size, &offset, "bytetaper_control_plane_auth_requests_total",
+                       metrics.auth_requests_total.load());
+    append_metric_line(buf, buf_size, &offset, "bytetaper_control_plane_auth_denied_total",
+                       metrics.auth_denied_total.load());
+    append_metric_line(buf, buf_size, &offset, "bytetaper_control_plane_mutation_rejected_total",
+                       metrics.mutation_rejected_total.load());
+    append_metric_line(buf, buf_size, &offset, "bytetaper_control_plane_public_bind_rejected_total",
+                       metrics.public_bind_rejected_total.load());
+    append_metric_line(buf, buf_size, &offset, "bytetaper_control_plane_unsafe_config_total",
+                       metrics.unsafe_config_total.load());
+    append_metric_line(buf, buf_size, &offset,
+                       "bytetaper_control_plane_runtime_only_mutation_rejected_total",
+                       metrics.runtime_only_mutation_rejected_total.load());
     return offset;
 }
 

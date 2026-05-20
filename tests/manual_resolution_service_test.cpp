@@ -324,7 +324,8 @@ TEST_F(ManualResolutionServiceTest, RollbackWithoutConfirmRejected) {
 
     const PolicyRollbackResult result = service_->rollback(request);
     EXPECT_FALSE(result.ok);
-    EXPECT_EQ(result.error_code, kErrRollbackConfirmationRequired);
+    EXPECT_EQ(result.status, PolicyApplyStatus::RejectedConfirmationRequired);
+    EXPECT_EQ(result.error_code, kErrManualConfirmationRequired);
 }
 
 TEST_F(ManualResolutionServiceTest, RollbackTargetMissingRejected) {
@@ -428,7 +429,8 @@ TEST_F(ManualResolutionServiceTest, AdoptLocalWithoutConfirmationRejected) {
 
     const PolicyAdoptLocalResult result = service_->adopt_local(request);
     EXPECT_FALSE(result.ok);
-    EXPECT_EQ(result.error_code, kErrAdoptLocalConfirmationRequired);
+    EXPECT_EQ(result.status, PolicyApplyStatus::RejectedConfirmationRequired);
+    EXPECT_EQ(result.error_code, kErrManualConfirmationRequired);
 }
 
 TEST_F(ManualResolutionServiceTest, AdoptLocalRequiresRuntimeId) {
@@ -544,6 +546,7 @@ TEST_F(ManualResolutionServiceTest, RepairLocalWithoutConfirmRejected) {
 
     const PolicyRepairLocalResult result = service_->repair_local(request);
     EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.status, PolicyApplyStatus::RejectedConfirmationRequired);
     EXPECT_EQ(result.error_code, kErrManualConfirmationRequired);
 }
 

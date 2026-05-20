@@ -3,6 +3,7 @@
 
 #include "runtime_policy/bootstrap_policy_importer.h"
 
+#include "control_plane/control_plane_guardrails.h"
 #include "control_plane/policy_state_key.h"
 #include "observability/logger.h"
 #include "runtime/policy_snapshot.h"
@@ -233,6 +234,14 @@ BootstrapImportResult import_bootstrap_policy(const BootstrapImportInput& input)
     const control_plane::LoadActivePointerResult active =
         input.store->load_active_pointer(*input.resource_key);
     if (active.ok) {
+        const control_plane::GuardrailResult confirm_guard =
+            control_plane::check_dangerous_operation_confirmation(
+                control_plane::DangerousOperationKind::BootstrapImport, input.confirm_import);
+        if (!confirm_guard.allowed) {
+            result.health = RuntimePolicyHealth::StartupFailed;
+            result.error = confirm_guard.message;
+            return result;
+        }
         const RuntimePolicyHealth drift = check_bootstrap_drift(input, active.pointer);
         if (drift == RuntimePolicyHealth::BootstrapDriftDetected) {
             result.health = RuntimePolicyHealth::BootstrapDriftDetected;

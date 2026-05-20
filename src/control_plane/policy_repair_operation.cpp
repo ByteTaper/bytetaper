@@ -3,6 +3,8 @@
 
 #include "control_plane/policy_repair_operation.h"
 
+#include "control_plane/control_plane_guardrails.h"
+
 namespace bytetaper::control_plane {
 
 PolicyRepairOperation::PolicyRepairOperation(ControlPlaneServiceConfig config,
@@ -86,11 +88,13 @@ PolicyRepairLocalResult PolicyRepairOperation::execute(const PolicyRepairLocalRe
         return result;
     }
 
-    if (!request.confirm) {
-        result.status = PolicyApplyStatus::RejectedInvalidRequest;
-        result.error_code = kErrManualConfirmationRequired;
-        result.error = "repair-local requires confirm=true";
-        result.message = result.error;
+    const GuardrailResult confirm_guard = check_dangerous_operation_confirmation(
+        DangerousOperationKind::RepairLocal, request.confirm);
+    if (!confirm_guard.allowed) {
+        result.status = confirm_guard.status;
+        result.error_code = confirm_guard.error_code;
+        result.error = confirm_guard.message;
+        result.message = confirm_guard.message;
         return result;
     }
 
