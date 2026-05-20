@@ -3,9 +3,12 @@
 
 #include "runtime_policy/runtime_policy_pull_loop.h"
 
+#include "control_plane/policy_lifecycle_event.h"
 #include "operational/policy_activation_result.h"
 #include "runtime/policy_snapshot.h"
 #include "runtime_policy/policy_mismatch_classifier.h"
+#include "runtime_policy/runtime_policy_log_events.h"
+#include "runtime_policy/runtime_policy_metrics.h"
 #include "taperquery/policy_ir_from_yaml.h"
 #include "taperquery/policy_ir_identity.h"
 #include "taperquery/policy_ir_yaml_emitter.h"
@@ -246,8 +249,37 @@ void RuntimePolicyPullLoop::tick() {
             status_.activation_status = "active";
             status_.state = RuntimePolicyPullState::Active;
         }
+        if (config_.lifecycle_emitter != nullptr || config_.runtime_policy_metrics != nullptr) {
+            control_plane::PolicyLifecycleEvent event{};
+            event.event_type = control_plane::PolicyLifecycleEventType::RuntimeConverged;
+            event.resource_key = config_.pull.resource_key.to_string();
+            event.after_generation = remote.generation;
+            event.after_policy_id = remote.policy_id;
+            event.status = "success";
+            if (config_.lifecycle_emitter != nullptr) {
+                (void) config_.lifecycle_emitter->emit(event);
+            }
+            record_runtime_convergence(config_.runtime_policy_metrics, "converged");
+            log_runtime_policy_lifecycle_event(event);
+        }
         report_status_to_control_plane();
         return;
+    }
+
+    if ((config_.lifecycle_emitter != nullptr || config_.runtime_policy_metrics != nullptr) &&
+        local_generation > 0 && local_generation < remote.generation) {
+        control_plane::PolicyLifecycleEvent event{};
+        event.event_type = control_plane::PolicyLifecycleEventType::RuntimeStale;
+        event.resource_key = config_.pull.resource_key.to_string();
+        event.before_generation = local_generation;
+        event.after_generation = remote.generation;
+        event.status = "failure";
+        event.message = "stale";
+        if (config_.lifecycle_emitter != nullptr) {
+            (void) config_.lifecycle_emitter->emit(event);
+        }
+        record_runtime_convergence(config_.runtime_policy_metrics, "stale");
+        log_runtime_policy_lifecycle_event(event);
     }
 
     update_status(RuntimePolicyPullState::FetchingPolicy);
@@ -310,7 +342,6 @@ void RuntimePolicyPullLoop::tick() {
 
     update_status(RuntimePolicyPullState::ActivatingPolicy);
 
-    operational::PolicyActivationBarrier barrier(config_.activation_barrier);
     operational::PolicyActivationRequest activation_req{};
     activation_req.generation = remote.generation;
     activation_req.policy_id = remote.policy_id;
@@ -320,8 +351,28 @@ void RuntimePolicyPullLoop::tick() {
     activation_req.committed_policy_ir = &load_res.policy;
     activation_req.committed_snapshot = build_res.snapshot;
 
-    const operational::PolicyActivationResult activation = barrier.activate(activation_req);
+    operational::PolicyActivationBarrierConfig activation_cfg = config_.activation_barrier;
+    activation_cfg.lifecycle_emitter = config_.lifecycle_emitter;
+    activation_cfg.runtime_policy_metrics = config_.runtime_policy_metrics;
+    operational::PolicyActivationBarrier barrier_with_obs(activation_cfg);
+    const operational::PolicyActivationResult activation =
+        barrier_with_obs.activate(activation_req);
     if (!activation.ok) {
+        {
+            control_plane::PolicyLifecycleEvent event{};
+            event.event_type = control_plane::PolicyLifecycleEventType::RuntimeActivationFailed;
+            event.resource_key = config_.pull.resource_key.to_string();
+            event.after_generation = remote.generation;
+            event.stage = operational::to_string(activation.failed_stage);
+            event.status = "failure";
+            event.error_code = activation.error_code;
+            event.message = activation.message;
+            if (config_.lifecycle_emitter != nullptr) {
+                (void) config_.lifecycle_emitter->emit(event);
+            }
+            record_runtime_convergence(config_.runtime_policy_metrics, "failed");
+            log_runtime_policy_lifecycle_event(event);
+        }
         record_failure(kErrPolicyActivationFailed, activation.message);
         report_status_to_control_plane();
         return;

@@ -4,6 +4,7 @@
 #ifndef BYTETAPER_OPERATIONAL_POLICY_ACTIVATION_BARRIER_H
 #define BYTETAPER_OPERATIONAL_POLICY_ACTIVATION_BARRIER_H
 
+#include "control_plane/policy_lifecycle_emitter.h"
 #include "control_plane/policy_state_key.h"
 #include "control_plane/policy_state_store.h"
 #include "operational/policy_activation_result.h"
@@ -13,6 +14,10 @@
 
 namespace bytetaper::cache {
 struct L1Cache;
+}
+
+namespace bytetaper::runtime_policy {
+struct RuntimePolicyMetrics;
 }
 
 namespace bytetaper::operational {
@@ -28,6 +33,8 @@ struct PolicyActivationBarrierConfig {
     taperquery::RouteCacheCleanupQueue* l2_cleanup_queue = nullptr;
     control_plane::PolicyResourceKey resource_key =
         control_plane::PolicyResourceKey::default_runtime();
+    control_plane::PolicyLifecycleEmitter* lifecycle_emitter = nullptr;
+    runtime_policy::RuntimePolicyMetrics* runtime_policy_metrics = nullptr;
     // When non-null, used instead of build_runtime_policy_snapshot_from_ir (tests).
     PolicySnapshotBuildFn snapshot_build_fn = nullptr;
 };

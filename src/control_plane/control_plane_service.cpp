@@ -3,9 +3,11 @@
 
 #include "control_plane/control_plane_service.h"
 
+#include "control_plane/control_plane_metrics.h"
 #include "control_plane/fleet_status_service.h"
 #include "control_plane/manual_resolution_service.h"
 #include "control_plane/policy_apply_contract.h"
+#include "control_plane/policy_lifecycle_event.h"
 #include "control_plane/policy_update_queue.h"
 #include "taperquery/policy_ir_from_yaml.h"
 #include "taperquery/policy_ir_identity.h"
@@ -218,8 +220,31 @@ bool is_policy_inactive(const ControlPlaneServiceConfig& config,
 
 } // namespace
 
+void ControlPlaneService::setup_lifecycle_observability() {
+    if (!config_.lifecycle_observability_enabled) {
+        return;
+    }
+    if (config_.control_plane_metrics == nullptr) {
+        config_.control_plane_metrics = &owned_control_plane_metrics_;
+    }
+    if (config_.runtime_policy_metrics == nullptr) {
+        config_.runtime_policy_metrics = &owned_runtime_policy_metrics_;
+    }
+
+    emitter_config_.policy_state_store = config_.policy_state_store;
+    emitter_config_.control_plane_metrics = config_.control_plane_metrics;
+    emitter_config_.runtime_policy_metrics = config_.runtime_policy_metrics;
+    emitter_config_.audit_retention = config_.audit_retention;
+    emitter_config_.audit_enabled = true;
+    emitter_config_.log_enabled = true;
+    emitter_config_.metrics_enabled = true;
+    lifecycle_emitter_ = std::make_unique<PolicyLifecycleEmitter>(emitter_config_);
+    config_.lifecycle_emitter = lifecycle_emitter_.get();
+}
+
 ControlPlaneService::ControlPlaneService(ControlPlaneServiceConfig config)
     : config_(std::move(config)) {
+    setup_lifecycle_observability();
     if (config_.policy_state_store != nullptr) {
         fleet_status_service_ =
             std::make_unique<FleetStatusService>(config_.fleet_status, config_.policy_state_store);
@@ -251,6 +276,21 @@ PolicyDryRunResult ControlPlaneService::dry_run(const PolicyDryRunRequest& reque
         result.status = PolicyApplyStatus::RejectedPolicyInactive;
         result.error = "policy is inactive and requires manual resolution";
         return result;
+    }
+
+    if (config_.lifecycle_emitter != nullptr) {
+        PolicyLifecycleEvent dry_run_event{};
+        dry_run_event.event_type = PolicyLifecycleEventType::PolicyDryRunRequested;
+        dry_run_event.resource_key = request.resource_key.to_string();
+        dry_run_event.operation = "dry-run";
+        dry_run_event.source_type =
+            request.source_type == PolicyApplySourceType::Yaml ? "yaml" : "taperquery";
+        dry_run_event.operator_id = request.operator_id;
+        dry_run_event.request_id = request.request_id;
+        dry_run_event.apply_id = request.request_id;
+        dry_run_event.event_id = request.request_id;
+        dry_run_event.status = "success";
+        (void) config_.lifecycle_emitter->emit(dry_run_event);
     }
 
     const CandidateParseResult parsed =
@@ -471,6 +511,7 @@ PolicyApplySubmitResult ControlPlaneService::apply(const PolicyApplyRequest& req
     job.apply_request.include_field_level_changes = request.include_field_level_changes;
     job.apply_request.strict_production = request.strict_production;
 
+    const PolicyUpdateJob submitted_job_snapshot = job;
     const EnqueueJobResult enqueue_res = config_.policy_update_queue->enqueue(std::move(job));
     if (!enqueue_res.ok) {
         if (enqueue_res.error == "POLICY_JOB_QUEUE_FULL") {
@@ -488,6 +529,21 @@ PolicyApplySubmitResult ControlPlaneService::apply(const PolicyApplyRequest& req
             result.message = enqueue_res.error;
         }
         return result;
+    }
+
+    if (config_.lifecycle_emitter != nullptr) {
+        PolicyUpdateJob accepted_job = submitted_job_snapshot;
+        accepted_job.job_id = enqueue_res.job_id;
+        accepted_job.state = PolicyUpdateJobState::Queued;
+        PolicyLifecycleEvent submitted = make_lifecycle_event_from_job(
+            accepted_job, PolicyLifecycleEventType::PolicyApplySubmitted);
+        submitted.status = "success";
+        (void) config_.lifecycle_emitter->emit(submitted);
+
+        PolicyLifecycleEvent queued = make_lifecycle_event_from_job(
+            accepted_job, PolicyLifecycleEventType::PolicyApplyQueued);
+        queued.status = "success";
+        (void) config_.lifecycle_emitter->emit(queued);
     }
 
     result.ok = true;
@@ -770,7 +826,35 @@ FleetStatusResult ControlPlaneService::get_fleet_status(const PolicyResourceKey&
         result.error_code = kErrFleetStatusActivePointerMissing;
         return result;
     }
-    return fleet_status_service_->get_fleet_status(resource_key, now_unix_epoch_ms());
+    result = fleet_status_service_->get_fleet_status(resource_key, now_unix_epoch_ms());
+    if (result.ok && config_.control_plane_metrics != nullptr) {
+        update_fleet_metrics(config_.control_plane_metrics, result.status.fleet.runtime_count,
+                             result.status.fleet.converged_count, result.status.fleet.stale_count,
+                             result.status.fleet.failed_count,
+                             result.status.fleet.unreachable_count,
+                             result.status.fleet.degraded_count, result.status.fleet.converged);
+    }
+    if (result.ok && config_.policy_update_queue != nullptr) {
+        result.status.observability.queue_depth = config_.policy_update_queue->depth();
+        result.status.observability.queue_capacity = config_.policy_update_queue->capacity();
+        if (const auto last_job = config_.policy_update_queue->last_enqueued_job_id()) {
+            result.status.observability.last_apply_job_id = *last_job;
+            if (const auto job_record =
+                    config_.policy_update_queue->get_job(*last_job, resource_key)) {
+                result.status.observability.last_apply_status = job_record->state;
+                result.status.observability.last_activation_status = job_record->activation_status;
+                result.status.observability.last_failure_code = job_record->failure.code;
+                result.status.observability.last_failure_stage = job_record->failure.stage;
+                result.status.observability.cleanup_pending =
+                    job_record->activation_status == "policy_active_cleanup_pending";
+            }
+        }
+    }
+    if (result.ok && config_.runtime_policy_metrics != nullptr &&
+        config_.runtime_policy_metrics->cleanup_pending.load(std::memory_order_relaxed) != 0) {
+        result.status.observability.cleanup_pending = true;
+    }
+    return result;
 }
 
 PolicyRepairLocalPlanResult

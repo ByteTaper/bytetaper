@@ -4,6 +4,12 @@
 #ifndef BYTETAPER_CONTROL_PLANE_POLICY_APPLY_TRANSACTION_H
 #define BYTETAPER_CONTROL_PLANE_POLICY_APPLY_TRANSACTION_H
 
+#include "control_plane/control_plane_metrics.h"
+#include "control_plane/policy_lifecycle_emitter.h"
+
+namespace bytetaper::runtime_policy {
+struct RuntimePolicyMetrics;
+}
 #include "control_plane/policy_state_key.h"
 #include "control_plane/policy_state_store.h"
 #include "control_plane/policy_update_job.h"
@@ -21,6 +27,9 @@ struct PolicyApplyTransactionConfig {
     taperquery::TqApplyService* tq_apply_service = nullptr;
     runtime::RuntimePolicyStore* scratch_policy_store = nullptr;
     PolicyResourceKey resource_key = PolicyResourceKey::default_runtime();
+    PolicyLifecycleEmitter* lifecycle_emitter = nullptr;
+    ControlPlaneMetrics* control_plane_metrics = nullptr;
+    runtime_policy::RuntimePolicyMetrics* runtime_policy_metrics = nullptr;
     std::function<void(const PolicyUpdateJob&)> on_state_change;
 };
 

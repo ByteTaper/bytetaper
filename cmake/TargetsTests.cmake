@@ -2921,6 +2921,79 @@ if(BUILD_TESTING)
   )
   add_test(NAME fleet_status_service_test COMMAND fleet_status_service_test)
 
+  add_executable(policy_audit_record_test
+    tests/policy_audit_record_test.cpp
+  )
+  set_source_files_properties(tests/policy_audit_record_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(policy_audit_record_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(policy_audit_record_test
+    PRIVATE gtest_main bytetaper_control_plane
+  )
+  add_test(NAME policy_audit_record_test COMMAND policy_audit_record_test)
+
+  add_executable(control_plane_metrics_test
+    tests/control_plane_metrics_test.cpp
+  )
+  set_source_files_properties(tests/control_plane_metrics_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(control_plane_metrics_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(control_plane_metrics_test
+    PRIVATE gtest_main bytetaper_control_plane
+  )
+  add_test(NAME control_plane_metrics_test COMMAND control_plane_metrics_test)
+
+  add_executable(policy_lifecycle_logging_test
+    tests/policy_lifecycle_logging_test.cpp
+  )
+  set_source_files_properties(tests/policy_lifecycle_logging_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(policy_lifecycle_logging_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(policy_lifecycle_logging_test
+    PRIVATE gtest_main bytetaper_control_plane bytetaper_runtime_policy
+  )
+  add_test(NAME policy_lifecycle_logging_test COMMAND policy_lifecycle_logging_test)
+
+  add_executable(runtime_policy_metrics_test
+    tests/runtime_policy_metrics_test.cpp
+  )
+  set_source_files_properties(tests/runtime_policy_metrics_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(runtime_policy_metrics_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(runtime_policy_metrics_test
+    PRIVATE gtest_main bytetaper_operational bytetaper_control_plane
+  )
+  add_test(NAME runtime_policy_metrics_test COMMAND runtime_policy_metrics_test)
+
+  add_executable(policy_lifecycle_observability_integration_test
+    tests/policy_lifecycle_observability_integration_test.cpp
+  )
+  set_source_files_properties(tests/policy_lifecycle_observability_integration_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(policy_lifecycle_observability_integration_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(policy_lifecycle_observability_integration_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+            bytetaper_operational bytetaper_taperquery_apply bytetaper_runtime
+            bytetaper_extproc_adapter RocksDB::RocksDB
+  )
+  add_test(NAME policy_lifecycle_observability_integration_test
+           COMMAND policy_lifecycle_observability_integration_test)
+
   add_executable(fleet_status_integration_test
     tests/fleet_status_integration_test.cpp
   )

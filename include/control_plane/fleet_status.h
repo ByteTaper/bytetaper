@@ -44,11 +44,23 @@ struct RuntimeFleetSummary {
     bool converged = false;
 };
 
+struct FleetPolicyObservability {
+    std::string last_apply_job_id;
+    std::string last_apply_status;
+    std::string last_activation_status;
+    std::string last_failure_code;
+    std::string last_failure_stage;
+    std::uint64_t queue_depth = 0;
+    std::uint64_t queue_capacity = 0;
+    bool cleanup_pending = false;
+};
+
 struct FleetPolicyStatus {
     bool ok = false;
     std::string resource_key;
     CommittedPolicySummary committed{};
     RuntimeFleetSummary fleet{};
+    FleetPolicyObservability observability{};
     std::vector<RuntimeFleetEntry> runtimes;
     std::string error;
     std::string error_code;

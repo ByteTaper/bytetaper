@@ -3,6 +3,8 @@
 
 #include "control_plane/policy_update_worker.h"
 
+#include "control_plane/control_plane_metrics.h"
+#include "control_plane/policy_lifecycle_event.h"
 #include "control_plane/policy_state_key.h"
 
 #include <chrono>
@@ -25,10 +27,17 @@ void PolicyUpdateWorker::start() {
     }
     stop_.store(false);
     running_.store(true);
+    if (tx_config_.control_plane_metrics != nullptr) {
+        tx_config_.control_plane_metrics->policy_update_worker_active.fetch_add(
+            1, std::memory_order_relaxed);
+    }
     thread_ = std::thread([this]() { worker_loop(); });
 }
 
 void PolicyUpdateWorker::stop() {
+    if (!running_.load()) {
+        return;
+    }
     stop_.store(true);
     if (queue_ != nullptr) {
         queue_->notify_workers();
@@ -37,6 +46,10 @@ void PolicyUpdateWorker::stop() {
         thread_.join();
     }
     running_.store(false);
+    if (tx_config_.control_plane_metrics != nullptr) {
+        tx_config_.control_plane_metrics->policy_update_worker_active.fetch_sub(
+            1, std::memory_order_relaxed);
+    }
 }
 
 bool PolicyUpdateWorker::is_running() const {
@@ -65,6 +78,9 @@ void PolicyUpdateWorker::worker_loop() {
                 job = std::move(shard->jobs.front());
                 shard->jobs.pop_front();
             }
+            queue_->record_job_dequeued();
+
+            const auto job_start = std::chrono::steady_clock::now();
 
             PolicyApplyTransactionConfig job_tx = tx_config_;
             if (!parse_resource_key(job.resource_key, &job_tx.resource_key)) {
@@ -86,7 +102,10 @@ void PolicyUpdateWorker::worker_loop() {
             } else if (tx_result.ok && job.state == PolicyUpdateJobState::Committed &&
                        activation_config_.policy_state_store != nullptr &&
                        activation_config_.runtime_policy_store != nullptr) {
-                operational::PolicyActivationBarrier barrier(activation_config_);
+                operational::PolicyActivationBarrierConfig activation_cfg = activation_config_;
+                activation_cfg.lifecycle_emitter = job_tx.lifecycle_emitter;
+                activation_cfg.runtime_policy_metrics = job_tx.runtime_policy_metrics;
+                operational::PolicyActivationBarrier barrier(activation_cfg);
                 operational::PolicyActivationRequest activation_req{};
                 activation_req.generation = job.candidate_generation;
                 activation_req.policy_id = job.candidate_policy_id;
@@ -103,6 +122,11 @@ void PolicyUpdateWorker::worker_loop() {
                 }
                 queue_->update_job(job);
             }
+
+            const auto job_end = std::chrono::steady_clock::now();
+            const std::uint64_t duration_ms = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(job_end - job_start).count());
+            record_policy_update_job(job_tx.control_plane_metrics, tx_result.ok, duration_ms);
         }
 
         queue_->release_shard(shard);

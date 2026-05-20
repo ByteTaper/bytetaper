@@ -4,6 +4,7 @@
 #ifndef BYTETAPER_RUNTIME_POLICY_RUNTIME_POLICY_PULL_LOOP_H
 #define BYTETAPER_RUNTIME_POLICY_RUNTIME_POLICY_PULL_LOOP_H
 
+#include "control_plane/policy_lifecycle_emitter.h"
 #include "operational/policy_activation_barrier.h"
 #include "runtime/policy_snapshot.h"
 #include "runtime_policy/control_plane_policy_client.h"
@@ -21,6 +22,8 @@ struct RuntimePolicyPullLoopConfig {
     RuntimePolicyPullConfig pull{};
     ControlPlanePolicyClient* client = nullptr;
     operational::PolicyActivationBarrierConfig activation_barrier{};
+    control_plane::PolicyLifecycleEmitter* lifecycle_emitter = nullptr;
+    RuntimePolicyMetrics* runtime_policy_metrics = nullptr;
     runtime::RuntimePolicyStore* runtime_policy_store = nullptr;
     // When non-null, used instead of build_runtime_policy_snapshot_from_ir (tests).
     operational::PolicySnapshotBuildFn snapshot_build_fn = nullptr;

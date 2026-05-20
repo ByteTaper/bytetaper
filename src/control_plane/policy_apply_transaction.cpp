@@ -3,6 +3,8 @@
 
 #include "control_plane/policy_apply_transaction.h"
 
+#include "control_plane/control_plane_metrics.h"
+#include "control_plane/policy_lifecycle_event.h"
 #include "control_plane/policy_state_key.h"
 #include "taperquery/policy_ir_from_yaml.h"
 #include "taperquery/policy_ir_identity.h"
@@ -58,6 +60,37 @@ void PolicyApplyTransaction::notify_state_change(const PolicyUpdateJob& job) con
     }
 }
 
+namespace {
+
+void emit_apply_lifecycle(PolicyLifecycleEmitter* emitter, const PolicyUpdateJob& job,
+                          PolicyLifecycleEventType type, const std::string& status,
+                          const char* stage) {
+    if (emitter == nullptr) {
+        return;
+    }
+    PolicyLifecycleEvent event = make_lifecycle_event_from_job(job, type);
+    event.status = status;
+    if (stage != nullptr) {
+        event.stage = stage;
+    }
+    (void) emitter->emit(event);
+}
+
+void record_completed_apply_stage(ControlPlaneMetrics* metrics, PolicyApplyStage stage,
+                                  std::chrono::steady_clock::time_point* stage_clock) {
+    if (metrics == nullptr || stage_clock == nullptr) {
+        return;
+    }
+    const std::uint64_t duration_ms =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::steady_clock::now() - *stage_clock)
+                                       .count());
+    record_policy_apply_stage_duration(metrics, policy_apply_stage_index(stage), duration_ms);
+    *stage_clock = std::chrono::steady_clock::now();
+}
+
+} // namespace
+
 PolicyApplyTransactionResult PolicyApplyTransaction::make_failure(PolicyUpdateJob& job,
                                                                   PolicyApplyStage stage,
                                                                   const std::string& code,
@@ -73,6 +106,9 @@ PolicyApplyTransactionResult PolicyApplyTransaction::make_failure(PolicyUpdateJo
     job.failure.actual_generation = actual_generation;
     notify_state_change(job);
 
+    emit_apply_lifecycle(config_.lifecycle_emitter, job,
+                         PolicyLifecycleEventType::PolicyApplyFailed, "failure", to_string(stage));
+
     PolicyApplyTransactionResult result{};
     result.ok = false;
     result.final_state = PolicyUpdateJobState::Failed;
@@ -83,7 +119,13 @@ PolicyApplyTransactionResult PolicyApplyTransaction::make_failure(PolicyUpdateJo
 }
 
 PolicyApplyTransactionResult PolicyApplyTransaction::execute(PolicyUpdateJob& job) {
+    auto stage_clock = std::chrono::steady_clock::now();
+    auto record_stage = [this, &stage_clock](PolicyApplyStage stage) {
+        record_completed_apply_stage(config_.control_plane_metrics, stage, &stage_clock);
+    };
+
     if (config_.policy_state_store == nullptr) {
+        record_stage(PolicyApplyStage::LoadActive);
         return make_failure(job, PolicyApplyStage::LoadActive, "POLICY_APPLY_STORE_UNAVAILABLE",
                             "policy state store is not configured");
     }
@@ -91,10 +133,13 @@ PolicyApplyTransactionResult PolicyApplyTransaction::execute(PolicyUpdateJob& jo
     job.state = PolicyUpdateJobState::Processing;
     job.updated_at_unix_epoch_ms = now_ms();
     notify_state_change(job);
+    emit_apply_lifecycle(config_.lifecycle_emitter, job,
+                         PolicyLifecycleEventType::PolicyApplyProcessing, "success", "processing");
 
     const LoadActivePointerResult active_res =
         config_.policy_state_store->load_active_pointer(config_.resource_key);
     if (!active_res.ok) {
+        record_stage(PolicyApplyStage::LoadActive);
         if (active_res.not_found) {
             return make_failure(job, PolicyApplyStage::LoadActive,
                                 "POLICY_APPLY_LOAD_ACTIVE_FAILED",
@@ -103,19 +148,24 @@ PolicyApplyTransactionResult PolicyApplyTransaction::execute(PolicyUpdateJob& jo
         return make_failure(job, PolicyApplyStage::LoadActive, "POLICY_APPLY_LOAD_ACTIVE_FAILED",
                             active_res.error);
     }
+    record_stage(PolicyApplyStage::LoadActive);
 
     const ActivePolicyPointer& active = active_res.pointer;
 
     if (active.generation != job.expected_base_generation ||
         active.policy_id != job.expected_base_policy_id) {
+        record_stage(PolicyApplyStage::ValidateBase);
         return make_failure(job, PolicyApplyStage::ValidateBase, "POLICY_APPLY_BASE_MISMATCH",
                             "expected base policy does not match active committed policy",
                             job.expected_base_generation, active.generation);
     }
 
+    record_stage(PolicyApplyStage::ValidateBase);
+
     const LoadPolicyVersionResult base_version =
         config_.policy_state_store->load_policy_version(config_.resource_key, active.generation);
     if (!base_version.ok) {
+        record_stage(PolicyApplyStage::LoadBasePolicy);
         return make_failure(job, PolicyApplyStage::LoadBasePolicy, "POLICY_APPLY_LOAD_BASE_FAILED",
                             base_version.error);
     }
@@ -137,9 +187,11 @@ PolicyApplyTransactionResult PolicyApplyTransaction::execute(PolicyUpdateJob& jo
 
     std::string install_err;
     if (!scratch_store.install_initial(base_build.snapshot, &install_err)) {
+        record_stage(PolicyApplyStage::LoadBasePolicy);
         return make_failure(job, PolicyApplyStage::LoadBasePolicy, "POLICY_APPLY_LOAD_BASE_FAILED",
                             install_err);
     }
+    record_stage(PolicyApplyStage::LoadBasePolicy);
 
     taperquery::TqPolicyDocument candidate_ir{};
     const bool yaml_source = job.source_type == "yaml";
@@ -207,16 +259,21 @@ PolicyApplyTransactionResult PolicyApplyTransaction::execute(PolicyUpdateJob& jo
         }
         candidate_ir = active_snapshot->policy_ir;
     }
+    record_stage(PolicyApplyStage::BuildCandidate);
 
     job.state = PolicyUpdateJobState::CandidateBuilt;
     job.updated_at_unix_epoch_ms = now_ms();
     notify_state_change(job);
+    emit_apply_lifecycle(config_.lifecycle_emitter, job,
+                         PolicyLifecycleEventType::PolicyApplyCandidateBuilt, "success", "compile");
 
     const auto roundtrip = taperquery::emit_and_reparse_canonical_policy_yaml(candidate_ir);
     if (!roundtrip.ok) {
+        record_stage(PolicyApplyStage::Canonicalize);
         return make_failure(job, PolicyApplyStage::Canonicalize, "POLICY_APPLY_CANONICALIZE_FAILED",
                             roundtrip.error);
     }
+    record_stage(PolicyApplyStage::Canonicalize);
 
     const std::string candidate_policy_id =
         taperquery::compute_policy_document_identity(roundtrip.parsed_policy_ir);
@@ -244,6 +301,7 @@ PolicyApplyTransactionResult PolicyApplyTransaction::execute(PolicyUpdateJob& jo
     const StorePolicyVersionResult store_res = config_.policy_state_store->store_policy_version(
         config_.resource_key, version_record, roundtrip.canonical_yaml);
     if (!store_res.ok) {
+        record_stage(PolicyApplyStage::StoreVersion);
         if (store_res.code == PolicyStateErrorCode::VersionConflict) {
             return make_failure(job, PolicyApplyStage::StoreVersion,
                                 "POLICY_APPLY_STORE_VERSION_FAILED", store_res.error);
@@ -251,10 +309,13 @@ PolicyApplyTransactionResult PolicyApplyTransaction::execute(PolicyUpdateJob& jo
         return make_failure(job, PolicyApplyStage::StoreVersion,
                             "POLICY_APPLY_STORE_VERSION_FAILED", store_res.error);
     }
+    record_stage(PolicyApplyStage::StoreVersion);
 
     job.state = PolicyUpdateJobState::VersionStored;
     job.updated_at_unix_epoch_ms = now_ms();
     notify_state_change(job);
+    emit_apply_lifecycle(config_.lifecycle_emitter, job,
+                         PolicyLifecycleEventType::PolicyVersionStored, "success", "store_version");
 
     ActivePolicyPointer next_pointer;
     next_pointer.generation = candidate_generation;
@@ -278,6 +339,7 @@ PolicyApplyTransactionResult PolicyApplyTransaction::execute(PolicyUpdateJob& jo
     const PromoteActiveResult promote_res = config_.policy_state_store->compare_and_promote_active(
         config_.resource_key, expected, next_pointer);
     if (!promote_res.ok) {
+        record_stage(PolicyApplyStage::CompareAndPromote);
         if (promote_res.code == PolicyStateErrorCode::ActivePointerConflict) {
             return make_failure(job, PolicyApplyStage::CompareAndPromote,
                                 "POLICY_APPLY_PROMOTE_CONFLICT", promote_res.error,
@@ -286,14 +348,26 @@ PolicyApplyTransactionResult PolicyApplyTransaction::execute(PolicyUpdateJob& jo
         return make_failure(job, PolicyApplyStage::CompareAndPromote,
                             "POLICY_APPLY_PROMOTE_CONFLICT", promote_res.error);
     }
+    record_stage(PolicyApplyStage::CompareAndPromote);
 
     job.state = PolicyUpdateJobState::ActivePromoted;
     job.updated_at_unix_epoch_ms = now_ms();
     notify_state_change(job);
+    emit_apply_lifecycle(config_.lifecycle_emitter, job,
+                         PolicyLifecycleEventType::PolicyActivePromoted, "success",
+                         "compare_and_promote");
 
     job.state = PolicyUpdateJobState::Committed;
     job.updated_at_unix_epoch_ms = now_ms();
     notify_state_change(job);
+    PolicyLifecycleEvent committed_event =
+        make_lifecycle_event_from_job(job, PolicyLifecycleEventType::PolicyApplyCommitted);
+    committed_event.status = "success";
+    if (config_.lifecycle_emitter != nullptr) {
+        (void) config_.lifecycle_emitter->emit(committed_event);
+    } else if (config_.control_plane_metrics != nullptr) {
+        record_policy_apply_success(config_.control_plane_metrics, 0);
+    }
 
     PolicyApplyTransactionResult result{};
     result.ok = true;

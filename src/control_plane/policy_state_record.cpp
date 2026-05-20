@@ -329,7 +329,24 @@ std::string serialize_audit_record(const PolicyAuditRecord& record) {
         json += "  \"afterGeneration\": " + std::to_string(record.after_generation) + ",\n";
         json += "  \"targetGeneration\": " + std::to_string(record.target_generation) + ",\n";
         json += "  \"result\": \"" + escape_json_string(record.result) + "\",\n";
-        json += "  \"failureReason\": \"" + escape_json_string(record.failure_reason) + "\"\n";
+        json += "  \"failureReason\": \"" + escape_json_string(record.failure_reason) + "\"";
+        if (record.record_version >= 3) {
+            json += ",\n";
+            json += "  \"eventId\": \"" + escape_json_string(record.event_id) + "\",\n";
+            json += "  \"eventType\": \"" + escape_json_string(record.event_type) + "\",\n";
+            json += "  \"jobId\": \"" + escape_json_string(record.job_id) + "\",\n";
+            json +=
+                "  \"beforePolicyId\": \"" + escape_json_string(record.before_policy_id) + "\",\n";
+            json +=
+                "  \"afterPolicyId\": \"" + escape_json_string(record.after_policy_id) + "\",\n";
+            json += "  \"canonicalHash\": \"" + escape_json_string(record.canonical_hash) + "\",\n";
+            json += "  \"status\": \"" + escape_json_string(record.lifecycle_status) + "\",\n";
+            json += "  \"failureCode\": \"" + escape_json_string(record.failure_code) + "\",\n";
+            json += "  \"failureStage\": \"" + escape_json_string(record.failure_stage) + "\",\n";
+            json += "  \"message\": \"" + escape_json_string(record.message) + "\"\n";
+        } else {
+            json += "\n";
+        }
     } else {
         json += "\n";
     }
@@ -360,6 +377,18 @@ bool deserialize_audit_record(const std::string& json, PolicyAuditRecord* out) {
         record.target_generation = get_json_uint64_field(json, "targetGeneration");
         record.result = get_json_string_field(json, "result");
         record.failure_reason = get_json_string_field(json, "failureReason");
+    }
+    if (record.record_version >= 3) {
+        record.event_id = get_json_string_field(json, "eventId");
+        record.event_type = get_json_string_field(json, "eventType");
+        record.job_id = get_json_string_field(json, "jobId");
+        record.before_policy_id = get_json_string_field(json, "beforePolicyId");
+        record.after_policy_id = get_json_string_field(json, "afterPolicyId");
+        record.canonical_hash = get_json_string_field(json, "canonicalHash");
+        record.lifecycle_status = get_json_string_field(json, "status");
+        record.failure_code = get_json_string_field(json, "failureCode");
+        record.failure_stage = get_json_string_field(json, "failureStage");
+        record.message = get_json_string_field(json, "message");
     }
 
     if (record.record_type.empty() || record.apply_id.empty()) {
