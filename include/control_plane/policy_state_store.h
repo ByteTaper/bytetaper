@@ -10,6 +10,21 @@
 
 namespace bytetaper::control_plane {
 
+struct CommitPolicyGenerationWithAuditParams {
+    PolicyResourceKey resource_key = PolicyResourceKey::default_runtime();
+    PolicyVersionRecord version{};
+    std::string canonical_yaml;
+    ExpectedActivePolicy expected_active{};
+    ActivePolicyPointer next_pointer{};
+    PolicyAuditRecord audit{};
+};
+
+struct CommitPolicyGenerationWithAuditResult {
+    bool ok = false;
+    PolicyStateErrorCode code = PolicyStateErrorCode::Ok;
+    std::string error;
+};
+
 class PolicyStateStore {
 public:
     virtual ~PolicyStateStore() = default;
@@ -29,6 +44,9 @@ public:
 
     virtual AppendAuditResult append_audit_record(const PolicyResourceKey& key,
                                                   const PolicyAuditRecord& record) = 0;
+
+    virtual CommitPolicyGenerationWithAuditResult
+    commit_policy_generation_with_audit(const CommitPolicyGenerationWithAuditParams& params) = 0;
 
     virtual StorePolicyUpdateJobResult
     store_policy_update_job(const PolicyResourceKey& key, const PolicyUpdateJobRecord& job) = 0;

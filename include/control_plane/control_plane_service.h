@@ -6,6 +6,7 @@
 
 #include "control_plane/control_plane_config.h"
 #include "control_plane/fleet_status.h"
+#include "control_plane/manual_resolution_api.h"
 #include "control_plane/policy_apply_api.h"
 #include "control_plane/policy_job_query.h"
 #include "control_plane/policy_version_query.h"
@@ -42,9 +43,20 @@ public:
 
     FleetStatusResult get_fleet_status(const PolicyResourceKey& resource_key);
 
+    PolicyRepairLocalPlanResult plan_repair_local(const PolicyRepairLocalPlanRequest& request);
+
+    PolicyRepairLocalResult repair_local(const PolicyRepairLocalRequest& request);
+
+    PolicyAdoptLocalPlanResult plan_adopt_local(const PolicyAdoptLocalPlanRequest& request);
+
+    PolicyAdoptLocalResult adopt_local(const PolicyAdoptLocalRequest& request);
+
+    PolicyRollbackResult rollback(const PolicyRollbackRequest& request);
+
 private:
     ControlPlaneServiceConfig config_;
     std::unique_ptr<class FleetStatusService> fleet_status_service_;
+    std::unique_ptr<class ManualResolutionService> manual_resolution_service_;
 };
 
 } // namespace bytetaper::control_plane

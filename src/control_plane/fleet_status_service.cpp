@@ -136,6 +136,39 @@ FleetStatusResult FleetStatusService::get_fleet_status(const PolicyResourceKey& 
     return result;
 }
 
+std::optional<RuntimeStatusReport>
+FleetStatusService::find_runtime_report(const PolicyResourceKey& resource_key,
+                                        const std::string& runtime_id) {
+    if (runtime_id.empty()) {
+        return std::nullopt;
+    }
+
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto resource_it = runtimes_by_resource_.find(resource_key.to_string());
+    if (resource_it == runtimes_by_resource_.end()) {
+        return std::nullopt;
+    }
+
+    const auto runtime_it = resource_it->second.find(runtime_id);
+    if (runtime_it == resource_it->second.end()) {
+        return std::nullopt;
+    }
+    return runtime_it->second;
+}
+
+bool FleetStatusService::has_runtime(const PolicyResourceKey& resource_key,
+                                     const std::string& runtime_id) {
+    if (runtime_id.empty()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto resource_it = runtimes_by_resource_.find(resource_key.to_string());
+    if (resource_it == runtimes_by_resource_.end()) {
+        return false;
+    }
+    return resource_it->second.find(runtime_id) != resource_it->second.end();
+}
+
 void FleetStatusService::prune_expired(std::int64_t now_unix_epoch_ms) {
     if (config_.runtime_status_retention_ms == 0) {
         return;

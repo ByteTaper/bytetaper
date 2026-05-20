@@ -37,6 +37,9 @@ public:
     AppendAuditResult append_audit_record(const PolicyResourceKey& key,
                                           const PolicyAuditRecord& record) override;
 
+    CommitPolicyGenerationWithAuditResult commit_policy_generation_with_audit(
+        const CommitPolicyGenerationWithAuditParams& params) override;
+
     StorePolicyUpdateJobResult store_policy_update_job(const PolicyResourceKey& key,
                                                        const PolicyUpdateJobRecord& job) override;
 

@@ -122,6 +122,11 @@ public:
         return res;
     }
 
+    CommitPolicyGenerationWithAuditResult commit_policy_generation_with_audit(
+        const CommitPolicyGenerationWithAuditParams& params) override {
+        return inner_->commit_policy_generation_with_audit(params);
+    }
+
     AppendAuditResult append_audit_record(const PolicyResourceKey& key,
                                           const PolicyAuditRecord& record) override {
         return inner_->append_audit_record(key, record);

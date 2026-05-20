@@ -4,6 +4,7 @@
 #include "control_plane/control_plane_service.h"
 
 #include "control_plane/fleet_status_service.h"
+#include "control_plane/manual_resolution_service.h"
 #include "control_plane/policy_apply_contract.h"
 #include "control_plane/policy_update_queue.h"
 #include "taperquery/policy_ir_from_yaml.h"
@@ -222,6 +223,8 @@ ControlPlaneService::ControlPlaneService(ControlPlaneServiceConfig config)
     if (config_.policy_state_store != nullptr) {
         fleet_status_service_ =
             std::make_unique<FleetStatusService>(config_.fleet_status, config_.policy_state_store);
+        manual_resolution_service_ =
+            std::make_unique<ManualResolutionService>(config_, fleet_status_service_.get());
     }
 }
 
@@ -768,6 +771,63 @@ FleetStatusResult ControlPlaneService::get_fleet_status(const PolicyResourceKey&
         return result;
     }
     return fleet_status_service_->get_fleet_status(resource_key, now_unix_epoch_ms());
+}
+
+PolicyRepairLocalPlanResult
+ControlPlaneService::plan_repair_local(const PolicyRepairLocalPlanRequest& request) {
+    PolicyRepairLocalPlanResult result{};
+    if (manual_resolution_service_ == nullptr) {
+        result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        result.error = "manual resolution service is not configured";
+        result.message = result.error;
+        return result;
+    }
+    return manual_resolution_service_->plan_repair_local(request);
+}
+
+PolicyRepairLocalResult ControlPlaneService::repair_local(const PolicyRepairLocalRequest& request) {
+    PolicyRepairLocalResult result{};
+    if (manual_resolution_service_ == nullptr) {
+        result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        result.error = "manual resolution service is not configured";
+        result.message = result.error;
+        return result;
+    }
+    return manual_resolution_service_->repair_local(request);
+}
+
+PolicyAdoptLocalPlanResult
+ControlPlaneService::plan_adopt_local(const PolicyAdoptLocalPlanRequest& request) {
+    PolicyAdoptLocalPlanResult result{};
+    if (manual_resolution_service_ == nullptr) {
+        result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        result.error = "manual resolution service is not configured";
+        result.message = result.error;
+        return result;
+    }
+    return manual_resolution_service_->plan_adopt_local(request);
+}
+
+PolicyAdoptLocalResult ControlPlaneService::adopt_local(const PolicyAdoptLocalRequest& request) {
+    PolicyAdoptLocalResult result{};
+    if (manual_resolution_service_ == nullptr) {
+        result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        result.error = "manual resolution service is not configured";
+        result.message = result.error;
+        return result;
+    }
+    return manual_resolution_service_->adopt_local(request);
+}
+
+PolicyRollbackResult ControlPlaneService::rollback(const PolicyRollbackRequest& request) {
+    PolicyRollbackResult result{};
+    if (manual_resolution_service_ == nullptr) {
+        result.status = PolicyApplyStatus::RejectedStorageUnavailable;
+        result.error = "manual resolution service is not configured";
+        result.message = result.error;
+        return result;
+    }
+    return manual_resolution_service_->rollback(request);
 }
 
 } // namespace bytetaper::control_plane

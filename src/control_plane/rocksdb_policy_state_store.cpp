@@ -338,6 +338,204 @@ RocksDBPolicyStateStore::compare_and_promote_active(const PolicyResourceKey& key
     return res;
 }
 
+CommitPolicyGenerationWithAuditResult RocksDBPolicyStateStore::commit_policy_generation_with_audit(
+    const CommitPolicyGenerationWithAuditParams& params) {
+    if (!open_ || impl_->db == nullptr) {
+        CommitPolicyGenerationWithAuditResult res;
+        res.ok = false;
+        res.code = PolicyStateErrorCode::DbOpenFailed;
+        res.error = "policy state db is not open";
+        return res;
+    }
+
+    if (params.audit.apply_id.empty()) {
+        CommitPolicyGenerationWithAuditResult res;
+        res.ok = false;
+        res.code = PolicyStateErrorCode::AuditWriteFailed;
+        res.error = "audit apply_id is empty";
+        return res;
+    }
+
+    const PolicyResourceKey& key = params.resource_key;
+    const std::string version_key = make_version_key(key, params.version.generation);
+    const std::string yaml_key = make_yaml_key(key, params.version.generation);
+    const std::string active_key = make_active_key(key);
+
+    std::string existing_version_json;
+    const rocksdb::Status version_get_status =
+        impl_->db->Get(rocksdb::ReadOptions{}, version_key, &existing_version_json);
+    bool write_version = false;
+    if (version_get_status.ok()) {
+        PolicyVersionRecord existing;
+        if (!deserialize_version_record(existing_version_json, &existing)) {
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = false;
+            res.code = PolicyStateErrorCode::DbReadFailed;
+            res.error = "existing policy version record is invalid";
+            return res;
+        }
+        if (existing.canonical_hash != params.version.canonical_hash) {
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = false;
+            res.code = PolicyStateErrorCode::VersionConflict;
+            res.error = "policy version conflict (VERSION_CONFLICT)";
+            return res;
+        }
+
+        std::string existing_yaml;
+        const rocksdb::Status yaml_status =
+            impl_->db->Get(rocksdb::ReadOptions{}, yaml_key, &existing_yaml);
+        if (yaml_status.IsNotFound()) {
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = false;
+            res.code = PolicyStateErrorCode::VersionConflict;
+            res.error = "policy version yaml missing for existing generation";
+            return res;
+        }
+        if (!yaml_status.ok()) {
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = false;
+            res.code = PolicyStateErrorCode::DbReadFailed;
+            res.error = yaml_status.ToString();
+            return res;
+        }
+        if (existing_yaml != params.canonical_yaml) {
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = false;
+            res.code = PolicyStateErrorCode::VersionConflict;
+            res.error = "policy version yaml content conflict (VERSION_CONFLICT)";
+            return res;
+        }
+    } else if (!version_get_status.IsNotFound()) {
+        CommitPolicyGenerationWithAuditResult res;
+        res.ok = false;
+        res.code = PolicyStateErrorCode::DbReadFailed;
+        res.error = version_get_status.ToString();
+        return res;
+    } else {
+        write_version = true;
+    }
+
+    std::string current_json;
+    const rocksdb::Status active_get_status =
+        impl_->db->Get(rocksdb::ReadOptions{}, active_key, &current_json);
+
+    ActivePolicyPointer current;
+    const bool has_current = active_get_status.ok();
+    if (has_current) {
+        if (!deserialize_active_pointer(current_json, &current)) {
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = false;
+            res.code = PolicyStateErrorCode::ActivePointerInvalid;
+            res.error = "active policy pointer is invalid (ACTIVE_POINTER_INVALID)";
+            return res;
+        }
+        if (current.generation == params.next_pointer.generation &&
+            current.policy_id == params.next_pointer.policy_id) {
+            PolicyAuditRecord audit_to_store = params.audit;
+            audit_to_store.resource_key = key.to_string();
+            const std::string audit_key = make_audit_key(key, params.audit.apply_id);
+
+            rocksdb::WriteBatch batch;
+            batch.Put(audit_key, serialize_audit_record(audit_to_store));
+            const rocksdb::Status write_status = impl_->db->Write(impl_->sync_write, &batch);
+            if (!write_status.ok()) {
+                CommitPolicyGenerationWithAuditResult res;
+                res.ok = false;
+                res.code = PolicyStateErrorCode::DbWriteFailed;
+                res.error = write_status.ToString();
+                return res;
+            }
+
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = true;
+            res.code = PolicyStateErrorCode::Ok;
+            return res;
+        }
+        if (current.generation != params.expected_active.generation ||
+            current.policy_id != params.expected_active.policy_id) {
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = false;
+            res.code = PolicyStateErrorCode::ActivePointerConflict;
+            res.error = "active policy pointer conflict (ACTIVE_POINTER_CONFLICT)";
+            return res;
+        }
+    } else if (!active_get_status.IsNotFound()) {
+        CommitPolicyGenerationWithAuditResult res;
+        res.ok = false;
+        res.code = PolicyStateErrorCode::DbReadFailed;
+        res.error = active_get_status.ToString();
+        return res;
+    } else if (params.expected_active.generation != 0) {
+        CommitPolicyGenerationWithAuditResult res;
+        res.ok = false;
+        res.code = PolicyStateErrorCode::ActivePointerConflict;
+        res.error = "active policy pointer conflict (ACTIVE_POINTER_CONFLICT)";
+        return res;
+    }
+
+    if (params.next_pointer.version_key.empty()) {
+        CommitPolicyGenerationWithAuditResult res;
+        res.ok = false;
+        res.code = PolicyStateErrorCode::ActivePointerTargetMissing;
+        res.error = "active pointer version key is empty";
+        return res;
+    }
+
+    if (!write_version) {
+        std::string target_json;
+        const rocksdb::Status target_status =
+            impl_->db->Get(rocksdb::ReadOptions{}, params.next_pointer.version_key, &target_json);
+        if (target_status.IsNotFound()) {
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = false;
+            res.code = PolicyStateErrorCode::ActivePointerTargetMissing;
+            res.error = "active pointer target version missing (ACTIVE_POINTER_TARGET_MISSING)";
+            return res;
+        }
+        if (!target_status.ok()) {
+            CommitPolicyGenerationWithAuditResult res;
+            res.ok = false;
+            res.code = PolicyStateErrorCode::DbReadFailed;
+            res.error = target_status.ToString();
+            return res;
+        }
+    }
+
+    PolicyVersionRecord version_to_store = params.version;
+    version_to_store.resource_key = key.to_string();
+    version_to_store.yaml_key = yaml_key;
+
+    ActivePolicyPointer active_to_store = params.next_pointer;
+    active_to_store.resource_key = key.to_string();
+
+    PolicyAuditRecord audit_to_store = params.audit;
+    audit_to_store.resource_key = key.to_string();
+    const std::string audit_key = make_audit_key(key, params.audit.apply_id);
+
+    rocksdb::WriteBatch batch;
+    if (write_version) {
+        batch.Put(version_key, serialize_version_record(version_to_store));
+        batch.Put(yaml_key, params.canonical_yaml);
+    }
+    batch.Put(active_key, serialize_active_pointer(active_to_store));
+    batch.Put(audit_key, serialize_audit_record(audit_to_store));
+
+    const rocksdb::Status write_status = impl_->db->Write(impl_->sync_write, &batch);
+    if (!write_status.ok()) {
+        CommitPolicyGenerationWithAuditResult res;
+        res.ok = false;
+        res.code = PolicyStateErrorCode::DbWriteFailed;
+        res.error = write_status.ToString();
+        return res;
+    }
+
+    CommitPolicyGenerationWithAuditResult res;
+    res.ok = true;
+    res.code = PolicyStateErrorCode::Ok;
+    return res;
+}
+
 AppendAuditResult RocksDBPolicyStateStore::append_audit_record(const PolicyResourceKey& key,
                                                                const PolicyAuditRecord& record) {
     if (!open_ || impl_->db == nullptr) {
