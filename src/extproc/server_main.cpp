@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Haluan Irsad
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
 
+#include "admin/control_plane_admin_http_server.h"
 #include "admin/taperquery_admin_http_server.h"
 #include "bytetaper_build_info.h"
 #include "cache/l1_cache.h"
@@ -9,6 +10,9 @@
 #include "control_plane/control_plane_guardrails.h"
 #include "control_plane/control_plane_security_config.h"
 #include "control_plane/control_plane_service.h"
+#include "control_plane/policy_apply_transaction.h"
+#include "control_plane/policy_update_queue.h"
+#include "control_plane/policy_update_worker.h"
 #include "control_plane/rocksdb_policy_state_store.h"
 #include "extproc/grpc_server.h"
 #include "extproc/startup_parse.h"
@@ -17,6 +21,7 @@
 #include "metrics/prometheus_registry.h"
 #include "observability/logger.h"
 #include "runtime/route_cache_epoch_store.h"
+#include "runtime_policy/bootstrap_policy_importer.h"
 #include "runtime_policy/control_plane_policy_client.h"
 #include "runtime_policy/policy_inactive_mode.h"
 #include "runtime_policy/runtime_policy_plane.h"
@@ -60,6 +65,129 @@ struct ServerArgs {
     bool help = false;
     bool error = false;
 };
+
+const char* resolve_policy_state_db_path(const ServerArgs& args) {
+    const char* env_policy_state_db = std::getenv("BYTETAPER_POLICY_STATE_DB");
+    if (args.policy_state_db != nullptr && args.policy_state_db[0] != '\0') {
+        return args.policy_state_db;
+    }
+    if (env_policy_state_db != nullptr && env_policy_state_db[0] != '\0') {
+        return env_policy_state_db;
+    }
+    return nullptr;
+}
+
+int run_control_plane_process(
+    const ServerArgs& args,
+    const bytetaper::control_plane::ControlPlaneSecurityConfig& security_config,
+    bytetaper::metrics::MetricsHttpServerHandle* metrics_handle) {
+    const char* policy_state_db_path = resolve_policy_state_db_path(args);
+    if (policy_state_db_path == nullptr) {
+        std::fprintf(stderr, "error: control-plane role requires --policy-state-db or "
+                             "BYTETAPER_POLICY_STATE_DB\n");
+        bytetaper::metrics::stop_metrics_http_server(metrics_handle);
+        bytetaper::observability::logger_shutdown();
+        return 1;
+    }
+
+    auto policy_state_store =
+        std::make_unique<bytetaper::control_plane::RocksDBPolicyStateStore>(policy_state_db_path);
+    if (!policy_state_store->is_open()) {
+        std::fprintf(stderr, "error: failed to open policy state db at %s: %s\n",
+                     policy_state_db_path, policy_state_store->open_error().c_str());
+        bytetaper::metrics::stop_metrics_http_server(metrics_handle);
+        bytetaper::observability::logger_shutdown();
+        return 1;
+    }
+
+    bytetaper::control_plane::ControlPlaneServiceConfig cp_config{};
+    cp_config.policy_state_store = policy_state_store.get();
+    cp_config.security = security_config;
+    cp_config.default_internal_auth = true;
+
+    bytetaper::control_plane::PolicyUpdateQueueConfig queue_config{};
+    queue_config.logical_shard_count = 16;
+    queue_config.job_store = policy_state_store.get();
+    auto policy_update_queue =
+        std::make_unique<bytetaper::control_plane::PolicyUpdateQueue>(queue_config);
+    cp_config.policy_update_queue = policy_update_queue.get();
+
+    const bytetaper::control_plane::PolicyResourceKey default_resource_key =
+        bytetaper::control_plane::PolicyResourceKey::default_runtime();
+    const bytetaper::control_plane::LoadActivePointerResult existing_active =
+        policy_state_store->load_active_pointer(default_resource_key);
+    if (!existing_active.ok && !existing_active.not_found) {
+        std::fprintf(stderr, "control plane failed to load active policy pointer: %s\n",
+                     existing_active.error.c_str());
+        bytetaper::metrics::stop_metrics_http_server(metrics_handle);
+        bytetaper::observability::logger_shutdown();
+        return 1;
+    }
+    if (existing_active.not_found) {
+        const char* bootstrap_policy_file = std::getenv("BYTETAPER_BOOTSTRAP_POLICY_FILE");
+        if (bootstrap_policy_file == nullptr || bootstrap_policy_file[0] == '\0') {
+            bootstrap_policy_file = "examples/policies/bootstrap-policy.yaml";
+        }
+        bytetaper::runtime_policy::BootstrapImportInput bootstrap_input{};
+        bootstrap_input.bootstrap_policy_file = bootstrap_policy_file;
+        bootstrap_input.store = policy_state_store.get();
+        bootstrap_input.resource_key = &default_resource_key;
+        const bytetaper::runtime_policy::BootstrapImportResult bootstrap_result =
+            bytetaper::runtime_policy::import_bootstrap_policy(bootstrap_input);
+        if (!bootstrap_result.ok) {
+            std::fprintf(stderr, "control plane bootstrap import failed: %s\n",
+                         bootstrap_result.error.c_str());
+            bytetaper::metrics::stop_metrics_http_server(metrics_handle);
+            bytetaper::observability::logger_shutdown();
+            return 1;
+        }
+    }
+
+    auto control_plane_service =
+        std::make_unique<bytetaper::control_plane::ControlPlaneService>(cp_config);
+
+    bytetaper::control_plane::PolicyApplyTransactionConfig tx_config{};
+    tx_config.policy_state_store = policy_state_store.get();
+    tx_config.resource_key = default_resource_key;
+    auto policy_update_worker = std::make_unique<bytetaper::control_plane::PolicyUpdateWorker>(
+        0, policy_update_queue.get(), tx_config);
+    policy_update_worker->start();
+
+    bytetaper::admin::ControlPlaneAdminHttpServerConfig cp_admin_config{};
+    const char* cp_bind = std::getenv("BYTETAPER_CONTROL_PLANE_BIND_ADDRESS");
+    cp_admin_config.listen_address = cp_bind != nullptr && cp_bind[0] != '\0' ? cp_bind : "0.0.0.0";
+    cp_admin_config.port = security_config.port;
+    cp_admin_config.control_plane_service = control_plane_service.get();
+    cp_admin_config.strict_production_apply =
+        security_config.deployment_mode ==
+        bytetaper::control_plane::ControlPlaneDeploymentMode::Production;
+
+    bytetaper::admin::ControlPlaneAdminHttpServerHandle cp_admin_handle{};
+    if (!bytetaper::admin::start_control_plane_admin_http_server(cp_admin_config,
+                                                                 &cp_admin_handle)) {
+        std::fprintf(stderr, "failed to start control plane admin http server on %s:%u\n",
+                     cp_admin_config.listen_address, cp_admin_config.port);
+        policy_update_worker->stop();
+        bytetaper::metrics::stop_metrics_http_server(metrics_handle);
+        bytetaper::observability::logger_shutdown();
+        return 1;
+    }
+
+    std::fprintf(stderr, "bytetaper control-plane listening on %s:%u (policy-state-db=%s)\n",
+                 cp_admin_config.listen_address, cp_admin_handle.bound_port, policy_state_db_path);
+    bytetaper::observability::log_info("control plane process started");
+
+    while (!g_should_stop.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+
+    bytetaper::observability::log_info("exiting control plane process");
+    bytetaper::admin::stop_control_plane_admin_http_server(&cp_admin_handle);
+    policy_update_worker->stop();
+    bytetaper::metrics::stop_metrics_http_server(metrics_handle);
+    bytetaper::observability::logger_shutdown();
+    return 0;
+}
 
 bytetaper::runtime_policy::PolicyInactiveMode parse_policy_inactive_mode(const char* value) {
     if (value == nullptr) {
@@ -356,6 +484,11 @@ int main(int argc, char** argv) {
         // non-fatal, but good to know
     }
 
+    if (security_config.runtime_role ==
+        bytetaper::control_plane::RuntimeProcessRole::ControlPlane) {
+        return run_control_plane_process(args, security_config, &metrics_handle);
+    }
+
     auto l1_cache = std::make_unique<bytetaper::cache::L1Cache>();
     bytetaper::cache::l1_init(l1_cache.get());
 
@@ -477,12 +610,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    const char* env_policy_state_db = std::getenv("BYTETAPER_POLICY_STATE_DB");
-    const char* policy_state_db_path = args.policy_state_db;
-    if (policy_state_db_path == nullptr && env_policy_state_db != nullptr &&
-        env_policy_state_db[0] != '\0') {
-        policy_state_db_path = env_policy_state_db;
-    }
+    const char* policy_state_db_path = resolve_policy_state_db_path(args);
 
     std::unique_ptr<bytetaper::control_plane::RocksDBPolicyStateStore> policy_state_store;
     if (policy_state_db_path != nullptr && policy_state_db_path[0] != '\0') {
@@ -534,6 +662,7 @@ int main(int argc, char** argv) {
 
     std::unique_ptr<bytetaper::control_plane::ControlPlaneService> control_plane_service;
     std::unique_ptr<bytetaper::runtime_policy::InProcessControlPlanePolicyClient> cp_policy_client;
+    std::unique_ptr<bytetaper::runtime_policy::HttpControlPlanePolicyClient> http_cp_policy_client;
     bool policy_pull_enabled = policy_state_store != nullptr;
     if (const char* env_pull = std::getenv("BYTETAPER_POLICY_PULL_ENABLED"); env_pull != nullptr) {
         const std::string pull_val(env_pull);
@@ -544,8 +673,42 @@ int main(int argc, char** argv) {
         security_config.runtime_role == bytetaper::control_plane::RuntimeProcessRole::RuntimeOnly;
     if (runtime_only_role) {
         args.admin_enable_taperquery = false;
+        if (!security_config.control_plane_endpoint.empty()) {
+            policy_pull_enabled = true;
+        }
     }
-    if (policy_state_store != nullptr && policy_pull_enabled && !runtime_only_role) {
+    if (runtime_only_role && policy_pull_enabled &&
+        !security_config.control_plane_endpoint.empty()) {
+        http_cp_policy_client =
+            std::make_unique<bytetaper::runtime_policy::HttpControlPlanePolicyClient>(
+                security_config.control_plane_endpoint);
+
+        bytetaper::runtime_policy::RuntimePolicyPullLoopConfig pull_loop_config{};
+        pull_loop_config.pull.enabled = true;
+        pull_loop_config.pull.resource_key =
+            bytetaper::control_plane::PolicyResourceKey::default_runtime();
+        pull_loop_config.pull.local_mirror = persistence_config;
+        if (const char* env_runtime_id = std::getenv("BYTETAPER_RUNTIME_ID");
+            env_runtime_id != nullptr && env_runtime_id[0] != '\0') {
+            pull_loop_config.pull.runtime_id = env_runtime_id;
+        }
+        pull_loop_config.client = http_cp_policy_client.get();
+        pull_loop_config.runtime_policy_store = policy_store.get();
+        pull_loop_config.activation_barrier.runtime_policy_store = policy_store.get();
+        pull_loop_config.activation_barrier.route_cache_epoch_store = route_cache_epoch_store.get();
+        pull_loop_config.activation_barrier.l1_cache = l1_cache.get();
+        pull_loop_config.activation_barrier.l2_cleanup_queue = route_cache_cleanup_queue.get();
+        pull_loop_config.activation_barrier.resource_key =
+            bytetaper::control_plane::PolicyResourceKey::default_runtime();
+
+        if (const char* env_interval = std::getenv("BYTETAPER_POLICY_PULL_INTERVAL_MS");
+            env_interval != nullptr && env_interval[0] != '\0') {
+            pull_loop_config.pull.pull_interval_ms =
+                static_cast<std::uint32_t>(std::strtoul(env_interval, nullptr, 10));
+        }
+
+        policy_plane.start_pull_loop(pull_loop_config);
+    } else if (policy_state_store != nullptr && policy_pull_enabled && !runtime_only_role) {
         bytetaper::control_plane::ControlPlaneServiceConfig cp_config{};
         cp_config.policy_state_store = policy_state_store.get();
         cp_config.security = security_config;

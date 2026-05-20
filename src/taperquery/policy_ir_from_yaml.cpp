@@ -6,7 +6,6 @@
 #include "policy/yaml_loader.h"
 #include "taperquery/policy_ir_version.h"
 
-#include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
 namespace bytetaper::taperquery {
@@ -124,8 +123,63 @@ TqRoutePolicy from_runtime_route_policy(const policy::RoutePolicy& route) {
     return result;
 }
 
+namespace {
+
+void apply_policy_ir_metadata_from_yaml_node(const YAML::Node& root, PolicyIrLoadResult* res) {
+    if (res == nullptr) {
+        return;
+    }
+    try {
+        if (root["document_id"] && root["document_id"].IsScalar()) {
+            res->policy.document_id = root["document_id"].as<std::string>();
+        }
+        if (root["expected_base_sha"] && root["expected_base_sha"].IsScalar()) {
+            res->policy.expected_base_sha = root["expected_base_sha"].as<std::string>();
+        }
+        if (root["apiVersion"] && root["apiVersion"].IsScalar()) {
+            res->policy.api_version = root["apiVersion"].as<std::string>();
+        }
+        if (root["kind"] && root["kind"].IsScalar()) {
+            res->policy.kind = root["kind"].as<std::string>();
+        }
+        if (root["metadata"] && root["metadata"].IsMap()) {
+            const YAML::Node metadata_node = root["metadata"];
+            if (metadata_node["generation"] && metadata_node["generation"].IsScalar()) {
+                res->policy.generation = metadata_node["generation"].as<std::uint64_t>();
+            }
+            if (metadata_node["policyId"] && metadata_node["policyId"].IsScalar()) {
+                res->policy.policy_id = metadata_node["policyId"].as<std::string>();
+            }
+            if (metadata_node["schemaVersion"] && metadata_node["schemaVersion"].IsScalar()) {
+                res->policy.schema_version_num = metadata_node["schemaVersion"].as<std::uint32_t>();
+            }
+        }
+    } catch (...) {
+        // Ignore parsing errors for optional root metadata fields.
+    }
+}
+
+PolicyIrLoadResult finalize_policy_ir_load(policy::PolicyFileResult&& file_res,
+                                           const char* source_name, const YAML::Node& root) {
+    PolicyIrLoadResult res{};
+    res.ok = true;
+    res.policy.source_name = source_name != nullptr ? source_name : "";
+    res.policy.version.source_schema_version = "yaml/v1";
+    res.policy.schema_version = "yaml/v1";
+    res.policy.version.policy_ir_version = kCurrentPolicyIrVersion;
+    res.policy.version.identity_version = kCurrentPolicyIdentityVersion;
+    apply_policy_ir_metadata_from_yaml_node(root, &res);
+    res.policy.routes.clear();
+    for (std::size_t i = 0; i < file_res.count; ++i) {
+        res.policy.routes.push_back(from_runtime_route_policy(file_res.policies[i]));
+    }
+    return res;
+}
+
+} // namespace
+
 PolicyIrLoadResult load_policy_ir_from_yaml_file(const char* path) {
-    PolicyIrLoadResult res;
+    PolicyIrLoadResult res{};
     policy::PolicyFileResult file_res;
 
     if (!policy::load_policy_from_file(path, &file_res)) {
@@ -134,75 +188,38 @@ PolicyIrLoadResult load_policy_ir_from_yaml_file(const char* path) {
         return res;
     }
 
-    res.ok = true;
-    res.policy.source_name = path;
-    res.policy.version.source_schema_version = "yaml/v1";
-    res.policy.schema_version = "yaml/v1";
-    res.policy.version.policy_ir_version = kCurrentPolicyIrVersion;
-    res.policy.version.identity_version = kCurrentPolicyIdentityVersion;
-
+    YAML::Node root;
     try {
-        YAML::Node root = YAML::LoadFile(path);
-        if (root["document_id"] && root["document_id"].IsScalar()) {
-            res.policy.document_id = root["document_id"].as<std::string>();
-        }
-        if (root["expected_base_sha"] && root["expected_base_sha"].IsScalar()) {
-            res.policy.expected_base_sha = root["expected_base_sha"].as<std::string>();
-        }
-        if (root["apiVersion"] && root["apiVersion"].IsScalar()) {
-            res.policy.api_version = root["apiVersion"].as<std::string>();
-        }
-        if (root["kind"] && root["kind"].IsScalar()) {
-            res.policy.kind = root["kind"].as<std::string>();
-        }
-        if (root["metadata"] && root["metadata"].IsMap()) {
-            YAML::Node metadata_node = root["metadata"];
-            if (metadata_node["generation"] && metadata_node["generation"].IsScalar()) {
-                res.policy.generation = metadata_node["generation"].as<std::uint64_t>();
-            }
-            if (metadata_node["policyId"] && metadata_node["policyId"].IsScalar()) {
-                res.policy.policy_id = metadata_node["policyId"].as<std::string>();
-            }
-            if (metadata_node["schemaVersion"] && metadata_node["schemaVersion"].IsScalar()) {
-                res.policy.schema_version_num = metadata_node["schemaVersion"].as<std::uint32_t>();
-            }
-        }
+        root = YAML::LoadFile(path);
     } catch (...) {
-        // Ignore parsing errors for non-existent or malformed root elements, fallback to empty
-        // defaults
+        root = YAML::Node();
     }
-
-    res.policy.routes.clear();
-    for (std::size_t i = 0; i < file_res.count; ++i) {
-        res.policy.routes.push_back(from_runtime_route_policy(file_res.policies[i]));
-    }
-
-    return res;
+    return finalize_policy_ir_load(std::move(file_res), path, root);
 }
 
 PolicyIrLoadResult load_policy_ir_from_yaml_string(const char* yaml_content, std::size_t len) {
-    PolicyIrLoadResult res;
-    char tmp_path[] = "/tmp/bytetaper_roundtrip_XXXXXX";
-    int fd = mkstemp(tmp_path);
-    if (fd == -1) {
+    PolicyIrLoadResult res{};
+    if (yaml_content == nullptr || len == 0) {
         res.ok = false;
-        res.error = "failed to create temporary file for YAML re-parsing";
+        res.error = "yaml content is empty";
         return res;
     }
 
-    ssize_t written = ::write(fd, yaml_content, len);
-    ::close(fd);
-
-    if (written < 0 || static_cast<std::size_t>(written) != len) {
+    const std::string content(yaml_content, len);
+    policy::PolicyFileResult file_res;
+    if (!policy::load_policy_from_string(content.c_str(), &file_res)) {
         res.ok = false;
-        res.error = "failed to write all bytes to temporary file for YAML re-parsing";
-        ::unlink(tmp_path);
+        res.error = file_res.error ? file_res.error : "Unknown YAML load error";
         return res;
     }
 
-    res = load_policy_ir_from_yaml_file(tmp_path);
-    ::unlink(tmp_path);
-    return res;
+    YAML::Node root;
+    try {
+        root = YAML::Load(content);
+    } catch (...) {
+        root = YAML::Node();
+    }
+    return finalize_policy_ir_load(std::move(file_res), "yaml-string", root);
 }
 
 } // namespace bytetaper::taperquery

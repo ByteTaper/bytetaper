@@ -63,7 +63,12 @@ StartupValidationResult validate_startup(const ControlPlaneSecurityConfig& secur
     StartupValidationResult result{};
 
     if (security.enabled && !policy_state_store_configured) {
-        append_error(&result, "control plane enabled but policy state store is not configured");
+        const bool remote_runtime_client =
+            security.runtime_role == RuntimeProcessRole::RuntimeOnly &&
+            !security.control_plane_endpoint.empty();
+        if (!remote_runtime_client) {
+            append_error(&result, "control plane enabled but policy state store is not configured");
+        }
     }
 
     if (is_public_bind_address(security.bind_address) && !security.allow_public_bind) {

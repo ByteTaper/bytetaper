@@ -509,17 +509,25 @@ PolicyApplySubmitResult ControlPlaneService::apply(const PolicyApplyRequest& req
         taperquery::build_taperquery_apply_plan(before, parsed.policy, plan_opts);
 
     bool cas_mismatch = false;
-    if (!plan.ok) {
+    auto set_plan_failure = [&](const char* summary) {
         result.status = map_plan_blockers(plan, &cas_mismatch);
-        result.error = "apply plan contains blocker issues";
-        result.message = result.error;
+        result.error = summary;
+        result.message = summary;
+        for (const auto& issue : plan.issues) {
+            if (issue.severity == taperquery::TqPlanSeverity::Blocker) {
+                result.message = issue.code + ": " + issue.reason;
+                result.error = result.message;
+                break;
+            }
+        }
+    };
+    if (!plan.ok) {
+        set_plan_failure("apply plan contains blocker issues");
         return result;
     }
     for (const auto& issue : plan.issues) {
         if (issue.severity == taperquery::TqPlanSeverity::Blocker) {
-            result.status = map_plan_blockers(plan, &cas_mismatch);
-            result.error = "apply plan contains blocker issues";
-            result.message = result.error;
+            set_plan_failure("apply plan contains blocker issues");
             return result;
         }
     }

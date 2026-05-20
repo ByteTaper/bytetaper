@@ -74,6 +74,17 @@ Run integration tests:
 docker compose run --rm bytetaper-integration-test
 ```
 
+Run the Control Plane + Runtime Compose profile (BT-CP-016):
+
+```bash
+LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
+  docker compose -f docker-compose.yml -f docker-compose.control-plane.yml \
+  up -d --build bytetaper-control-plane bytetaper-runtime mock-api envoy
+./scripts/demo/control-plane-demo.sh
+```
+
+See [docs/control-plane/docker-compose-profile.md](docs/control-plane/docker-compose-profile.md).
+
 Run sanitizer verification tests:
 
 | Sanitizer | Purpose | Test Scope | CI Cadence | Command |

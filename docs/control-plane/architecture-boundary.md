@@ -115,7 +115,7 @@ The following items are explicitly out of scope for this architecture phase:
 
 Control Plane mutation endpoints are guarded at the service boundary and at process startup:
 
-* **Listener separation**: ext_proc gRPC (data path), optional TaperQuery Admin HTTP (default `127.0.0.1:18082`), and a reserved dedicated Control Plane admin port (`19090`) for future HTTP mutation APIs.
+* **Listener separation**: ext_proc gRPC (data path) on runtime pods, optional TaperQuery Admin HTTP on runtime (`127.0.0.1:18082`), and dedicated Control Plane admin HTTP (`19090`) for committed-policy mutation and fleet status (`/admin/control-plane/*`). See [docker-compose-profile.md](docker-compose-profile.md).
 * **Deployment modes**: `local-dev`, `single-node`, `multi-runtime`, `production` — production enforces auth and rejects unsafe public bind without `allow_public_bind=true`.
 * **Runtime-only role**: runtime pods pull committed policy; in-process mutation and admin apply are disabled.
 * **Auth**: pluggable `ControlPlaneAuthProvider`; optional static bearer token via `BYTETAPER_CONTROL_PLANE_TOKEN` (never logged).

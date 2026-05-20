@@ -4,7 +4,9 @@ The TaperQuery Admin HTTP server provides a mutating control-plane API for dynam
 
 ## Purpose & Architecture
 
-This server is strictly a control-plane administrative interface. It coordinates with the internal `RuntimePolicyStore` and `TqApplyService` to validate and atomically swap active compiled policy snapshots.
+This server is strictly a **runtime-local** administrative interface. It coordinates with the internal `RuntimePolicyStore` and `TqApplyService` to validate and atomically swap active compiled policy snapshots on a single process.
+
+For multi-service Control Plane + Runtime deployments, committed policy mutations go through the dedicated Control Plane HTTP API on port **19090** (`/admin/control-plane/*`). See [docker-compose-profile.md](../control-plane/docker-compose-profile.md).
 
 > [!WARNING]
 > This interface is **unauthenticated** and allows arbitrary policy mutation. It must **never** be exposed to public networks or untrusted traffic.
