@@ -26,6 +26,11 @@ enum class PolicyApplyStatus {
     RejectedQueueFull,
     RejectedStorageUnavailable,
     RollbackPlanReady,
+    RollbackAccepted,
+    RepairLocalAccepted,
+    RepairLocalPlanReady,
+    AdoptLocalAccepted,
+    AdoptLocalPlanReady,
     InternalError,
 };
 

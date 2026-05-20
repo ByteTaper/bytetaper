@@ -2936,6 +2936,38 @@ if(BUILD_TESTING)
   )
   add_test(NAME fleet_status_integration_test COMMAND fleet_status_integration_test)
 
+  add_executable(manual_resolution_service_test
+    tests/manual_resolution_service_test.cpp
+  )
+  set_source_files_properties(tests/manual_resolution_service_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(manual_resolution_service_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(manual_resolution_service_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+            bytetaper_taperquery_apply RocksDB::RocksDB
+  )
+  add_test(NAME manual_resolution_service_test COMMAND manual_resolution_service_test)
+
+  add_executable(manual_resolution_integration_test
+    tests/manual_resolution_integration_test.cpp
+  )
+  set_source_files_properties(tests/manual_resolution_integration_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(manual_resolution_integration_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(manual_resolution_integration_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+            bytetaper_runtime_policy bytetaper_operational bytetaper_runtime
+            bytetaper_cache bytetaper_extproc_adapter bytetaper_taperquery_apply
+            RocksDB::RocksDB
+  )
+  add_test(NAME manual_resolution_integration_test COMMAND manual_resolution_integration_test)
+
   add_executable(policy_update_queue_test
     tests/policy_update_queue_test.cpp
   )

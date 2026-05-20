@@ -45,6 +45,16 @@ const char* to_string(PolicyApplyStatus status) {
         return "RejectedStorageUnavailable";
     case PolicyApplyStatus::RollbackPlanReady:
         return "RollbackPlanReady";
+    case PolicyApplyStatus::RollbackAccepted:
+        return "RollbackAccepted";
+    case PolicyApplyStatus::RepairLocalAccepted:
+        return "RepairLocalAccepted";
+    case PolicyApplyStatus::RepairLocalPlanReady:
+        return "RepairLocalPlanReady";
+    case PolicyApplyStatus::AdoptLocalAccepted:
+        return "AdoptLocalAccepted";
+    case PolicyApplyStatus::AdoptLocalPlanReady:
+        return "AdoptLocalPlanReady";
     case PolicyApplyStatus::InternalError:
         return "InternalError";
     }

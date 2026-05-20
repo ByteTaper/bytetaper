@@ -321,8 +321,18 @@ std::string serialize_audit_record(const PolicyAuditRecord& record) {
     json += "  \"sourceType\": \"" + escape_json_string(record.source_type) + "\",\n";
     json += "  \"operatorId\": \"" + escape_json_string(record.operator_id) + "\",\n";
     json += "  \"requestId\": \"" + escape_json_string(record.request_id) + "\",\n";
-    json +=
-        "  \"recordedAtUnixEpochMs\": " + std::to_string(record.recorded_at_unix_epoch_ms) + "\n";
+    json += "  \"recordedAtUnixEpochMs\": " + std::to_string(record.recorded_at_unix_epoch_ms);
+    if (record.record_version >= 2) {
+        json += ",\n";
+        json += "  \"operation\": \"" + escape_json_string(record.operation) + "\",\n";
+        json += "  \"beforeGeneration\": " + std::to_string(record.before_generation) + ",\n";
+        json += "  \"afterGeneration\": " + std::to_string(record.after_generation) + ",\n";
+        json += "  \"targetGeneration\": " + std::to_string(record.target_generation) + ",\n";
+        json += "  \"result\": \"" + escape_json_string(record.result) + "\",\n";
+        json += "  \"failureReason\": \"" + escape_json_string(record.failure_reason) + "\"\n";
+    } else {
+        json += "\n";
+    }
     json += "}\n";
     return json;
 }
@@ -343,6 +353,14 @@ bool deserialize_audit_record(const std::string& json, PolicyAuditRecord* out) {
     record.operator_id = get_json_string_field(json, "operatorId");
     record.request_id = get_json_string_field(json, "requestId");
     record.recorded_at_unix_epoch_ms = get_json_uint64_field(json, "recordedAtUnixEpochMs");
+    if (record.record_version >= 2) {
+        record.operation = get_json_string_field(json, "operation");
+        record.before_generation = get_json_uint64_field(json, "beforeGeneration");
+        record.after_generation = get_json_uint64_field(json, "afterGeneration");
+        record.target_generation = get_json_uint64_field(json, "targetGeneration");
+        record.result = get_json_string_field(json, "result");
+        record.failure_reason = get_json_string_field(json, "failureReason");
+    }
 
     if (record.record_type.empty() || record.apply_id.empty()) {
         return false;

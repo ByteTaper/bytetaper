@@ -297,13 +297,6 @@ void RuntimePolicyPullLoop::tick() {
         return;
     }
 
-    if (load_res.policy.generation != 0 && load_res.policy.generation != remote.generation) {
-        record_failure(kErrPolicyGenerationMismatch,
-                       "parsed policy document generation does not match active pointer");
-        report_status_to_control_plane();
-        return;
-    }
-
     const runtime::RuntimePolicySnapshotBuildResult build_res =
         config_.snapshot_build_fn != nullptr
             ? config_.snapshot_build_fn(load_res.policy, remote.generation)

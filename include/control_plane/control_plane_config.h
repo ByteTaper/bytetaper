@@ -5,6 +5,7 @@
 #define BYTETAPER_CONTROL_PLANE_CONTROL_PLANE_CONFIG_H
 
 #include "control_plane/fleet_status_config.h"
+#include "control_plane/manual_resolution_api.h"
 #include "control_plane/policy_state_key.h"
 #include "control_plane/policy_state_store.h"
 
@@ -19,8 +20,13 @@ struct ControlPlaneServiceConfig {
     PolicyUpdateQueue* policy_update_queue = nullptr;
     FleetStatusConfig fleet_status{};
 
-    // Optional hook for runtime policy inactive state (BT-CP-013 will replace this).
     std::function<bool(const PolicyResourceKey&)> is_policy_inactive;
+
+    std::function<RepairLocalHookResult(const PolicyRepairLocalRequest& request,
+                                        const ActivePolicyPointer& committed)>
+        repair_local_hook;
+
+    AdoptLocalFetchHook adopt_local_fetch_hook;
 };
 
 } // namespace bytetaper::control_plane

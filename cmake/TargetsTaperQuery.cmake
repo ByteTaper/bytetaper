@@ -59,6 +59,8 @@ add_library(bytetaper_runtime_policy STATIC
   src/runtime_policy/runtime_policy_pull_loop.cpp
   src/runtime_policy/runtime_policy_pull_status.cpp
   src/runtime_policy/runtime_status_report.cpp
+  src/runtime_policy/committed_policy_mirror_sync.cpp
+  src/runtime_policy/runtime_local_policy_fetch.cpp
 )
 target_include_directories(bytetaper_runtime_policy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(bytetaper_runtime_policy PUBLIC

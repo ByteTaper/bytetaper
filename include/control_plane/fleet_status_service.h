@@ -12,6 +12,7 @@
 
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 
 namespace bytetaper::control_plane {
@@ -25,6 +26,11 @@ public:
 
     FleetStatusResult get_fleet_status(const PolicyResourceKey& resource_key,
                                        std::int64_t now_unix_epoch_ms);
+
+    bool has_runtime(const PolicyResourceKey& resource_key, const std::string& runtime_id);
+
+    std::optional<RuntimeStatusReport> find_runtime_report(const PolicyResourceKey& resource_key,
+                                                           const std::string& runtime_id);
 
     void prune_expired(std::int64_t now_unix_epoch_ms);
 
