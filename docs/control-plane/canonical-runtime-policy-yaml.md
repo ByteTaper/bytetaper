@@ -213,14 +213,13 @@ It is critical to distinguish between logical content identity and physical file
 
 > A deployment-provided bootstrap YAML must not overwrite a newer committed runtime policy.
 
-If the bootstrap YAML differs from the active runtime policy, the runtime must skip loading the bootstrap file. A future diagnostics API must report this status:
+If the bootstrap YAML differs from the active runtime policy, the runtime must skip loading the bootstrap file. Operators detect drift through:
 
-```json
-{
-  "bootstrapDiffersFromCommitted": true,
-  "message": "Bootstrap policy differs from committed runtime policy but was not applied automatically."
-}
-```
+- Startup validation (`runtime_policy_startup_validation_test`, compose smoke)
+- `PolicyMismatchDetected` lifecycle events and `bytetaper_runtime_policy_bootstrap_drift_total` ([observability.md](observability.md))
+- Fleet/runtime status when local mirror does not match committed generation
+
+ByteTaper does not auto-apply bootstrap over committed policy. See [manual-resolution runbook](../runbooks/control-plane/manual-resolution.md).
 
 ---
 
@@ -234,17 +233,17 @@ When starting up, the ByteTaper runtime must load policy configurations in the f
 
 ---
 
-## 12. Future Tests Checklist
+## 12. Regression coverage
 
-The implementation of emitters, parsers, and controllers must validate the following scenarios:
+Canonical YAML behavior is covered by the Control Plane test matrix ([test-matrix.md](test-matrix.md)), including:
 
-- [ ] **Stable Field Order**: The canonical emitter generates fields in a deterministic order.
-- [ ] **Semantic Identity**: Two policy specifications with identical routing specs result in the exact same `policyId`.
-- [ ] **Volatile Invariance**: Modifying volatile metadata (e.g. changing `appliedBy`) does not alter the computed `policyId`.
-- [ ] **Version Safety**: The parser rejects unsupported `apiVersion` values.
-- [ ] **Redeploy Protection**: The runtime does not automatically overwrite a committed active policy with a modified bootstrap YAML file.
-- [ ] **Sequence Progression**: Bootstrap import establishes generation `1`, while a subsequent TaperQL apply establishes generation `2`.
-- [ ] **Rollback Continuity**: Performing a rollback creates a new incremented generation containing the spec contents of the target historical version.
+| Scenario | Tests |
+|----------|-------|
+| Stable emitter / identity | `policy_ir_yaml_roundtrip_test`, `taperquery_policy_persistence_test` |
+| Bootstrap import → generation 1 | `runtime_policy_bootstrap_import_test` |
+| Apply → monotonic generation | `control_plane_service_contract_test`, compose smoke |
+| Redeploy / bootstrap protection | `runtime_policy_startup_validation_test`, compose failure smoke |
+| Rollback → new generation | `manual_resolution_service_test` |
 
 ---
 

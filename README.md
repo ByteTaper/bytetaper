@@ -83,6 +83,19 @@ LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
 ./scripts/demo/control-plane-demo.sh
 ```
 
+Documentation hub: [docs/control-plane/index.md](docs/control-plane/index.md).
+
+### Deployment modes
+
+ByteTaper can run in:
+
+| Mode | Description |
+|------|-------------|
+| **Single-runtime local** | One process; optional TaperQuery admin on port `18082` for in-process apply |
+| **Control Plane + Runtime** | Dedicated CP (`19090`) with durable `policy-state-db`; runtimes pull committed policy — **recommended** for multiple pods, multiple VMs, and future multi-gateway adapters |
+
+See [docs/control-plane/deployment-guardrails.md](docs/control-plane/deployment-guardrails.md) and [docs/control-plane/production-readiness-checklist.md](docs/control-plane/production-readiness-checklist.md).
+
 See [docs/control-plane/docker-compose-profile.md](docs/control-plane/docker-compose-profile.md).
 
 Control Plane regression tiers:

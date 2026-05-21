@@ -75,6 +75,24 @@ These variables control the administrative control-plane HTTP server used for dy
 
 ---
 
+### Control Plane + Runtime (multi-runtime)
+
+For Control Plane + Runtime deployments, use these variables on the appropriate process. Full docs: [control-plane/index.md](../control-plane/index.md).
+
+| Variable | Process | Effect / Description |
+|---|---|---|
+| `BYTETAPER_RUNTIME_ROLE` | both | `control-plane` or `runtime-only` |
+| `BYTETAPER_DEPLOYMENT_MODE` | both | `local-dev`, `single-node`, `multi-runtime`, `production` |
+| `BYTETAPER_POLICY_STATE_DB` | control-plane | RocksDB path for committed policy (`/var/lib/bytetaper/policy-state-db`) |
+| `BYTETAPER_CONTROL_PLANE_ENDPOINT` | runtime-only | CP base URL, e.g. `http://bytetaper-control-plane:19090` |
+| `BYTETAPER_CONTROL_PLANE_PORT` | control-plane | Admin HTTP port (default `19090`) |
+| `BYTETAPER_CONTROL_PLANE_TOKEN` | both | Static bearer token when auth enabled |
+| `BYTETAPER_POLICY_PULL_ENABLED` | runtime-only | `1` enables pull loop |
+| `BYTETAPER_POLICY_PULL_INTERVAL_MS` | runtime-only | Pull interval in milliseconds |
+| `BYTETAPER_POLICY_STATE_DIR` | runtime-only | Local LKG mirror directory |
+
+---
+
 ### Hash Hardening
 
 | Variable | Default | Valid Range | Effect / Description |

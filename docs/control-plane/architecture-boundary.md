@@ -75,41 +75,54 @@ include/
     kong/                — kong_adapter.h
 ```
 
-## 7. Mapping: Existing Admin HTTP → Future Control Plane
+## 7. Admin HTTP Surfaces
 
-The table below maps the current behavior of the experimental TaperQuery Admin API to the formalized Control Plane design:
+ByteTaper exposes two policy admin surfaces. Use the correct one for your deployment mode.
 
-| Current Behavior | Future Control Plane Equivalent |
-|------------------|----------------------------------|
-| `GET /admin/taperquery/policy/current` | Control Plane active policy query |
-| `POST /admin/taperquery/apply` | Control Plane apply endpoint |
-| Dry-run configuration validation | Control Plane dry-run API |
-| CAS (Compare-And-Swap) identity protection | Control Plane CAS check |
-| Canonical YAML persistence | Control Plane immutable version store |
-| Persistence failure prevents swap | Control Plane transactional commit |
+| Surface | Port (compose) | Paths | When to use |
+|---------|----------------|-------|-------------|
+| **Control Plane admin HTTP** | `19090` | `/admin/control-plane/*` | Multi-runtime, production: all committed-policy mutations and fleet status |
+| **TaperQuery runtime admin HTTP** | `18082` (local only) | `/admin/taperquery/*` | Single-node local dev: in-process snapshot apply |
 
-*Note: Single-node or local development mode may retain runtime-local apply shortcuts. However, multi-pod production modes route all mutations strictly through the Control Plane.*
+### Control Plane HTTP (implemented)
 
-## 8. Activation Barrier (Conceptual)
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/admin/control-plane/policy/current` | Active committed policy pointer |
+| `GET` | `/admin/control-plane/policy/version?generation=N` | Immutable version fetch (includes `canonical_yaml`) |
+| `POST` | `/admin/control-plane/policy/apply` | Submit async apply job (CAS-protected) |
+| `GET` | `/admin/control-plane/fleet/status` | Fleet convergence and per-runtime status |
+| `POST` | `/admin/control-plane/runtime/status` | Runtime heartbeat / status report |
 
-The Operational Plane enforces a strict barrier ensuring that a new policy generation is only visible to the Data Plane once the following tasks are completed:
+Additional operations (`dry_run`, `diff`, `rollback`, `repair_local`, `adopt_local`) are available on the in-process `ControlPlaneService` API (integration tests and future HTTP exposure). See [api.md](api.md).
 
-1. **Route Cache Epoch Bump**: All affected routes must increment their local cache epoch tag to logically isolate older cached entries.
-2. **L1 Cache Namespace Cleanup**: L1 memory slots affected by configuration adjustments must be enqueued for removal or invalidated.
-3. **L2 Cache Cleanup**: Background cleanup of disk-backed L2 caches for modified or deleted routes must be initiated or completed.
-4. **Materialized Variant Invalidation**: Variant variants and indexes must be cleared.
-5. **Readiness Gate**: The instance must pass health verification using the new snapshot.
+*Note: Single-node or local development may retain runtime-local TaperQuery apply shortcuts. Multi-runtime and production modes route committed-policy mutations through the Control Plane.*
 
-This sequence represents a future requirement and is not implemented in the current runtime.
+## 8. Activation Barrier (Implemented)
 
-## 9. Non-Goals
+**Persisted policy is not the same as operationally activated policy.** After the Control Plane commits a new generation, the Operational Plane runs an activation barrier before the Data Plane serves the new snapshot.
 
-The following items are explicitly out of scope for this architecture phase:
+Stages (see [activation-barrier.md](activation-barrier.md)):
+
+1. **Committed** — generation stored and active pointer promoted in `PolicyStateStore`.
+2. **Operational diff computed** — route-level changes identified.
+3. **Cache namespace prepared** — L1/L2 namespaces aligned with new generation.
+4. **Route epochs bumped** — affected routes get a new cache epoch so old entries are unreachable.
+5. **Cleanup enqueued** — L2 and materialized-variant cleanup may proceed asynchronously.
+6. **Snapshot built and swapped** — new `RuntimePolicySnapshot` becomes the active serving snapshot.
+7. **Activated** — readiness gate passes; data path uses the new generation.
+
+Serving safety is immediate: old cache entries must not be reachable under the new policy generation even when background cleanup is still pending. See [cache-synchronization.md](cache-synchronization.md).
+
+## 9. Non-Goals (Initial Release)
+
+The following remain out of scope for the initial Control Plane release:
+
 * Integration of `etcd` or external consensus mechanisms.
-* Implementations of high-availability clustering or replication protocols for the Control Plane.
-* Runtime adapters or implementations for Nginx, HAProxy, or Kong.
-* Addition of new Admin HTTP endpoints.
-* Integration or implementation of the RocksDB state store database.
+* High-availability clustering or replication for the Control Plane process.
+* Runtime adapters for Nginx, HAProxy, or Kong (Envoy ext_proc is the initial gateway adapter).
+* Kubernetes Operator, Helm chart, or Terraform modules.
+* Distributed multi-writer `RocksDBPolicyStateStore` (single-writer only; see [rocksdb-policy-state-store.md](rocksdb-policy-state-store.md)).
 
 ## 10. Security and Deployment Guardrails
 
