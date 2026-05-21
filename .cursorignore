@@ -1,0 +1,116 @@
+# C/C++ build outputs
+build/
+build-*/
+cmake-build-*/
+out/
+bin/
+obj/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# Toolchain/build-system generated files
+.ninja_deps
+.ninja_log
+build.ninja
+makedep*
+libtool
+aclocal.m4
+autom4te.cache/
+m4/
+
+# Compiled artifacts and debug symbols
+*.o
+*.obj
+*.lo
+*.slo
+*.gch
+*.pch
+*.a
+*.la
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Runtime/cache/persistence state
+.var/
+var/
+tmp/
+*.db
+*.sst
+*.ldb
+MANIFEST-*
+CURRENT
+LOCK
+OPTIONS-*
+IDENTITY
+
+# Benchmark, trace, and report outputs
+reports/benchmarks/
+reports/traces/
+benchmark-summary.json
+benchmark-summary.md
+mock-api-metrics.json
+coalescing-summary.json
+graphify-out/
+dist/
+
+# Python/generated helper artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+
+# Terraform generated artifacts
+.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# IDE/editor/local assistant state
+.idea/
+.vscode/
+*.code-workspace
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+kubeconfig
+kubeconfig.*
