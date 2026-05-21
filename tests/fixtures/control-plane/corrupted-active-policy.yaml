@@ -1,0 +1,4 @@
+# Intentionally invalid for unit/docs reference only. Compose smoke uses stale generation G-1
+# from the control plane API (see tamper_runtime_mirror_stale_local) so YAML/metadata stay
+# consistent and the runtime can start to report fleet mismatch.
+corrupted: true

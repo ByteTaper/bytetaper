@@ -99,6 +99,47 @@ TEST(ControlPlaneSecurityTest, StaticTokenValidAllowsProductionMutation) {
     ::unsetenv("BYTETAPER_CONTROL_PLANE_TOKEN");
 }
 
+TEST(ControlPlaneSecurityTest, AuthDenialSecurityLogOmitsBearerToken) {
+    constexpr const char* kToken = "super-secret-bearer-token-xyz";
+    constexpr const char* kWrongToken = "wrong-bearer-token-sent-by-client";
+    ::setenv("BYTETAPER_CONTROL_PLANE_TOKEN", kToken, 1);
+
+    ControlPlaneSecurityConfig security{};
+    security.enabled = true;
+    security.deployment_mode = ControlPlaneDeploymentMode::Production;
+    security.auth.mode = ControlPlaneAuthMode::StaticToken;
+
+    auto provider = make_auth_provider(security.auth, security.deployment_mode);
+    ASSERT_NE(provider, nullptr);
+
+    ControlPlaneAuthContext context{};
+    context.operation = "policy_apply";
+    context.resource_key = "policy/default/runtime";
+    context.deployment_mode = security.deployment_mode;
+    context.mutation = true;
+    context.headers["Authorization"] = std::string("Bearer ") + kWrongToken;
+
+    const GuardrailResult result =
+        check_mutation_allowed(security, provider.get(), context, nullptr);
+    EXPECT_FALSE(result.allowed);
+
+    ControlPlaneSecurityLogEvent event{};
+    event.level = "WARN";
+    event.event = "mutation_rejected_unauthorized";
+    event.operation = context.operation;
+    event.resource_key = context.resource_key;
+    event.reason = "invalid_token";
+    event.deployment_mode = to_string(context.deployment_mode);
+    event.message = result.message;
+
+    const std::string json = format_control_plane_security_log_json(event);
+    EXPECT_EQ(json.find(kToken), std::string::npos);
+    EXPECT_EQ(json.find(kWrongToken), std::string::npos);
+    EXPECT_EQ(json.find("Bearer"), std::string::npos);
+
+    ::unsetenv("BYTETAPER_CONTROL_PLANE_TOKEN");
+}
+
 TEST(ControlPlaneSecurityTest, StaticTokenInvalidRejectsProductionMutation) {
     constexpr const char* kToken = "configured-secret-token";
     constexpr const char* kWrongToken = "wrong-bearer-token-value";

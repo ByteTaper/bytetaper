@@ -179,6 +179,34 @@ protected:
     PolicyActivationBarrierConfig config_;
 };
 
+TEST_F(PolicyActivationBarrierTest, RuntimePullFieldReductionUsesActiveSnapshotAsBefore) {
+    const TqPolicyDocument gen1 = make_policy_doc("route-a", 1, { "id", "secret_token" });
+    const RuntimePolicySnapshotBuildResult gen1_build =
+        build_runtime_policy_snapshot_from_ir(gen1, 1);
+    ASSERT_TRUE(gen1_build.ok);
+    ASSERT_TRUE(runtime_store_.swap(gen1_build.snapshot, nullptr));
+
+    const TqPolicyDocument gen2 = make_policy_doc("route-a", 2, { "id" });
+    const RuntimePolicySnapshotBuildResult gen2_build =
+        build_runtime_policy_snapshot_from_ir(gen2, 2);
+    ASSERT_TRUE(gen2_build.ok);
+
+    PolicyActivationBarrierConfig runtime_only_cfg = config_;
+    runtime_only_cfg.policy_state_store = nullptr;
+
+    PolicyActivationBarrier barrier(runtime_only_cfg);
+    PolicyActivationRequest request{};
+    request.generation = 2;
+    request.policy_id = gen2.policy_id;
+    request.previous_generation = 1;
+    request.committed_policy_ir = &gen2;
+    request.committed_snapshot = gen2_build.snapshot;
+
+    const PolicyActivationResult result = barrier.activate(request);
+    ASSERT_TRUE(result.ok) << result.message;
+    EXPECT_GT(result.bumped_route_epochs, 0u);
+}
+
 TEST_F(PolicyActivationBarrierTest, ActivateUsesCommittedPolicyIrWithoutStoreVersion) {
     const TqPolicyDocument gen1 = make_policy_doc("route-a", 1, { "id" });
     store_version(*store_, key_, gen1, 1);

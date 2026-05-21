@@ -637,4 +637,32 @@ TEST(JsonTransformFilterFlatJsonTest, DenylistClientQueryBypassLeakage) {
     EXPECT_EQ(context.removed_field_count, 3u); // all 3 fields filtered
 }
 
+TEST(JsonTransformFilterFlatJsonTest, PolicyAllowlistFiltersFlatJsonWithoutClientQuery) {
+    const char* body =
+        R"({"service":"mock-api","secret_token":"super-secret","sentinel":"bt-001","version":1})";
+    ParsedFlatJsonObject parsed{};
+    const FlatJsonParseStatus parse_status =
+        parse_flat_json_object(body, JsonResponseKind::EligibleJson, &parsed);
+    ASSERT_EQ(parse_status, FlatJsonParseStatus::Ok);
+
+    policy::RoutePolicy matched_policy{};
+    matched_policy.route_id = "small-json";
+    matched_policy.field_filter.mode = policy::FieldFilterMode::Allowlist;
+    matched_policy.field_filter.field_count = 2;
+    std::strncpy(matched_policy.field_filter.fields[0], "service", policy::kMaxFieldNameLen - 1);
+    std::strncpy(matched_policy.field_filter.fields[1], "sentinel", policy::kMaxFieldNameLen - 1);
+
+    apg::ApgTransformContext context{};
+    context.matched_policy = &matched_policy;
+    context.client_query_present = false;
+
+    char output[256] = {};
+    std::size_t output_length = 0;
+    ASSERT_EQ(transform_flat_json_with_filter_toggle(body, parse_status, &parsed, context, true,
+                                                     output, sizeof(output), &output_length),
+              FlatJsonFilterStatus::Ok);
+    EXPECT_STREQ(output, R"({"service":"mock-api","sentinel":"bt-001"})");
+    EXPECT_EQ(context.removed_field_count, 2u);
+}
+
 } // namespace bytetaper::json_transform

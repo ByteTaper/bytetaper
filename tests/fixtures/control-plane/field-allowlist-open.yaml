@@ -1,0 +1,17 @@
+routes:
+  - id: small-json
+    match:
+      kind: "exact"
+      prefix: /api/v1/small
+    mutation: "full"
+    cache:
+      enabled: true
+      behavior: store
+      ttl_seconds: 120
+      field_variant:
+        enabled: true
+        max_variants_per_route: 8
+        min_field_count: 1
+        max_field_count: 16
+        admission_threshold: 1
+        ttl_max_ms: 10000

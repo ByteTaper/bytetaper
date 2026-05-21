@@ -90,6 +90,42 @@ routes:
     EXPECT_FALSE(load_policy_from_string(yaml, &result));
 }
 
+TEST(YamlLoaderFieldFilterTest, CacheStoreWithoutLayersDefaultsL1Enabled) {
+    const char* yaml = R"(
+routes:
+  - id: "r1"
+    match: { kind: "exact", prefix: "/api/v1/small" }
+    mutation: "full"
+    cache:
+      enabled: true
+      behavior: store
+      ttl_seconds: 120
+)";
+    PolicyFileResult result{};
+    EXPECT_TRUE(load_policy_from_string(yaml, &result));
+    EXPECT_TRUE(result.policies[0].cache.l1.enabled);
+}
+
+TEST(YamlLoaderFieldFilterTest, IncludeFieldsUnderFieldVariantMapsToAllowlist) {
+    const char* yaml = R"(
+routes:
+  - id: "r1"
+    match: { kind: "exact", prefix: "/api/v1/small" }
+    mutation: "full"
+    cache:
+      behavior: store
+      field_variant:
+        enabled: true
+        include_fields: ["service", "sentinel"]
+)";
+    PolicyFileResult result{};
+    EXPECT_TRUE(load_policy_from_string(yaml, &result));
+    EXPECT_EQ(result.policies[0].field_filter.mode, FieldFilterMode::Allowlist);
+    EXPECT_EQ(result.policies[0].field_filter.field_count, 2u);
+    EXPECT_STREQ(result.policies[0].field_filter.fields[0], "service");
+    EXPECT_STREQ(result.policies[0].field_filter.fields[1], "sentinel");
+}
+
 TEST(YamlLoaderFieldFilterTest, InvalidYamlEmptyFieldName) {
     const char* yaml = R"(
 routes:

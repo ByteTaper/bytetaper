@@ -1309,9 +1309,9 @@ FlatJsonFilterStatus transform_flat_json_with_filter_toggle(
     }
 
     if (parse_status == FlatJsonParseStatus::Ok && parsed != nullptr) {
-        if (context.matched_policy != nullptr &&
-            context.matched_policy->field_filter.mode == policy::FieldFilterMode::Denylist &&
-            !context.client_query_present) {
+        if (context.matched_policy != nullptr && !context.client_query_present &&
+            (context.matched_policy->field_filter.mode == policy::FieldFilterMode::Allowlist ||
+             context.matched_policy->field_filter.mode == policy::FieldFilterMode::Denylist)) {
             return filter_flat_json_by_policy_denylist(*parsed, context,
                                                        context.matched_policy->field_filter, output,
                                                        output_capacity, output_length);
@@ -1320,9 +1320,9 @@ FlatJsonFilterStatus transform_flat_json_with_filter_toggle(
 
     FieldCountMetrics metrics{};
     FlatJsonFilterStatus status;
-    if (context.matched_policy != nullptr &&
-        context.matched_policy->field_filter.mode == policy::FieldFilterMode::Denylist &&
-        !context.client_query_present) {
+    if (context.matched_policy != nullptr && !context.client_query_present &&
+        (context.matched_policy->field_filter.mode == policy::FieldFilterMode::Allowlist ||
+         context.matched_policy->field_filter.mode == policy::FieldFilterMode::Denylist)) {
         status =
             filter_nested_json_by_policy_denylist(input_body, context.matched_policy->field_filter,
                                                   output, output_capacity, output_length, &metrics);

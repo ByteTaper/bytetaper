@@ -1,8 +1,8 @@
-# BT-CP-016: Control Plane + Runtime profile (merge with docker-compose.yml).
+# Control Plane + Runtime profile (merge with docker-compose.yml).
 # Usage: docker compose -f docker-compose.yml -f docker-compose.control-plane.yml up -d --build
 
 services:
-  # Avoid host port 18080 clash if monolithic extproc is started alongside the profile.
+  # Avoid host port 18080/18081 clash if monolithic extproc is started alongside the profile.
   bytetaper-extproc:
     ports: !reset []
 
@@ -68,7 +68,7 @@ services:
       - BYTETAPER_POLICY_PULL_ENABLED=1
       - BYTETAPER_POLICY_PULL_INTERVAL_MS=2000
       - BYTETAPER_RUNTIME_ID=bytetaper-runtime-0
-      - BYTETAPER_POLICY_PERSISTENCE_ENABLED=1
+      - BYTETAPER_POLICY_PERSISTENCE_ENABLED=0
       - BYTETAPER_POLICY_STATE_DIR=/var/lib/bytetaper/policies
       - BYTETAPER_POLICY_INACTIVE_MODE=pass-through
     command:
@@ -79,13 +79,14 @@ services:
         mkdir -p /var/lib/bytetaper/policies /tmp/bytetaper-cache-cp-demo
         exec ./build/bytetaper-extproc-server \
           --listen-address 0.0.0.0:18080 \
-          --policy-file examples/policies/control-plane-demo-policy.yaml \
+          --policy-file examples/policies/bootstrap-policy.yaml \
           --l2-cache-path /tmp/bytetaper-cache-cp-demo \
           --metrics-address 0.0.0.0 \
           --metrics-port 18081
     ports:
       - "18080:18080"
-      - "18081:18081"
+      # 18083 avoids collision with monolithic bytetaper-extproc on 18081 when port reset fails.
+      - "18083:18081"
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18081 && printf \"GET /readyz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n\" >&3 && read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]'"]
       interval: 2s
@@ -106,6 +107,31 @@ services:
       - "10000:10000"
     volumes:
       - ./examples/envoy/control-plane-demo.yaml:/etc/envoy/envoy.yaml:ro
+
+  bytetaper-control-plane-compose-test:
+    image: bytetaper-dev:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    depends_on:
+      bytetaper-control-plane:
+        condition: service_healthy
+      bytetaper-runtime:
+        condition: service_healthy
+      mock-api:
+        condition: service_healthy
+      envoy:
+        condition: service_started
+    environment:
+      - BYTETAPER_CONTROL_PLANE_URL=http://bytetaper-control-plane:19090
+      - BYTETAPER_ENVOY_URL=http://envoy:10000
+      - BYTETAPER_FIXTURES_DIR=/workspace/tests/fixtures/control-plane
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        python3 tests/integration/e2e/control_plane_field_allowlist_e2e_test.py
 
 volumes:
   bytetaper-policy-state:

@@ -179,18 +179,61 @@ bool json_field_bool(const std::string& body, const char* key) {
 }
 
 bool json_field_string(const std::string& body, const char* key, std::string* out) {
-    const std::string needle = std::string("\"") + key + "\":\"";
+    if (out == nullptr) {
+        return false;
+    }
+    const std::string needle = std::string("\"") + key + "\"";
     const size_t pos = body.find(needle);
     if (pos == std::string::npos) {
         return false;
     }
-    const size_t start = pos + needle.size();
-    const size_t end = body.find('"', start);
-    if (end == std::string::npos) {
+    size_t colon = body.find(':', pos + needle.size());
+    if (colon == std::string::npos) {
         return false;
     }
-    *out = body.substr(start, end - start);
-    return true;
+    size_t quote = body.find('"', colon + 1);
+    if (quote == std::string::npos) {
+        return false;
+    }
+
+    std::string value;
+    for (size_t i = quote + 1; i < body.size(); ++i) {
+        const char c = body[i];
+        if (c == '"') {
+            *out = std::move(value);
+            return true;
+        }
+        if (c == '\\' && i + 1 < body.size()) {
+            const char next = body[i + 1];
+            switch (next) {
+            case '"':
+                value.push_back('"');
+                break;
+            case '\\':
+                value.push_back('\\');
+                break;
+            case 'n':
+                value.push_back('\n');
+                break;
+            case 'r':
+                value.push_back('\r');
+                break;
+            case 't':
+                value.push_back('\t');
+                break;
+            case '/':
+                value.push_back('/');
+                break;
+            default:
+                value.push_back(next);
+                break;
+            }
+            i += 1;
+            continue;
+        }
+        value.push_back(c);
+    }
+    return false;
 }
 
 std::uint64_t json_field_uint64(const std::string& body, const char* key) {

@@ -187,11 +187,20 @@ PolicyActivationResult PolicyActivationBarrier::activate(const PolicyActivationR
                           control_plane::PolicyLifecycleEventType::PolicyActivationStarted,
                           "success", "started", "", "", 0, false, false);
 
-    if (config_.policy_state_store == nullptr || config_.runtime_policy_store == nullptr) {
+    if (config_.runtime_policy_store == nullptr) {
         return fail_activation(std::move(result), PolicyActivationStage::Committed,
                                "POLICY_ACTIVATION_STORE_UNAVAILABLE",
-                               "policy state store or runtime policy store is not configured", true,
-                               config_, request, activation_start, stage_clock);
+                               "runtime policy store is not configured", true, config_, request,
+                               activation_start, stage_clock);
+    }
+
+    const bool remote_committed_ir = request.committed_policy_ir != nullptr;
+    if (config_.policy_state_store == nullptr && !remote_committed_ir) {
+        return fail_activation(std::move(result), PolicyActivationStage::Committed,
+                               "POLICY_ACTIVATION_STORE_UNAVAILABLE",
+                               "policy state store is not configured and no committed policy IR "
+                               "was supplied",
+                               true, config_, request, activation_start, stage_clock);
     }
 
     taperquery::TqPolicyDocument before_ir{};
@@ -201,17 +210,26 @@ PolicyActivationResult PolicyActivationBarrier::activate(const PolicyActivationR
         request.previous_generation > 0 ? request.previous_generation : request.generation - 1;
 
     if (before_generation > 0) {
-        std::string load_err;
-        if (!load_policy_ir_from_store(config_.policy_state_store, config_.resource_key,
-                                       before_generation, &before_ir, &load_err)) {
-            return fail_activation(std::move(result), PolicyActivationStage::Committed,
-                                   "POLICY_ACTIVATION_LOAD_BEFORE_FAILED",
-                                   "failed to load previous policy version: " + load_err, true,
-                                   config_, request, activation_start, stage_clock);
+        if (config_.policy_state_store == nullptr) {
+            if (remote_committed_ir && config_.runtime_policy_store != nullptr) {
+                const auto current = config_.runtime_policy_store->load();
+                if (current != nullptr && !current->policy_ir.routes.empty()) {
+                    before_ir = current->policy_ir;
+                }
+            }
+        } else {
+            std::string load_err;
+            if (!load_policy_ir_from_store(config_.policy_state_store, config_.resource_key,
+                                           before_generation, &before_ir, &load_err)) {
+                return fail_activation(std::move(result), PolicyActivationStage::Committed,
+                                       "POLICY_ACTIVATION_LOAD_BEFORE_FAILED",
+                                       "failed to load previous policy version: " + load_err, true,
+                                       config_, request, activation_start, stage_clock);
+            }
         }
     }
 
-    if (request.committed_policy_ir != nullptr) {
+    if (remote_committed_ir) {
         after_ir = *request.committed_policy_ir;
         const std::string computed_policy_id =
             taperquery::compute_policy_document_identity(after_ir);

@@ -13,14 +13,17 @@
 #include "taperquery/policy_ir_yaml_emitter.h"
 #include "taperquery/policy_persistence.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <rocksdb/db.h>
 #include <thread>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace bytetaper::control_plane;
@@ -166,6 +169,27 @@ protected:
         return queue_->get_job_state(job_id) == target;
     }
 
+    bool collect_job_states_until(const std::string& job_id, PolicyUpdateJobState terminal,
+                                  std::vector<PolicyUpdateJobState>* observed) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::chrono::steady_clock::now() < deadline) {
+            const PolicyUpdateJobState state = queue_->get_job_state(job_id);
+            if (observed != nullptr) {
+                if (observed->empty() || observed->back() != state) {
+                    observed->push_back(state);
+                }
+            }
+            if (state == terminal) {
+                return true;
+            }
+            if (state == PolicyUpdateJobState::Failed) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        return queue_->get_job_state(job_id) == terminal;
+    }
+
     std::string db_path_;
     PolicyResourceKey key_;
     ControlPlaneServiceConfig config_;
@@ -273,6 +297,46 @@ TEST_F(ControlPlaneServiceContractTest, ApplyRejectsStaleExpectedBase) {
     EXPECT_EQ(result.actual_base_generation, 1u);
     EXPECT_EQ(result.actual_base_policy_id, base.policy_id);
     EXPECT_EQ(result.expected_base_generation, 99u);
+}
+
+TEST_F(ControlPlaneServiceContractTest, ApplyJobObservesSubmittedQueuedProcessingCommitted) {
+    TqPolicyDocument base = make_policy_doc("route-base", 1);
+    seed_active_policy(*store_, key_, base, 1);
+
+    std::vector<PolicyUpdateJobState> lifecycle_states;
+    std::mutex lifecycle_mu;
+    tx_config_.on_state_change = [&lifecycle_states, &lifecycle_mu](const PolicyUpdateJob& job) {
+        std::lock_guard<std::mutex> lock(lifecycle_mu);
+        if (lifecycle_states.empty() || lifecycle_states.back() != job.state) {
+            lifecycle_states.push_back(job.state);
+        }
+    };
+
+    TqPolicyDocument candidate = make_policy_doc("route-candidate", 2, base.policy_id);
+    PolicyIrYamlEmitResult candidate_emit = emit_policy_ir_canonical_yaml(candidate);
+    ASSERT_TRUE(candidate_emit.ok);
+
+    PolicyApplyRequest request{};
+    request.resource_key = key_;
+    request.source_type = PolicyApplySourceType::Yaml;
+    request.source = candidate_emit.yaml;
+    request.expected_base_generation = 1;
+    request.expected_base_policy_id = base.policy_id;
+    request.request_id = "req-job-states-001";
+
+    const auto result = service_->apply(request);
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(queue_->get_job_state(result.job_id), PolicyUpdateJobState::Queued);
+
+    start_workers(1);
+    ASSERT_TRUE(wait_for_job_state(result.job_id, PolicyUpdateJobState::Committed));
+
+    auto seen = [&](PolicyUpdateJobState state) {
+        return std::find(lifecycle_states.begin(), lifecycle_states.end(), state) !=
+               lifecycle_states.end();
+    };
+    EXPECT_TRUE(seen(PolicyUpdateJobState::Processing));
+    EXPECT_TRUE(seen(PolicyUpdateJobState::Committed));
 }
 
 TEST_F(ControlPlaneServiceContractTest, ApplyAcceptedWithValidCas) {

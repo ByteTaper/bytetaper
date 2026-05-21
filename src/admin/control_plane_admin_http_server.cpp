@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <netinet/in.h>
 #include <string>
@@ -111,6 +112,33 @@ static bool parse_json_string_field(const std::string& body, const std::string& 
         value.push_back(c);
     }
     return false;
+}
+
+static bool parse_json_int64_field(const std::string& body, const std::string& key,
+                                   std::int64_t* out) {
+    if (out == nullptr) {
+        return false;
+    }
+    const std::string needle = "\"" + key + "\"";
+    const size_t pos = body.find(needle);
+    if (pos == std::string::npos) {
+        return false;
+    }
+    const size_t colon = body.find(':', pos + needle.size());
+    if (colon == std::string::npos) {
+        return false;
+    }
+    size_t start = colon + 1;
+    while (start < body.size() && std::isspace(static_cast<unsigned char>(body[start]))) {
+        ++start;
+    }
+    char* end = nullptr;
+    const long long value = std::strtoll(body.c_str() + static_cast<std::size_t>(start), &end, 10);
+    if (end == body.c_str() + static_cast<std::size_t>(start)) {
+        return false;
+    }
+    *out = static_cast<std::int64_t>(value);
+    return true;
 }
 
 static ParsedApplyJson parse_apply_json(const std::string& body) {
@@ -253,6 +281,7 @@ static std::string fleet_status_json(const FleetStatusResult& result) {
         out += "{\"runtime_id\":\"" + escape_json_string(r.runtime_id) + "\"";
         out += ",\"active_generation\":" + std::to_string(r.active_generation);
         out += ",\"active_policy_id\":\"" + escape_json_string(r.active_policy_id) + "\"";
+        out += ",\"active_canonical_hash\":\"" + escape_json_string(r.active_canonical_hash) + "\"";
         out += ",\"activation_status\":\"" + escape_json_string(r.activation_status) + "\"";
         out += ",\"convergence_status\":\"" + escape_json_string(to_string(r.convergence_status)) +
                "\"";
@@ -312,6 +341,16 @@ static bool parse_runtime_status_json(const std::string& body, RuntimeStatusRepo
         body.find("\"control_plane_reachable\":true") != std::string::npos) {
         out->control_plane_reachable = true;
     }
+    std::int64_t last_pull_ms = 0;
+    if (!parse_json_int64_field(body, "lastPullAtUnixEpochMs", &last_pull_ms)) {
+        parse_json_int64_field(body, "last_pull_at_unix_epoch_ms", &last_pull_ms);
+    }
+    out->last_pull_at_unix_epoch_ms = last_pull_ms;
+    std::int64_t last_activated_ms = 0;
+    if (!parse_json_int64_field(body, "lastActivatedAtUnixEpochMs", &last_activated_ms)) {
+        parse_json_int64_field(body, "last_activated_at_unix_epoch_ms", &last_activated_ms);
+    }
+    out->last_activated_at_unix_epoch_ms = last_activated_ms;
     if (out->runtime_id.empty() || out->resource_key.empty()) {
         if (error != nullptr) {
             *error = "runtime status requires runtime_id and resource_key";

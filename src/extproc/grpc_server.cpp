@@ -973,8 +973,10 @@ public:
                         filter_state.matched_policy->cache.behavior ==
                             policy::CacheBehavior::Store) {
 
+                        const bool store_filtered_body = filter_state.has_query_selection ||
+                                                         filter_state.has_effective_field_filter;
                         const std::string& body_to_store =
-                            filter_state.has_query_selection
+                            store_filtered_body
                                 ? response.response_body().response().body_mutation().body()
                                 : request.response_body().body();
                         filter_state.context.response_body = body_to_store.c_str();

@@ -5,7 +5,7 @@ LOCAL_GID ?= $(shell id -g)
 HOST_DOCKER_SOCK ?= $(shell python3 -c "import os; print(os.path.realpath('/var/run/docker.sock'))" 2>/dev/null || echo "/var/run/docker.sock")
 COMPOSE_ENV := LOCAL_UID=$(LOCAL_UID) LOCAL_GID=$(LOCAL_GID) HOST_DOCKER_SOCK=$(HOST_DOCKER_SOCK)
 
-.PHONY: format test smoke-test
+.PHONY: format test smoke-test test-control-plane-unit test-control-plane-integration test-control-plane-compose
 format:
 	@if [ -z "$(FORMAT_FILES)" ]; then \
 		echo "No C++ files found to format."; \
@@ -21,6 +21,15 @@ test:
 smoke-test:
 	@rm -rf build
 	@$(COMPOSE_ENV) $(DOCKER_COMPOSE) run --rm bytetaper-smoke-test
+
+test-control-plane-unit:
+	@./scripts/test/control-plane-unit.sh
+
+test-control-plane-integration:
+	@./scripts/test/control-plane-integration.sh
+
+test-control-plane-compose:
+	@./scripts/test/control-plane-compose.sh
 
 benchmark:
 	@rm -rf build

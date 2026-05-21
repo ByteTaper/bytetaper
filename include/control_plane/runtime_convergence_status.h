@@ -22,7 +22,7 @@ enum class RuntimeConvergenceStatus : std::uint8_t {
     Unknown,
 };
 
-// Spec error codes for convergence outcomes (BT-CP-012).
+// Spec error codes for convergence outcomes.
 constexpr const char* kErrRuntimeStatusPolicyMismatch = "RUNTIME_STATUS_POLICY_MISMATCH";
 constexpr const char* kErrRuntimeStatusStale = "RUNTIME_STATUS_STALE";
 constexpr const char* kErrRuntimeStatusUnreachable = "RUNTIME_STATUS_UNREACHABLE";
