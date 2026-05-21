@@ -262,8 +262,6 @@ TEST_F(PolicyUpdateQueueConcurrencyTest, DifferentResourcesApplyConcurrently) {
         }
     };
 
-    start_workers(4);
-
     std::vector<std::string> resource_keys;
     for (int i = 0; i < 8; ++i) {
         resource_keys.push_back("policy/default/runtime-" + std::to_string(i));
@@ -288,6 +286,8 @@ TEST_F(PolicyUpdateQueueConcurrencyTest, DifferentResourcesApplyConcurrently) {
         ASSERT_TRUE(enqueue_res.ok);
         job_ids.push_back(enqueue_res.job_id);
     }
+
+    start_workers(4);
 
     for (const std::string& job_id : job_ids) {
         ASSERT_TRUE(wait_for_job_state(*queue_, job_id, PolicyUpdateJobState::Committed,

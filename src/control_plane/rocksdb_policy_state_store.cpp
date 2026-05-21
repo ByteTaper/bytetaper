@@ -6,6 +6,7 @@
 #include "control_plane/policy_state_key.h"
 #include "control_plane/policy_state_record.h"
 
+#include <mutex>
 #include <rocksdb/db.h>
 #include <rocksdb/options.h>
 #include <rocksdb/status.h>
@@ -16,6 +17,7 @@ namespace bytetaper::control_plane {
 struct RocksDBPolicyStateStoreImpl {
     std::unique_ptr<rocksdb::DB> db;
     rocksdb::WriteOptions sync_write{};
+    mutable std::mutex mu;
 
     RocksDBPolicyStateStoreImpl() {
         sync_write.sync = true;
@@ -123,6 +125,7 @@ StorePolicyVersionResult
 RocksDBPolicyStateStore::store_policy_version(const PolicyResourceKey& key,
                                               const PolicyVersionRecord& version,
                                               const std::string& canonical_yaml) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
     if (!open_ || impl_->db == nullptr) {
         return make_store_error(PolicyStateErrorCode::DbOpenFailed, "policy state db is not open");
     }
@@ -189,6 +192,7 @@ RocksDBPolicyStateStore::store_policy_version(const PolicyResourceKey& key,
 
 LoadPolicyVersionResult RocksDBPolicyStateStore::load_policy_version(const PolicyResourceKey& key,
                                                                      std::uint64_t generation) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
     if (!open_ || impl_->db == nullptr) {
         return make_load_version_error(PolicyStateErrorCode::DbOpenFailed,
                                        "policy state db is not open");
@@ -235,6 +239,7 @@ LoadPolicyVersionResult RocksDBPolicyStateStore::load_policy_version(const Polic
 }
 
 LoadActivePointerResult RocksDBPolicyStateStore::load_active_pointer(const PolicyResourceKey& key) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
     if (!open_ || impl_->db == nullptr) {
         return make_load_active_error(PolicyStateErrorCode::DbOpenFailed,
                                       "policy state db is not open");
@@ -269,6 +274,7 @@ PromoteActiveResult
 RocksDBPolicyStateStore::compare_and_promote_active(const PolicyResourceKey& key,
                                                     const ExpectedActivePolicy& expected,
                                                     const ActivePolicyPointer& next) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
     if (!open_ || impl_->db == nullptr) {
         return make_promote_error(PolicyStateErrorCode::DbOpenFailed,
                                   "policy state db is not open");
@@ -340,6 +346,7 @@ RocksDBPolicyStateStore::compare_and_promote_active(const PolicyResourceKey& key
 
 CommitPolicyGenerationWithAuditResult RocksDBPolicyStateStore::commit_policy_generation_with_audit(
     const CommitPolicyGenerationWithAuditParams& params) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
     if (!open_ || impl_->db == nullptr) {
         CommitPolicyGenerationWithAuditResult res;
         res.ok = false;
@@ -538,6 +545,7 @@ CommitPolicyGenerationWithAuditResult RocksDBPolicyStateStore::commit_policy_gen
 
 AppendAuditResult RocksDBPolicyStateStore::append_audit_record(const PolicyResourceKey& key,
                                                                const PolicyAuditRecord& record) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
     if (!open_ || impl_->db == nullptr) {
         return make_audit_error(PolicyStateErrorCode::DbOpenFailed, "policy state db is not open");
     }
@@ -565,6 +573,7 @@ AppendAuditResult RocksDBPolicyStateStore::append_audit_record(const PolicyResou
 StorePolicyUpdateJobResult
 RocksDBPolicyStateStore::store_policy_update_job(const PolicyResourceKey& key,
                                                  const PolicyUpdateJobRecord& job) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
     if (!open_ || impl_->db == nullptr) {
         return make_store_job_error(PolicyStateErrorCode::DbOpenFailed,
                                     "policy state db is not open");
@@ -593,6 +602,7 @@ RocksDBPolicyStateStore::store_policy_update_job(const PolicyResourceKey& key,
 LoadPolicyUpdateJobResult
 RocksDBPolicyStateStore::load_policy_update_job(const PolicyResourceKey& key,
                                                 const std::string& job_id) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
     if (!open_ || impl_->db == nullptr) {
         return make_load_job_error(PolicyStateErrorCode::DbOpenFailed,
                                    "policy state db is not open");
