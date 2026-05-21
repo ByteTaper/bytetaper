@@ -10,6 +10,7 @@ source "${ROOT}/scripts/test/_control_plane_compose_lib.sh"
 
 bytetaper_compose_init
 
+export BYTETAPER_CP_COMPOSE_CLEAN="${BYTETAPER_CP_COMPOSE_CLEAN:-1}"
 export BYTETAPER_RUNTIME_METRICS_URL="${BYTETAPER_RUNTIME_METRICS_URL:-http://127.0.0.1:18083}"
 
 CP_URL="$(cp_url)"

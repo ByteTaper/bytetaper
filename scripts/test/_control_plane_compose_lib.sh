@@ -7,8 +7,8 @@ set -euo pipefail
 
 ROOT="${BYTETAPER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
-bytetaper_compose_init() {
-  cd "$ROOT"
+# Sets BYTETAPER_COMPOSE_CMD to the validated docker compose CLI (no -f flags).
+bytetaper_resolve_compose_cmd() {
   local -a compose_cmd=()
   local docker_compose_known=0
   if [[ -n "${DOCKER_COMPOSE:-}" ]]; then
@@ -24,26 +24,34 @@ bytetaper_compose_init() {
         compose_cmd=(${DOCKER_COMPOSE}) ;;
     esac
     if [[ ${#compose_cmd[@]} -gt 0 ]] && "${compose_cmd[@]}" version >/dev/null 2>&1; then
-      BYTETAPER_COMPOSE=("${compose_cmd[@]}" -f docker-compose.yml -f docker-compose.control-plane.yml)
-    else
-      if [[ "${docker_compose_known}" -eq 0 ]]; then
-        echo "Ignoring invalid DOCKER_COMPOSE='${DOCKER_COMPOSE}'" >&2
-      fi
-      compose_cmd=()
+      BYTETAPER_COMPOSE_CMD=("${compose_cmd[@]}")
+      return 0
     fi
+    if [[ "${docker_compose_known}" -eq 0 ]]; then
+      echo "Ignoring invalid DOCKER_COMPOSE='${DOCKER_COMPOSE}'" >&2
+    fi
+    compose_cmd=()
   fi
-  if [[ ${#compose_cmd[@]} -eq 0 ]] && command -v docker-compose >/dev/null 2>&1 &&
-    docker-compose version >/dev/null 2>&1; then
-    BYTETAPER_COMPOSE=(docker-compose -f docker-compose.yml -f docker-compose.control-plane.yml)
-  elif [[ ${#compose_cmd[@]} -eq 0 ]] && command -v docker >/dev/null 2>&1 &&
-    docker compose version >/dev/null 2>&1; then
-    BYTETAPER_COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.control-plane.yml)
-  elif [[ ${#compose_cmd[@]} -eq 0 ]]; then
-    echo "docker compose or docker-compose is required" >&2
-    return 1
-  else
-    :
+  if command -v docker-compose >/dev/null 2>&1 && docker-compose version >/dev/null 2>&1; then
+    BYTETAPER_COMPOSE_CMD=(docker-compose)
+    return 0
   fi
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    BYTETAPER_COMPOSE_CMD=(docker compose)
+    return 0
+  fi
+  echo "docker compose or docker-compose is required" >&2
+  return 1
+}
+
+bytetaper_compose_init() {
+  cd "$ROOT"
+  bytetaper_resolve_compose_cmd
+  BYTETAPER_COMPOSE=(
+    "${BYTETAPER_COMPOSE_CMD[@]}"
+    -f docker-compose.yml
+    -f docker-compose.control-plane.yml
+  )
   export LOCAL_UID="${LOCAL_UID:-$(id -u)}"
   export LOCAL_GID="${LOCAL_GID:-$(id -g)}"
 }
@@ -211,7 +219,7 @@ poll_policy_current_generation() {
   return 1
 }
 
-# BT-CP-017: require aggregate fleet.converged and per-runtime hash/generation match.
+# require aggregate fleet.converged and per-runtime hash/generation match.
 assert_fleet_strictly_converged() {
   local fleet_json="$1"
   local label="${2:-fleet}"
@@ -601,10 +609,39 @@ cp_apply_policy_yaml() {
     -d "${payload}"
 }
 
+cp_compose_service_running() {
+  local service="$1"
+  local state
+  state="$("${BYTETAPER_COMPOSE[@]}" ps "${service}" --format json 2>/dev/null \
+    | jq -r 'if type == "array" then .[0].State else .State end // ""' 2>/dev/null || true)"
+  [[ "${state}" == "running" ]]
+}
+
+cp_profile_is_ready() {
+  local service
+  for service in mock-api bytetaper-control-plane bytetaper-runtime envoy; do
+    if ! cp_compose_service_running "${service}"; then
+      return 1
+    fi
+  done
+  poll_http_ok "$(cp_url)/healthz" "control plane health" 5 || return 1
+  poll_runtime_ready 15 || return 1
+  poll_http_ok "$(envoy_url)/api/v1/small" "envoy data path" 5 || return 1
+}
+
 cp_start_profile() {
   echo "==> Starting Control Plane + Runtime profile"
-  echo "==> Cleaning stale profile state"
-  "${BYTETAPER_COMPOSE[@]}" down -v --remove-orphans
+  if [[ "${BYTETAPER_CP_COMPOSE_REUSE_READY:-0}" == "1" ]] && cp_profile_is_ready; then
+    echo "==> Reusing healthy Control Plane profile (skip clean/build/startup)"
+    poll_control_plane_health
+    poll_runtime_ready 30
+    poll_envoy_data_path
+    return 0
+  fi
+  if [[ "${BYTETAPER_CP_COMPOSE_CLEAN:-1}" == "1" ]]; then
+    echo "==> Cleaning stale profile state"
+    "${BYTETAPER_COMPOSE[@]}" down -v --remove-orphans
+  fi
   echo "==> Starting mock-api"
   "${BYTETAPER_COMPOSE[@]}" up -d mock-api
   echo "==> Building bytetaper-extproc-server (compose run --rm bytetaper-build-server)"

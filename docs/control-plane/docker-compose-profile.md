@@ -180,8 +180,13 @@ Expected: RocksDB committed state survives CP restart; runtime LKG + pull restor
 |------|---------|
 | Unit | `make test-control-plane-unit` or `./scripts/test/control-plane-unit.sh` |
 | Integration | `make test-control-plane-integration` |
-| Compose smoke | `make test-control-plane-compose` or `./scripts/test/control-plane-compose.sh` (cleans volumes, waits for `bytetaper-build-server` with bounded timeout, then starts CP/runtime/Envoy; prints diagnostics on failure) |
+| Compose smoke | `make test-control-plane-compose` or `./scripts/test/control-plane-compose.sh` (default `BYTETAPER_CP_COMPOSE_CLEAN=1`: cleans volumes, incremental build in `build/control-plane-compose`, then CP/runtime/Envoy; diagnostics on failure) |
+| Demo | `./scripts/demo/control-plane-demo.sh` (default `BYTETAPER_CP_COMPOSE_CLEAN=0`, `BYTETAPER_CP_COMPOSE_REUSE_READY=1`: reuses a healthy profile after compose smoke) |
 | Field-allowlist E2E only | `docker compose -f docker-compose.yml -f docker-compose.control-plane.yml run --rm bytetaper-control-plane-compose-test` |
+
+The control-plane overlay builds `bytetaper-extproc-server` into `build/control-plane-compose` (not the shared `build/` tree used by generic compose services). CP and runtime execute `./build/control-plane-compose/bytetaper-extproc-server`. Monolithic `bytetaper-extproc` is a no-op stub in this profile so Envoy startup does not re-trigger a generic `bytetaper-build-server` build.
+
+See [test-matrix.md](test-matrix.md) for build-dir split, parallel `ctest` defaults, and env overrides.
 
 Regression mapping: [test-matrix.md](test-matrix.md).
 
