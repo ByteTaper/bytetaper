@@ -1428,7 +1428,7 @@ TEST(TaperQueryPolicyPersistenceTest, LegacyMetadataWithoutVersionedFileLoadsNor
     std::string json((std::istreambuf_iterator<char>(meta_in)), std::istreambuf_iterator<char>());
     meta_in.close();
 
-    // Strip BT-CP-005 optional legacy keys so metadata matches pre-versioned deployments.
+    // Strip optional legacy keys so metadata matches pre-versioned deployments.
     for (const char* key :
          { "\"canonical_hash\"", "\"canonical_hash_algorithm\"", "\"versioned_policy_file\"" }) {
         std::size_t p = json.find(key);

@@ -100,7 +100,7 @@ The Operational Plane enforces a strict barrier ensuring that a new policy gener
 4. **Materialized Variant Invalidation**: Variant variants and indexes must be cleared.
 5. **Readiness Gate**: The instance must pass health verification using the new snapshot.
 
-This sequence represents a future requirement (tracked under BT-CP-023) and is not implemented in the current runtime.
+This sequence represents a future requirement and is not implemented in the current runtime.
 
 ## 9. Non-Goals
 
@@ -111,7 +111,7 @@ The following items are explicitly out of scope for this architecture phase:
 * Addition of new Admin HTTP endpoints.
 * Integration or implementation of the RocksDB state store database.
 
-## 10. Security and Deployment Guardrails (BT-CP-015)
+## 10. Security and Deployment Guardrails
 
 Control Plane mutation endpoints are guarded at the service boundary and at process startup:
 
@@ -121,7 +121,19 @@ Control Plane mutation endpoints are guarded at the service boundary and at proc
 * **Auth**: pluggable `ControlPlaneAuthProvider`; optional static bearer token via `BYTETAPER_CONTROL_PLANE_TOKEN` (never logged).
 * **Dangerous operations**: repair, adopt, rollback, and bootstrap import when active policy exists require explicit confirmation flags.
 
-## 11. Future Extension Points
+## 11. Regression test matrix
+
+Control Plane behavior is covered by tiered runners documented in [test-matrix.md](test-matrix.md):
+
+| Tier | Proves |
+|------|--------|
+| `control_plane_unit` | PolicyStateStore, apply queue, guardrails, restart durability |
+| `control_plane_integration` | Apply contract, pull loop, fleet/manual resolution, activation barrier |
+| `control_plane_compose` | Docker profile: CP apply, fleet poll, Envoy data path, CP stop LKG, mirror tamper |
+
+Commands: `make test-control-plane-unit`, `make test-control-plane-integration`, `make test-control-plane-compose`.
+
+## 12. Future Extension Points
 
 Storage mechanisms are designed behind abstract interfaces:
 * The `PolicyStateStore` abstraction will support future backends such as etcd, relational databases (PostgreSQL), object storage (S3/GCS), or external managed control systems without modifying runtime loader logic.

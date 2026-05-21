@@ -2895,6 +2895,23 @@ if(BUILD_TESTING)
     COMMAND control_plane_service_contract_test
   )
 
+  add_executable(control_plane_restart_durability_test
+    tests/control_plane_restart_durability_test.cpp
+  )
+  set_source_files_properties(tests/control_plane_restart_durability_test.cpp
+    PROPERTIES COMPILE_OPTIONS "-fexceptions"
+  )
+  target_include_directories(control_plane_restart_durability_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(control_plane_restart_durability_test
+    PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
+            bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter
+  )
+  add_test(NAME control_plane_restart_durability_test
+    COMMAND control_plane_restart_durability_test
+  )
+
   add_executable(runtime_convergence_status_test
     tests/runtime_convergence_status_test.cpp
   )
@@ -3158,6 +3175,43 @@ if(BUILD_TESTING)
             bytetaper_runtime
   )
   add_test(NAME policy_operational_sync_test COMMAND policy_operational_sync_test)
+
+  # Control Plane test matrix labels (ctest -L control_plane_unit|integration)
+  set(_bytetaper_control_plane_unit_tests
+    rocksdb_policy_state_store_test
+    policy_update_queue_test
+    policy_apply_transaction_test
+    runtime_convergence_status_test
+    fleet_status_service_test
+    policy_audit_record_test
+    control_plane_metrics_test
+    control_plane_guardrails_test
+    control_plane_security_test
+    policy_operational_sync_test
+    runtime_policy_bootstrap_import_test
+    manual_resolution_service_test
+    control_plane_restart_durability_test
+  )
+  set(_bytetaper_control_plane_integration_tests
+    control_plane_service_contract_test
+    policy_update_queue_concurrency_test
+    runtime_policy_pull_loop_test
+    runtime_policy_pull_loop_integration_test
+    runtime_policy_startup_validation_test
+    control_plane_security_integration_test
+    policy_lifecycle_logging_test
+    policy_lifecycle_observability_integration_test
+    fleet_status_integration_test
+    manual_resolution_integration_test
+    policy_activation_barrier_test
+    runtime_policy_metrics_test
+  )
+  foreach(_cp_test IN LISTS _bytetaper_control_plane_unit_tests)
+    set_tests_properties(${_cp_test} PROPERTIES LABELS "control_plane;control_plane_unit")
+  endforeach()
+  foreach(_cp_test IN LISTS _bytetaper_control_plane_integration_tests)
+    set_tests_properties(${_cp_test} PROPERTIES LABELS "control_plane;control_plane_integration")
+  endforeach()
 
   # Concurrency and Race Harness tests (BT-RACE-001)
   add_executable(inflight_registry_generation_concurrency_test

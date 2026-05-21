@@ -323,6 +323,41 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
             if (fv_node["ttl_max_ms"]) {
                 policy.cache.field_variant.ttl_max_ms = fv_node["ttl_max_ms"].as<std::uint32_t>();
             }
+            if (fv_node["include_fields"]) {
+                if (policy.field_filter.mode != FieldFilterMode::None) {
+                    result->error =
+                        "field_variant.include_fields cannot be combined with field_filter";
+                    return false;
+                }
+                const YAML::Node& include_node = fv_node["include_fields"];
+                if (!include_node.IsSequence()) {
+                    result->error = "field_variant.include_fields must be a list";
+                    return false;
+                }
+                if (include_node.size() > kMaxFields) {
+                    result->error = "too many field_variant.include_fields (exceeds kMaxFields)";
+                    return false;
+                }
+                policy.field_filter.mode = FieldFilterMode::Allowlist;
+                for (std::size_t i = 0; i < include_node.size(); ++i) {
+                    if (!include_node[i].IsScalar()) {
+                        result->error =
+                            "field_variant.include_fields entry must be a scalar string";
+                        return false;
+                    }
+                    const std::string f = include_node[i].as<std::string>();
+                    if (f.empty()) {
+                        result->error = "field_variant.include_fields entry cannot be empty";
+                        return false;
+                    }
+                    if (f.size() >= kMaxFieldNameLen) {
+                        result->error = "field_variant.include_fields entry exceeds max length";
+                        return false;
+                    }
+                    std::memcpy(policy.field_filter.fields[i], f.c_str(), f.size() + 1);
+                }
+                policy.field_filter.field_count = include_node.size();
+            }
         }
 
         if (cache_node["vary_headers"]) {
@@ -494,6 +529,14 @@ bool parse_one_route(const YAML::Node& node, PolicyFileResult* result, std::size
             } else if (policy.cache.invalidation.enabled) {
                 result->error = "cache.invalidation enabled requires targets";
                 return false;
+            }
+        }
+
+        if (policy.cache.enabled && policy.cache.behavior == CacheBehavior::Store &&
+            !policy.cache.l1.enabled && !policy.cache.l2.enabled) {
+            policy.cache.l1.enabled = true;
+            if (policy.cache.l1.capacity_entries == 0) {
+                policy.cache.l1.capacity_entries = 1000;
             }
         }
     }

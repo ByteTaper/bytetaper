@@ -74,7 +74,7 @@ Run integration tests:
 docker compose run --rm bytetaper-integration-test
 ```
 
-Run the Control Plane + Runtime Compose profile (BT-CP-016):
+Run the Control Plane + Runtime Compose profile:
 
 ```bash
 LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
@@ -84,6 +84,16 @@ LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) \
 ```
 
 See [docs/control-plane/docker-compose-profile.md](docs/control-plane/docker-compose-profile.md).
+
+Control Plane regression tiers:
+
+```bash
+make test-control-plane-unit
+make test-control-plane-integration
+make test-control-plane-compose   # heavy; polls fleet + failure smoke
+```
+
+Test matrix: [docs/control-plane/test-matrix.md](docs/control-plane/test-matrix.md).
 
 Run sanitizer verification tests:
 
