@@ -32,6 +32,8 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       BYTETAPER_IMAGE_REPOSITORY: docker.io/bytetaper/bytetaper-runtime
+      BYTETAPER_UBUNTU_OS_IMAGE: ubuntu:26.04
+      BYTETAPER_UBI_MICRO_OS_IMAGE: registry.access.redhat.com/ubi9/ubi-micro
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -71,9 +73,11 @@ jobs:
           fi
           echo "BYTETAPER_RELEASE_PUBLISH=${PUBLISH}" >> $GITHUB_ENV
           echo "BYTETAPER_VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "BYTETAPER_IMAGE_VERSION_TAG=${VERSION#v}" >> $GITHUB_ENV
           echo "BYTETAPER_GIT_SHA=${GITHUB_SHA}" >> $GITHUB_ENV
           echo "BYTETAPER_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
-          echo "BYTETAPER_RUNTIME_OS_IMAGE=ubuntu:26.04" >> $GITHUB_ENV
+          echo "BYTETAPER_RUNTIME_OS_IMAGE=${BYTETAPER_UBUNTU_OS_IMAGE}" >> $GITHUB_ENV
+          echo "BYTETAPER_RUNTIME_CHANNEL=ubuntu" >> $GITHUB_ENV
 
       - name: Enforce PR dry-run mode
         if: ${{ github.event_name == 'pull_request' }}
@@ -100,8 +104,6 @@ jobs:
             echo "==> Dynamically updating Chart.yaml to version: ${SEMVER}, appVersion: ${TAG}"
             sed -i "s/^version: .*/version: ${SEMVER}/" charts/bytetaper/Chart.yaml
             sed -i "s/^appVersion: .*/appVersion: \"${TAG}\"/" charts/bytetaper/Chart.yaml
-
-            # Print updated lines for build visibility
             grep -E "^(version|appVersion):" charts/bytetaper/Chart.yaml
           else
             echo "--> Dry-run or non-tag build (${TAG}). Keeping default static versions in Chart.yaml."
@@ -110,73 +112,112 @@ jobs:
       - name: Phase 1 — Verify release inputs
         run: tools/release/verify_release_inputs.sh
 
-      - name: Phase 2 — Build production image (local validation)
+      - name: Phase 2 — Build production images (local validation)
         run: |
-          docker buildx build --load --platform linux/amd64 -f docker/production.Dockerfile \
-            --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
-            --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
-            --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
-            --build-arg BYTETAPER_RUNTIME_OS_IMAGE="${BYTETAPER_RUNTIME_OS_IMAGE}" \
-            -t bytetaper-runtime:release .
+          set -euo pipefail
 
-      - name: Phase 2 — Build and push multi-arch image
+          build_local() {
+            local channel="$1"
+            local os_image="$2"
+            docker buildx build --load --platform linux/amd64 -f docker/production.Dockerfile \
+              --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
+              --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
+              --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
+              --build-arg BYTETAPER_RUNTIME_CHANNEL="${channel}" \
+              --build-arg BYTETAPER_RUNTIME_OS_IMAGE="${os_image}" \
+              -t "bytetaper-runtime:${channel}" .
+          }
+
+          build_local ubuntu "${BYTETAPER_UBUNTU_OS_IMAGE}"
+          build_local ubi-micro "${BYTETAPER_UBI_MICRO_OS_IMAGE}"
+          docker tag bytetaper-runtime:ubuntu bytetaper-runtime:release
+
+      - name: Phase 2 — Build and push multi-arch image channels
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
         run: |
-          docker buildx build --push --platform linux/amd64,linux/arm64 -f docker/production.Dockerfile \
-            --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
-            --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
-            --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
-            --build-arg BYTETAPER_RUNTIME_OS_IMAGE="${BYTETAPER_RUNTIME_OS_IMAGE}" \
-            --annotation "index:org.opencontainers.image.base.name=${BYTETAPER_RUNTIME_OS_IMAGE}" \
-            --annotation "index:io.bytetaper.os-image=${BYTETAPER_RUNTIME_OS_IMAGE}" \
-            -t ${BYTETAPER_IMAGE_REPOSITORY}:${BYTETAPER_VERSION} \
-            -t ${BYTETAPER_IMAGE_REPOSITORY}:${BYTETAPER_VERSION#v} \
-            -t ${BYTETAPER_IMAGE_REPOSITORY}:sha-${GITHUB_SHA:0:12} .
+          set -euo pipefail
+
+          build_push() {
+            local channel="$1"
+            local os_image="$2"
+            local tag="${BYTETAPER_IMAGE_REPOSITORY}:${BYTETAPER_IMAGE_VERSION_TAG}-${channel}"
+
+            docker buildx build --push --platform linux/amd64,linux/arm64 -f docker/production.Dockerfile \
+              --build-arg BYTETAPER_VERSION="${BYTETAPER_VERSION}" \
+              --build-arg BYTETAPER_GIT_SHA="${BYTETAPER_GIT_SHA}" \
+              --build-arg BYTETAPER_BUILD_DATE="${BYTETAPER_BUILD_DATE}" \
+              --build-arg BYTETAPER_RUNTIME_CHANNEL="${channel}" \
+              --build-arg BYTETAPER_RUNTIME_OS_IMAGE="${os_image}" \
+              --annotation "index:org.opencontainers.image.base.name=${os_image}" \
+              --annotation "index:io.bytetaper.os-image=${os_image}" \
+              --annotation "index:io.bytetaper.runtime-channel=${channel}" \
+              -t "${tag}" .
+          }
+
+          build_push ubuntu "${BYTETAPER_UBUNTU_OS_IMAGE}"
+          build_push ubi-micro "${BYTETAPER_UBI_MICRO_OS_IMAGE}"
 
       - name: Pre-publish validation — Binary version and info
         run: |
-          VER_OUT=$(docker run --rm bytetaper-runtime:release --version)
-          echo "$VER_OUT"
-          echo "$VER_OUT" | grep -q "ByteTaper extproc server" || (echo "ERROR: Missing title" && exit 1)
-          echo "$VER_OUT" | grep -q "version:    ${BYTETAPER_VERSION}" || (echo "ERROR: Version mismatch" && exit 1)
-          echo "$VER_OUT" | grep -q "git_sha:    ${BYTETAPER_GIT_SHA}" || (echo "ERROR: Git SHA mismatch" && exit 1)
-          echo "$VER_OUT" | grep -q "build_date: ${BYTETAPER_BUILD_DATE}" || (echo "ERROR: Build date mismatch" && exit 1)
-          echo "$VER_OUT" | grep -q "build_type: Release" || (echo "ERROR: Build type mismatch" && exit 1)
+          for CHANNEL in ubuntu ubi-micro; do
+            VER_OUT=$(docker run --rm bytetaper-runtime:${CHANNEL} --version)
+            echo "$VER_OUT"
+            echo "$VER_OUT" | grep -q "ByteTaper extproc server" || (echo "ERROR: Missing title for ${CHANNEL}" && exit 1)
+            echo "$VER_OUT" | grep -q "version:    ${BYTETAPER_VERSION}" || (echo "ERROR: Version mismatch for ${CHANNEL}" && exit 1)
+            echo "$VER_OUT" | grep -q "git_sha:    ${BYTETAPER_GIT_SHA}" || (echo "ERROR: Git SHA mismatch for ${CHANNEL}" && exit 1)
+            echo "$VER_OUT" | grep -q "build_date: ${BYTETAPER_BUILD_DATE}" || (echo "ERROR: Build date mismatch for ${CHANNEL}" && exit 1)
+            echo "$VER_OUT" | grep -q "build_type: Release" || (echo "ERROR: Build type mismatch for ${CHANNEL}" && exit 1)
+          done
 
       - name: Pre-publish validation — OCI labels
         run: |
-          LABELS=$(docker image inspect --format '{{json .Config.Labels}}' bytetaper-runtime:release)
-          echo "$LABELS" | jq -e '.["org.opencontainers.image.title"] == "ByteTaper Runtime"' >/dev/null || (echo "ERROR: Title label mismatch" && exit 1)
-          echo "$LABELS" | jq -e '.["org.opencontainers.image.description"] == "ByteTaper API Performance Gateway runtime image"' >/dev/null || (echo "ERROR: Description label mismatch" && exit 1)
-          echo "$LABELS" | jq -e '.["org.opencontainers.image.source"] == "https://github.com/ByteTaper/bytetaper"' >/dev/null || (echo "ERROR: Source label mismatch" && exit 1)
-          echo "$LABELS" | jq -e '.["org.opencontainers.image.revision"] == "'"${BYTETAPER_GIT_SHA}"'"' >/dev/null || (echo "ERROR: Revision label mismatch" && exit 1)
-          echo "$LABELS" | jq -e '.["org.opencontainers.image.version"] == "'"${BYTETAPER_VERSION}"'"' >/dev/null || (echo "ERROR: Version label mismatch" && exit 1)
-          echo "$LABELS" | jq -e '.["org.opencontainers.image.created"] == "'"${BYTETAPER_BUILD_DATE}"'"' >/dev/null || (echo "ERROR: Created label mismatch" && exit 1)
-          echo "$LABELS" | jq -e '.["org.opencontainers.image.licenses"] == "AGPL-3.0-only OR LicenseRef-Commercial"' >/dev/null || (echo "ERROR: Licenses label mismatch" && exit 1)
-          echo "$LABELS" | jq -e '.["org.opencontainers.image.base.name"] == "'"${BYTETAPER_RUNTIME_OS_IMAGE}"'"' >/dev/null || (echo "ERROR: Base image label mismatch" && exit 1)
-          echo "$LABELS" | jq -e '.["io.bytetaper.os-image"] == "'"${BYTETAPER_RUNTIME_OS_IMAGE}"'"' >/dev/null || (echo "ERROR: OS image label mismatch" && exit 1)
+          validate_labels() {
+            local channel="$1"
+            local os_image="$2"
+            local labels
+            labels=$(docker image inspect --format '{{json .Config.Labels}}' "bytetaper-runtime:${channel}")
+            echo "$labels" | jq -e '.["org.opencontainers.image.title"] == "ByteTaper Runtime"' >/dev/null || (echo "ERROR: Title label mismatch for ${channel}" && exit 1)
+            echo "$labels" | jq -e '.["org.opencontainers.image.description"] == "ByteTaper API Performance Gateway runtime image"' >/dev/null || (echo "ERROR: Description label mismatch for ${channel}" && exit 1)
+            echo "$labels" | jq -e '.["org.opencontainers.image.source"] == "https://github.com/ByteTaper/bytetaper"' >/dev/null || (echo "ERROR: Source label mismatch for ${channel}" && exit 1)
+            echo "$labels" | jq -e '.["org.opencontainers.image.revision"] == "'"${BYTETAPER_GIT_SHA}"'"' >/dev/null || (echo "ERROR: Revision label mismatch for ${channel}" && exit 1)
+            echo "$labels" | jq -e '.["org.opencontainers.image.version"] == "'"${BYTETAPER_VERSION}"'"' >/dev/null || (echo "ERROR: Version label mismatch for ${channel}" && exit 1)
+            echo "$labels" | jq -e '.["org.opencontainers.image.created"] == "'"${BYTETAPER_BUILD_DATE}"'"' >/dev/null || (echo "ERROR: Created label mismatch for ${channel}" && exit 1)
+            echo "$labels" | jq -e '.["org.opencontainers.image.licenses"] == "AGPL-3.0-only OR LicenseRef-Commercial"' >/dev/null || (echo "ERROR: Licenses label mismatch for ${channel}" && exit 1)
+            echo "$labels" | jq -e '.["org.opencontainers.image.base.name"] == "'"${os_image}"'"' >/dev/null || (echo "ERROR: Base image label mismatch for ${channel}" && exit 1)
+            echo "$labels" | jq -e '.["io.bytetaper.os-image"] == "'"${os_image}"'"' >/dev/null || (echo "ERROR: OS image label mismatch for ${channel}" && exit 1)
+            echo "$labels" | jq -e '.["io.bytetaper.runtime-channel"] == "'"${channel}"'"' >/dev/null || (echo "ERROR: Runtime channel label mismatch for ${channel}" && exit 1)
+          }
+
+          validate_labels ubuntu "${BYTETAPER_UBUNTU_OS_IMAGE}"
+          validate_labels ubi-micro "${BYTETAPER_UBI_MICRO_OS_IMAGE}"
 
       - name: Pre-publish validation — Non-root user contract
         run: |
-          USER=$(docker image inspect --format='{{.Config.User}}' bytetaper-runtime:release)
-          if [[ "${USER}" != "bytetaper" && "${USER}" != "1001" ]]; then
-            echo "ERROR: Expected non-root container user bytetaper or 1001, got '${USER}'"
-            exit 1
-          fi
+          for CHANNEL in ubuntu ubi-micro; do
+            USER=$(docker image inspect --format='{{.Config.User}}' "bytetaper-runtime:${CHANNEL}")
+            if [[ "${USER}" != "bytetaper" && "${USER}" != "1001" ]]; then
+              echo "ERROR: Expected non-root container user bytetaper or 1001 for ${CHANNEL}, got '${USER}'"
+              exit 1
+            fi
+          done
 
       - name: Pre-publish validation — Filesystem permission probe
         run: |
-          docker run --rm --entrypoint /bin/sh bytetaper-runtime:release -c '
-            set -eu
-            test -w /var/lib/bytetaper/l2-cache || (echo "ERROR: L2 cache dir is not writable" && exit 1)
-            test -w /var/run/bytetaper || (echo "ERROR: Run dir is not writable" && exit 1)
-            ! test -w /usr/local/bin || (echo "ERROR: System bin dir is writable" && exit 1)
-            ! test -w /opt/bytetaper || (echo "ERROR: System opt dir is writable" && exit 1)
-            ! test -w /etc/bytetaper || (echo "ERROR: System etc dir is writable" && exit 1)
-          '
+          for CHANNEL in ubuntu ubi-micro; do
+            docker run --rm --entrypoint /bin/sh "bytetaper-runtime:${CHANNEL}" -c '
+              set -eu
+              test -w /var/lib/bytetaper/l2-cache || (echo "ERROR: L2 cache dir is not writable" && exit 1)
+              test -w /var/run/bytetaper || (echo "ERROR: Run dir is not writable" && exit 1)
+              ! test -w /usr/local/bin || (echo "ERROR: System bin dir is writable" && exit 1)
+              ! test -w /opt/bytetaper || (echo "ERROR: System opt dir is writable" && exit 1)
+              ! test -w /etc/bytetaper || (echo "ERROR: System etc dir is writable" && exit 1)
+            '
+          done
 
       - name: Phase 3a — Runtime smoke matrix
-        run: tests/runtime/smoke_runtime_matrix.sh bytetaper-runtime:release
+        run: |
+          tests/runtime/smoke_runtime_matrix.sh bytetaper-runtime:ubuntu
+          tests/runtime/smoke_runtime_matrix.sh bytetaper-runtime:ubi-micro
 
       - name: Setup Syft and Grype for supply-chain check
         run: |
@@ -186,7 +227,10 @@ jobs:
           grype version
 
       - name: Phase 3b — Supply-chain readiness
-        run: tools/supply_chain/check_runtime_image.sh bytetaper-runtime:release
+        env:
+          BYTETAPER_RUNTIME_OS_IMAGE: ${{ env.BYTETAPER_UBUNTU_OS_IMAGE }}
+          BYTETAPER_RUNTIME_CHANNEL: ubuntu
+        run: tools/supply_chain/check_runtime_image.sh bytetaper-runtime:ubuntu
 
       - name: Phase 3c — Helm chart lint and package
         run: tools/release/package_helm_chart.sh
@@ -200,47 +244,75 @@ jobs:
           cp dist/supply-chain/bytetaper-runtime-vulnerability-report.json dist/release/bytetaper-vulnerability-report.json
           cp dist/supply-chain/bytetaper-runtime-vulnerability-report.sarif dist/release/bytetaper-vulnerability-report.sarif
 
-      - name: Phase 5 — Capture multi-arch digest
+      - name: Phase 5 — Capture multi-arch digests
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
         run: |
-          IMAGE_REF="${BYTETAPER_IMAGE_REPOSITORY}:${BYTETAPER_VERSION}"
-          INSPECT_OUT=$(docker buildx imagetools inspect "${IMAGE_REF}")
-          DIGEST=$(printf "%s\n" "${INSPECT_OUT}" | awk '/^Digest:[[:space:]]*sha256:/ {print $2; exit}')
-          if ! [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "ERROR: Failed to capture or validate remote OCI digest for ${IMAGE_REF}"
-            echo "Inspect output was:"
-            printf "%s\n" "${INSPECT_OUT}"
-            exit 1
-          fi
-          REF="${BYTETAPER_IMAGE_REPOSITORY}@${DIGEST}"
-          cat <<EOF > dist/release/bytetaper-runtime-image-digest.txt
-          image=${BYTETAPER_IMAGE_REPOSITORY}
-          tag=${BYTETAPER_VERSION}
-          digest=${DIGEST}
-          reference=${REF}
-          git_sha=${BYTETAPER_GIT_SHA}
-          EOF
+          set -euo pipefail
+          mkdir -p dist/release
 
-      - name: Phase 5 — Verify multi-arch manifest
+          capture_digest() {
+            local channel="$1"
+            local os_image="$2"
+            local tag="${BYTETAPER_IMAGE_VERSION_TAG}-${channel}"
+            local image_ref="${BYTETAPER_IMAGE_REPOSITORY}:${tag}"
+            local digest_file="dist/release/bytetaper-runtime-image-digest-${channel}.txt"
+            local inspect_out digest ref
+
+            inspect_out=$(docker buildx imagetools inspect "${image_ref}")
+            digest=$(printf "%s\n" "${inspect_out}" | awk '/^Digest:[[:space:]]*sha256:/ {print $2; exit}')
+            if ! [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "ERROR: Failed to capture or validate remote OCI digest for ${image_ref}"
+              printf "%s\n" "${inspect_out}"
+              exit 1
+            fi
+            ref="${BYTETAPER_IMAGE_REPOSITORY}@${digest}"
+            cat <<EOF > "${digest_file}"
+          image=${BYTETAPER_IMAGE_REPOSITORY}
+          tag=${tag}
+          digest=${digest}
+          reference=${ref}
+          git_sha=${BYTETAPER_GIT_SHA}
+          runtime_channel=${channel}
+          os_image=${os_image}
+          EOF
+          }
+
+          capture_digest ubuntu "${BYTETAPER_UBUNTU_OS_IMAGE}"
+          capture_digest ubi-micro "${BYTETAPER_UBI_MICRO_OS_IMAGE}"
+          cp dist/release/bytetaper-runtime-image-digest-ubuntu.txt dist/release/bytetaper-runtime-image-digest.txt
+
+      - name: Phase 5 — Verify multi-arch manifests
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH == 'true' }}
-        run: bash tools/release/verify_multiarch_image.sh
+        run: |
+          BYTETAPER_RUNTIME_OS_IMAGE="${BYTETAPER_UBUNTU_OS_IMAGE}" bash tools/release/verify_multiarch_image.sh "${BYTETAPER_IMAGE_REPOSITORY}@$(grep '^digest=' dist/release/bytetaper-runtime-image-digest-ubuntu.txt | cut -d= -f2)"
+          BYTETAPER_RUNTIME_OS_IMAGE="${BYTETAPER_UBI_MICRO_OS_IMAGE}" bash tools/release/verify_multiarch_image.sh "${BYTETAPER_IMAGE_REPOSITORY}@$(grep '^digest=' dist/release/bytetaper-runtime-image-digest-ubi-micro.txt | cut -d= -f2)"
 
       - name: Phase 5 (Dry Run) — Simulate digest capture
         if: ${{ env.BYTETAPER_RELEASE_PUBLISH != 'true' }}
         run: |
-          cat <<EOF > dist/release/bytetaper-runtime-image-digest.txt
+          mkdir -p dist/release
+          for CHANNEL in ubuntu ubi-micro; do
+            OS_IMAGE="${BYTETAPER_UBUNTU_OS_IMAGE}"
+            if [[ "${CHANNEL}" == "ubi-micro" ]]; then
+              OS_IMAGE="${BYTETAPER_UBI_MICRO_OS_IMAGE}"
+            fi
+            cat <<EOF > "dist/release/bytetaper-runtime-image-digest-${CHANNEL}.txt"
           image=${BYTETAPER_IMAGE_REPOSITORY}
-          tag=${BYTETAPER_VERSION}
+          tag=${BYTETAPER_IMAGE_VERSION_TAG}-${CHANNEL}
           digest=sha256:0000000000000000000000000000000000000000000000000000000000000000
           reference=${BYTETAPER_IMAGE_REPOSITORY}@sha256:0000000000000000000000000000000000000000000000000000000000000000
           git_sha=${BYTETAPER_GIT_SHA}
+          runtime_channel=${CHANNEL}
+          os_image=${OS_IMAGE}
           EOF
+          done
+          cp dist/release/bytetaper-runtime-image-digest-ubuntu.txt dist/release/bytetaper-runtime-image-digest.txt
 
       - name: Phase 6 — Generate build provenance
+        env:
+          BYTETAPER_RUNTIME_OS_IMAGE: ${{ env.BYTETAPER_UBUNTU_OS_IMAGE }}
+          BYTETAPER_RUNTIME_CHANNEL: ubuntu
         run: bash tools/release/generate_release_provenance.sh
-      
-      - name: Phase 6 — Setup Cosign
-        uses: sigstore/cosign-installer@v3.8.1
 
       - name: Phase 6 — Sign image and attach attestations
         run: bash tools/release/sign_release_image.sh
@@ -248,6 +320,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Phase 7 — Build release manifest
+        env:
+          BYTETAPER_RUNTIME_OS_IMAGE: ${{ env.BYTETAPER_UBUNTU_OS_IMAGE }}
+          BYTETAPER_RUNTIME_CHANNEL: ubuntu
         run: tools/release/build_release_manifest.sh
 
       - name: Copy verification documentation
@@ -258,70 +333,64 @@ jobs:
 
       - name: Generate release body
         run: |
-          DIGEST_REF=$(grep "^reference=" dist/release/bytetaper-runtime-image-digest.txt | cut -d= -f2)
+          UBUNTU_REF=$(grep "^reference=" dist/release/bytetaper-runtime-image-digest-ubuntu.txt | cut -d= -f2)
+          UBI_MICRO_REF=$(grep "^reference=" dist/release/bytetaper-runtime-image-digest-ubi-micro.txt | cut -d= -f2)
           CHART_PKG=$(basename $(ls dist/release/bytetaper-*.tgz))
           cat <<EOF > dist/release/bytetaper-release-body.md
           ## ByteTaper Runtime Release ${BYTETAPER_VERSION}
 
-          Hardened production runtime release verified across all security, SBOM, and smoke testing gates.
+          Hardened production runtime release verified across security, SBOM, and smoke testing gates.
+
+          ### Container Image Channels
+
+          This release publishes explicit versioned image channels only. No `latest` tag is published.
+
+          | Channel | Tag | Base image | Digest reference |
+          |---|---|---|---|
+          | Ubuntu | \`${BYTETAPER_IMAGE_REPOSITORY}:${BYTETAPER_IMAGE_VERSION_TAG}-ubuntu\` | \`${BYTETAPER_UBUNTU_OS_IMAGE}\` | \`${UBUNTU_REF}\` |
+          | UBI Micro | \`${BYTETAPER_IMAGE_REPOSITORY}:${BYTETAPER_IMAGE_VERSION_TAG}-ubi-micro\` | \`${BYTETAPER_UBI_MICRO_OS_IMAGE}\` | \`${UBI_MICRO_REF}\` |
+
+          ### Pull Examples
+
+          \`\`\`bash
+          docker pull ${BYTETAPER_IMAGE_REPOSITORY}:${BYTETAPER_IMAGE_VERSION_TAG}-ubuntu
+          docker pull ${BYTETAPER_IMAGE_REPOSITORY}:${BYTETAPER_IMAGE_VERSION_TAG}-ubi-micro
+          \`\`\`
 
           ### Container Contracts & References
-          * **OCI Runtime Reference:** \`${DIGEST_REF}\`
-          * **OS Image:** \`${BYTETAPER_RUNTIME_OS_IMAGE}\`
+          * **Ubuntu OCI Runtime Reference:** \`${UBUNTU_REF}\`
+          * **UBI Micro OCI Runtime Reference:** \`${UBI_MICRO_REF}\`
           * **Supported Platforms:** \`linux/amd64\`, \`linux/arm64\`
           * **Helm Chart Package:** \`${CHART_PKG}\`
           * **Release Manifest:** \`bytetaper-release-manifest.json\`
           * **Supply Chain Manifest:** \`bytetaper-supply-chain-manifest.json\`
 
-          ### Supported Platforms
-          - `linux/amd64`
-          - `linux/arm64`
-
-          The image reference resolves to a multi-architecture OCI manifest list. For reproducible deployments, pin by the manifest-list digest using the reference above.
-
-          **Pinning in Helm:**
-          Use the manifest-list digest in your `values.yaml` to ensure the correct architecture is pulled automatically by your cluster nodes:
-          ```yaml
-          image:
-            repository: docker.io/bytetaper/bytetaper-runtime
-            digest: ${DIGEST_REF#*@}
-          ```
-
           ### Production Helm Installation
 
           **Standard Single-Replica (Persistent Cache):**
-          ```bash
-          helm upgrade --install bytetaper ./${CHART_PKG} \
-            --set image.repository=docker.io/bytetaper/bytetaper-runtime \
-            --set image.digest="${DIGEST_REF#*@}" \
-            --set l2Cache.persistence.enabled=true \
-            --set admin.enabled=false \
+          \`\`\`bash
+          helm upgrade --install bytetaper ./${CHART_PKG} \\
+            --set image.repository=docker.io/bytetaper/bytetaper-runtime \\
+            --set image.tag="${BYTETAPER_IMAGE_VERSION_TAG}-ubuntu" \\
+            --set l2Cache.persistence.enabled=true \\
+            --set admin.enabled=false \\
             --namespace bytetaper --create-namespace
-          ```
+          \`\`\`
 
           **Multi-Replica HA (Safe per-pod emptyDir):**
-          ```bash
-          helm upgrade --install bytetaper ./${CHART_PKG} \
-            --set replicaCount=3 \
-            --set image.repository=docker.io/bytetaper/bytetaper-runtime \
-            --set image.digest="${DIGEST_REF#*@}" \
-            --set l2Cache.persistence.enabled=false \
-            --set l2Cache.emptyDir.enabled=true \
-            --set admin.enabled=false \
+          \`\`\`bash
+          helm upgrade --install bytetaper ./${CHART_PKG} \\
+            --set replicaCount=3 \\
+            --set image.repository=docker.io/bytetaper/bytetaper-runtime \\
+            --set image.tag="${BYTETAPER_IMAGE_VERSION_TAG}-ubuntu" \\
+            --set l2Cache.persistence.enabled=false \\
+            --set l2Cache.emptyDir.enabled=true \\
+            --set admin.enabled=false \\
             --namespace bytetaper
-          ```
+          \`\`\`
 
           > [!IMPORTANT]
           > **HA Storage Caveat**: Because the current chart uses a `Deployment`, `replicaCount > 1` is only safe with `emptyDir` storage. Persistent L2 across multiple replicas is a future roadmap item. See `docs/deployment/helm-ha-production.md` for details.
-
-          **Verify health and metrics:**
-          ```bash
-          kubectl get pods -n bytetaper
-          kubectl port-forward svc/bytetaper 18081:18081 -n bytetaper
-          curl -f http://localhost:18081/healthz
-          curl -f http://localhost:18081/readyz
-          curl -f http://localhost:18081/metrics
-          ```
 
           ### Artifact Checksums
           \`\`\`text
@@ -330,35 +399,13 @@ jobs:
 
           ### Verification
 
-          This release image is signed with keyless Sigstore/Cosign using the ByteTaper GitHub Actions release workflow identity.
+          This release signs the Ubuntu channel digest with keyless Sigstore/Cosign using the ByteTaper GitHub Actions release workflow identity.
 
-          **Verify signature:**
           \`\`\`bash
           cosign verify \\
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
             --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
-            ${DIGEST_REF}
-          \`\`\`
-
-          **Verify attestations:**
-          \`\`\`bash
-          cosign verify-attestation \\
-            --type cyclonedx \\
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
-            --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
-            ${DIGEST_REF}
-
-          cosign verify-attestation \\
-            --type spdx \\
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
-            --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
-            ${DIGEST_REF}
-
-          cosign verify-attestation \\
-            --type slsaprovenance \\
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
-            --certificate-identity-regexp 'https://github.com/ByteTaper/bytetaper/.github/workflows/release.yml@refs/tags/v.*' \\
-            ${DIGEST_REF}
+            ${UBUNTU_REF}
           \`\`\`
 
           See [VERIFY_RELEASE.md] for full verification guide.
