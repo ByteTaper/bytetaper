@@ -2871,7 +2871,6 @@ if(BUILD_TESTING)
   )
   target_link_libraries(runtime_policy_bootstrap_import_test
     PRIVATE gtest_main bytetaper_runtime_policy bytetaper_control_plane bytetaper_runtime
-               bytetaper_extproc_adapter
   )
   add_test(NAME runtime_policy_bootstrap_import_test
     COMMAND runtime_policy_bootstrap_import_test
@@ -2906,7 +2905,7 @@ if(BUILD_TESTING)
   )
   target_link_libraries(control_plane_restart_durability_test
     PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
-            bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter
+            bytetaper_taperquery_apply bytetaper_runtime
   )
   add_test(NAME control_plane_restart_durability_test
     COMMAND control_plane_restart_durability_test
@@ -3126,7 +3125,7 @@ if(BUILD_TESTING)
   )
   target_link_libraries(policy_apply_transaction_test
     PRIVATE gtest_main bytetaper_control_plane_service bytetaper_control_plane
-            bytetaper_taperquery_apply bytetaper_runtime bytetaper_extproc_adapter
+            bytetaper_taperquery_apply bytetaper_runtime
   )
   add_test(NAME policy_apply_transaction_test COMMAND policy_apply_transaction_test)
 
@@ -3212,6 +3211,13 @@ if(BUILD_TESTING)
   foreach(_cp_test IN LISTS _bytetaper_control_plane_integration_tests)
     set_tests_properties(${_cp_test} PROPERTIES LABELS "control_plane;control_plane_integration")
   endforeach()
+
+  add_custom_target(bytetaper_control_plane_unit_tests
+    DEPENDS ${_bytetaper_control_plane_unit_tests}
+  )
+  add_custom_target(bytetaper_control_plane_integration_tests
+    DEPENDS ${_bytetaper_control_plane_integration_tests}
+  )
 
   # Concurrency and Race Harness tests (BT-RACE-001)
   add_executable(inflight_registry_generation_concurrency_test

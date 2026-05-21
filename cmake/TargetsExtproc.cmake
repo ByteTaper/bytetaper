@@ -12,6 +12,16 @@ target_link_libraries(bytetaper-extproc
     RocksDB::RocksDB
 )
 
+# Logger is required by control plane / operational targets even when integration tests are off.
+add_library(bytetaper_logger STATIC
+  src/observability/logger.cpp
+)
+set_source_files_properties(src/observability/logger.cpp
+  PROPERTIES COMPILE_OPTIONS "-fexceptions"
+)
+target_include_directories(bytetaper_logger PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(bytetaper_logger PUBLIC quill::quill)
+
 if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
   set(BYTETAPER_PROTO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/proto")
   set(BYTETAPER_GENERATED_PROTO_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/extproc")
@@ -121,15 +131,6 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
       bytetaper_extproc_proto
   )
 
-  add_library(bytetaper_logger STATIC
-    src/observability/logger.cpp
-  )
-  set_source_files_properties(src/observability/logger.cpp
-    PROPERTIES COMPILE_OPTIONS "-fexceptions"
-  )
-  target_include_directories(bytetaper_logger PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_link_libraries(bytetaper_logger PUBLIC quill::quill)
-
   add_library(bytetaper_trace STATIC
     src/observability/trace.cpp
   )
@@ -139,7 +140,6 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
   add_library(bytetaper_extproc_adapter STATIC
     src/extproc/request_runtime.cpp
     src/extproc/bytetaper_to_envoy.cpp
-    src/extproc/default_pipelines.cpp
     src/extproc/header_view.cpp
   )
   target_include_directories(bytetaper_extproc_adapter
@@ -149,19 +149,8 @@ if(BYTETAPER_ENABLE_INTEGRATION_TESTS)
       ${BYTETAPER_GENERATED_PROTO_DIR}
   )
   target_link_libraries(bytetaper_extproc_adapter PUBLIC
-    bytetaper_stages
-    bytetaper_apg
-    bytetaper_cache
-    bytetaper_runtime
-    bytetaper_coalescing
-    bytetaper_pagination
-    bytetaper_compression
-    bytetaper_policy
-    bytetaper_field_selection
-    bytetaper_json_transform
-    bytetaper_safety
+    bytetaper_extproc_route_compile
     bytetaper_extproc_proto_boundary
-    bytetaper_logger
     bytetaper_trace
   )
 

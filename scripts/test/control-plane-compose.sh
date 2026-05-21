@@ -17,7 +17,16 @@ ENVOY_URL="$(envoy_url)"
 APPLY_YAML="${ROOT}/tests/fixtures/control-plane/apply-policy-source.yaml"
 FIELD_E2E="${ROOT}/tests/integration/e2e/control_plane_field_allowlist_e2e_test.py"
 
-trap 'cp_teardown_volumes' EXIT
+on_exit() {
+  local rc=$?
+  if [[ "${rc}" -ne 0 ]]; then
+    cp_compose_diagnostics || true
+  fi
+  cp_teardown_volumes || true
+  exit "${rc}"
+}
+
+trap on_exit EXIT
 
 echo "==> Success flow: start profile and poll health"
 cp_start_profile

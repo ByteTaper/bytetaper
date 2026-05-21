@@ -23,10 +23,10 @@ echo "==> Control Plane unit tests (ctest -L control_plane_unit)"
   set -eu
   cmake -S . -B build -G Ninja \
     -DBYTETAPER_ENABLE_GTEST_TESTS=ON \
-    -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
+    -DBYTETAPER_ENABLE_INTEGRATION_TESTS=OFF \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-  cmake --build build
+  cmake --build build --target bytetaper_control_plane_unit_tests
   ctest --test-dir build -L control_plane_unit --output-on-failure
 '
 echo "PASS: control-plane unit tests"

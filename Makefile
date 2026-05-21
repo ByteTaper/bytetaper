@@ -29,7 +29,7 @@ test-control-plane-integration:
 	@./scripts/test/control-plane-integration.sh
 
 test-control-plane-compose:
-	@./scripts/test/control-plane-compose.sh
+	@DOCKER_COMPOSE="$(DOCKER_COMPOSE)" ./scripts/test/control-plane-compose.sh
 
 benchmark:
 	@rm -rf build

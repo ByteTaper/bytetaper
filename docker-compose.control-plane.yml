@@ -8,9 +8,8 @@ services:
 
   bytetaper-control-plane:
     image: bytetaper-dev:latest
-    depends_on:
-      bytetaper-build-server:
-        condition: service_completed_successfully
+    # Build is orchestrated by scripts/test/_control_plane_compose_lib.sh (compose run --rm
+    # bytetaper-build-server) before this service starts; avoid re-running the build on up.
     working_dir: /workspace
     volumes:
       - ./:/workspace
@@ -48,8 +47,6 @@ services:
   bytetaper-runtime:
     image: bytetaper-dev:latest
     depends_on:
-      bytetaper-build-server:
-        condition: service_completed_successfully
       bytetaper-control-plane:
         condition: service_healthy
       mock-api:

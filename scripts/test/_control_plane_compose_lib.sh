@@ -9,16 +9,54 @@ ROOT="${BYTETAPER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
 bytetaper_compose_init() {
   cd "$ROOT"
-  if docker compose version >/dev/null 2>&1; then
-    BYTETAPER_COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.control-plane.yml)
-  elif command -v docker-compose >/dev/null 2>&1; then
+  local -a compose_cmd=()
+  local docker_compose_known=0
+  if [[ -n "${DOCKER_COMPOSE:-}" ]]; then
+    case "${DOCKER_COMPOSE}" in
+      "docker compose")
+        docker_compose_known=1
+        compose_cmd=(docker compose) ;;
+      docker-compose)
+        docker_compose_known=1
+        compose_cmd=(docker-compose) ;;
+      *)
+        # shellcheck disable=SC2206
+        compose_cmd=(${DOCKER_COMPOSE}) ;;
+    esac
+    if [[ ${#compose_cmd[@]} -gt 0 ]] && "${compose_cmd[@]}" version >/dev/null 2>&1; then
+      BYTETAPER_COMPOSE=("${compose_cmd[@]}" -f docker-compose.yml -f docker-compose.control-plane.yml)
+    else
+      if [[ "${docker_compose_known}" -eq 0 ]]; then
+        echo "Ignoring invalid DOCKER_COMPOSE='${DOCKER_COMPOSE}'" >&2
+      fi
+      compose_cmd=()
+    fi
+  fi
+  if [[ ${#compose_cmd[@]} -eq 0 ]] && command -v docker-compose >/dev/null 2>&1 &&
+    docker-compose version >/dev/null 2>&1; then
     BYTETAPER_COMPOSE=(docker-compose -f docker-compose.yml -f docker-compose.control-plane.yml)
-  else
+  elif [[ ${#compose_cmd[@]} -eq 0 ]] && command -v docker >/dev/null 2>&1 &&
+    docker compose version >/dev/null 2>&1; then
+    BYTETAPER_COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.control-plane.yml)
+  elif [[ ${#compose_cmd[@]} -eq 0 ]]; then
     echo "docker compose or docker-compose is required" >&2
     return 1
+  else
+    :
   fi
   export LOCAL_UID="${LOCAL_UID:-$(id -u)}"
   export LOCAL_GID="${LOCAL_GID:-$(id -g)}"
+}
+
+cp_compose_diagnostics() {
+  local tail_lines="${BYTETAPER_CP_COMPOSE_LOG_TAIL:-120}"
+  local service
+  echo "==> Compose diagnostics: ps" >&2
+  "${BYTETAPER_COMPOSE[@]}" ps >&2 || true
+  for service in bytetaper-build-server bytetaper-control-plane bytetaper-runtime envoy mock-api; do
+    echo "==> Compose diagnostics: ${service} logs (tail ${tail_lines})" >&2
+    "${BYTETAPER_COMPOSE[@]}" logs --no-color --tail="${tail_lines}" "${service}" >&2 || true
+  done
 }
 
 cp_url() {
@@ -96,6 +134,61 @@ poll_runtime_ready() {
 
 poll_envoy_data_path() {
   poll_http_ok "$(envoy_url)/api/v1/small" "envoy data path"
+}
+
+wait_for_build_server_completed() {
+  local timeout="${BYTETAPER_CP_COMPOSE_BUILD_TIMEOUT:-600}"
+  local i state exit_code status ps_json
+
+  echo "==> Waiting for bytetaper-build-server (timeout ${timeout}s)"
+
+  if command -v timeout >/dev/null 2>&1 &&
+    "${BYTETAPER_COMPOSE[@]}" wait --help >/dev/null 2>&1; then
+    if timeout "${timeout}" "${BYTETAPER_COMPOSE[@]}" wait bytetaper-build-server; then
+      echo "==> bytetaper-build-server completed"
+      return 0
+    fi
+    local wait_rc=$?
+    if [[ "${wait_rc}" -eq 124 ]]; then
+      echo "timeout waiting for bytetaper-build-server after ${timeout}s" >&2
+      cp_compose_diagnostics
+      return 1
+    fi
+    echo "bytetaper-build-server wait failed (exit ${wait_rc})" >&2
+    cp_compose_diagnostics
+    return 1
+  fi
+
+  for ((i = 1; i <= timeout; i++)); do
+    ps_json="$("${BYTETAPER_COMPOSE[@]}" ps bytetaper-build-server --format json 2>/dev/null || true)"
+    state="$(echo "${ps_json}" | jq -r 'if type == "array" then .[0].State else .State end // ""' 2>/dev/null || true)"
+    exit_code="$(echo "${ps_json}" | jq -r 'if type == "array" then .[0].ExitCode else .ExitCode end // ""' 2>/dev/null || true)"
+    status="$(echo "${ps_json}" | jq -r 'if type == "array" then .[0].Status else .Status end // ""' 2>/dev/null || true)"
+
+    if [[ "${state}" == "exited" && "${exit_code}" == "0" ]]; then
+      return 0
+    fi
+    if [[ "${state}" == "exited" && -n "${exit_code}" && "${exit_code}" != "0" ]]; then
+      echo "bytetaper-build-server exited with ${exit_code}" >&2
+      cp_compose_diagnostics
+      return 1
+    fi
+    if [[ -z "${exit_code}" && "${status}" == *"Exited (0)"* ]]; then
+      return 0
+    fi
+    if [[ "${status}" == *"Exited ("* && "${status}" != *"Exited (0)"* ]]; then
+      echo "bytetaper-build-server failed: ${status}" >&2
+      cp_compose_diagnostics
+      return 1
+    fi
+    if ((i % 30 == 0)); then
+      echo "==> still waiting for bytetaper-build-server (${i}s, state=${state:-unknown})" >&2
+    fi
+    sleep 1
+  done
+  echo "timeout waiting for bytetaper-build-server to complete after ${timeout}s" >&2
+  cp_compose_diagnostics
+  return 1
 }
 
 fetch_fleet_status() {
@@ -510,13 +603,18 @@ cp_apply_policy_yaml() {
 
 cp_start_profile() {
   echo "==> Starting Control Plane + Runtime profile"
-  if "${BYTETAPER_COMPOSE[@]}" up --help 2>&1 | grep -q -- '--wait'; then
-    "${BYTETAPER_COMPOSE[@]}" up -d --wait \
-      bytetaper-control-plane bytetaper-runtime mock-api envoy
-  else
-    "${BYTETAPER_COMPOSE[@]}" up -d \
-      bytetaper-control-plane bytetaper-runtime mock-api envoy
+  echo "==> Cleaning stale profile state"
+  "${BYTETAPER_COMPOSE[@]}" down -v --remove-orphans
+  echo "==> Starting mock-api"
+  "${BYTETAPER_COMPOSE[@]}" up -d mock-api
+  echo "==> Building bytetaper-extproc-server (compose run --rm bytetaper-build-server)"
+  if ! "${BYTETAPER_COMPOSE[@]}" run --rm bytetaper-build-server; then
+    echo "bytetaper-build-server failed" >&2
+    cp_compose_diagnostics
+    return 1
   fi
+  echo "==> Starting bytetaper-control-plane, bytetaper-runtime, and envoy"
+  "${BYTETAPER_COMPOSE[@]}" up -d bytetaper-control-plane bytetaper-runtime envoy
   poll_control_plane_health
   poll_runtime_ready 30
   poll_envoy_data_path
@@ -524,5 +622,5 @@ cp_start_profile() {
 
 cp_teardown_volumes() {
   echo "==> Tearing down profile and volumes"
-  "${BYTETAPER_COMPOSE[@]}" down -v
+  "${BYTETAPER_COMPOSE[@]}" down -v --remove-orphans
 }
