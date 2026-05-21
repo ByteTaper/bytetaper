@@ -26,7 +26,7 @@ echo "==> Control Plane integration tests (ctest -L control_plane_integration)"
     -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-  cmake --build build
+  cmake --build build --target bytetaper_control_plane_integration_tests
   ctest --test-dir build -L control_plane_integration --output-on-failure
 '
 echo "PASS: control-plane integration tests"

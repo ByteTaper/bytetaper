@@ -79,3 +79,19 @@ target_link_libraries(bytetaper_stages PUBLIC
   bytetaper_policy
   bytetaper_prometheus_registry
 )
+
+# Route pipeline compilation for policy snapshots (no gRPC/protobuf).
+add_library(bytetaper_extproc_route_compile STATIC
+  src/extproc/default_pipelines.cpp
+)
+target_include_directories(bytetaper_extproc_route_compile
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(bytetaper_extproc_route_compile PUBLIC
+  bytetaper_stages
+  bytetaper_field_selection
+  bytetaper_json_transform
+  bytetaper_safety
+  bytetaper_logger
+)
+target_link_libraries(bytetaper_runtime PUBLIC bytetaper_extproc_route_compile)
