@@ -1,0 +1,45 @@
+# .graphifyignore
+
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.internalx/
+.git/
+graphify-out/
+bin/
+build/
+build-*/
+cmake-build-*/
+out/
+dist/
+tmp/
+.cache/
+reports/
+coverage/
+.vscode/
+.idea/
+
+# Dependencies / generated / vendored
+_deps/
+third_party/
+vendor/
+external/
+node_modules/
+
+*.generated.*
+*.pb.cc
+*.pb.h
+*.grpc.pb.cc
+*.grpc.pb.h
+
+# Large runtime/cache artifacts
+*.db
+*.sst
+*.log
+*.trace
+*.prof
+*.o
+*.a
+*.so
