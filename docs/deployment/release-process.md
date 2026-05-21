@@ -1,6 +1,6 @@
 # ByteTaper Release & Publishing Manual
 
-This manual details the automated release publishing pipeline (`BT-DIST-002`) for deploying the hardened ByteTaper API Performance Gateway runtime.
+This manual details the automated release publishing pipeline for deploying the hardened ByteTaper API Performance Gateway runtime.
 
 ## 1. Prerequisites & Tag Format
 

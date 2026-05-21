@@ -1,6 +1,6 @@
 # Terraform Deployment Runbook
 
-This runbook guides infrastructure operators through deploying and managing the ByteTaper API Performance Gateway using the official Terraform module (`BT-DIST-003`).
+This runbook guides infrastructure operators through deploying and managing the ByteTaper API Performance Gateway using the official Terraform module.
 
 ## 1. Architectural Overview
 

@@ -1,6 +1,6 @@
 # Production Hardening Runbook
 
-This guide defines the mandatory security, isolation, and reliability controls for running the ByteTaper API Performance Gateway in enterprise production environments (`BT-DIST-003`).
+This guide defines the mandatory security, isolation, and reliability controls for running the ByteTaper API Performance Gateway in enterprise production environments.
 
 ## 1. Container Security & Identity
 

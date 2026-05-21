@@ -1,6 +1,6 @@
 # GitHub Actions Deployment Runbook
 
-This runbook guides CI/CD engineers through configuring automated staging and production deployment pipelines for ByteTaper using the reusable GitHub Actions templates (`BT-DIST-003`).
+This runbook guides CI/CD engineers through configuring automated staging and production deployment pipelines for ByteTaper using the reusable GitHub Actions templates.
 
 ## 1. Pipeline Architecture
 

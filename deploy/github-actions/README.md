@@ -1,6 +1,6 @@
 # ByteTaper GitHub Actions Deployment Templates
 
-This directory contains official, reusable GitHub Actions deployment workflows for managing ByteTaper Helm releases across staging and production environments (`BT-DIST-003`).
+This directory contains official, reusable GitHub Actions deployment workflows for managing ByteTaper Helm releases across staging and production environments.
 
 ## Available Workflows
 
