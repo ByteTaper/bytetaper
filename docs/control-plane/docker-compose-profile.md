@@ -1,5 +1,7 @@
 # Docker Compose Control Plane + Runtime Profile
 
+Documentation hub: [index.md](index.md).
+
 This profile runs ByteTaper in a separated Control Plane + Runtime topology for local smoke validation.
 
 ## Topology
@@ -72,14 +74,105 @@ chmod +x scripts/demo/control-plane-demo.sh
 
 ## Manual smoke
 
+Prerequisites: profile running (see [Start](#start)).
+
 ```bash
-curl -fsS http://localhost:19090/admin/control-plane/policy/current | jq .
-curl -fsS -X POST http://localhost:19090/admin/control-plane/policy/apply \
-  -H 'content-type: application/json' \
-  -d @examples/taperquery/apply-policy.json | jq .
-curl -fsS http://localhost:19090/admin/control-plane/fleet/status | jq .
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.control-plane.yml"
+CP=http://localhost:19090
+
+curl -fsS "${CP}/admin/control-plane/policy/current" | jq .
+
+# Apply: CAS from current committed pointer (not a fixed apply-policy.json)
+CURRENT="$(curl -fsS "${CP}/admin/control-plane/policy/current")"
+GEN="$(echo "${CURRENT}" | jq -r '.generation')"
+PID="$(echo "${CURRENT}" | jq -r '.policy_id')"
+jq -n \
+  --rawfile source examples/taperquery/apply-policy-source.yaml \
+  --arg request_id "cp-manual-apply-1" \
+  --arg operator_id "control-plane-manual" \
+  --argjson expected_base_generation "${GEN}" \
+  --arg expected_base_policy_id "${PID}" \
+  '{source: $source, request_id: $request_id, operator_id: $operator_id,
+    expected_base_generation: $expected_base_generation,
+    expected_base_policy_id: $expected_base_policy_id}' \
+  | curl -fsS -X POST "${CP}/admin/control-plane/policy/apply" \
+      -H 'content-type: application/json' -d @- | jq .
+
+curl -fsS "${CP}/admin/control-plane/fleet/status" | jq .
 curl -fsS http://localhost:10000/api/v1/small | jq .
 ```
+
+Or run `./scripts/demo/control-plane-demo.sh`, which uses the same CAS pattern.
+
+After apply, wait until `fleet.converged` is `true` before restart checks below.
+
+## Restart durability
+
+Validates that committed policy and the runtime last-known-good (LKG) mirror survive process restarts. Automated equivalent: `make test-control-plane-compose` (restart block in [`control-plane-compose.sh`](../../scripts/test/control-plane-compose.sh)) and [`control-plane-demo.sh`](../../scripts/demo/control-plane-demo.sh).
+
+### Runtime restart check
+
+Confirms the runtime reloads its LKG mirror on startup and re-converges to the Control Plane committed generation (pull loop + fleet status).
+
+```bash
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.control-plane.yml"
+
+# 1. Record committed generation after apply + fleet converged
+GEN="$(curl -fsS http://localhost:19090/admin/control-plane/policy/current | jq -r '.generation')"
+POLICY_ID="$(curl -fsS http://localhost:19090/admin/control-plane/policy/current | jq -r '.policy_id')"
+echo "committed before restart: generation=${GEN} policy_id=${POLICY_ID}"
+
+# 2. Restart runtime only
+${COMPOSE} restart bytetaper-runtime
+
+# 3. Wait for runtime healthy + ready (prefer in-container probe; host fallback on :18083)
+for i in $(seq 1 60); do
+  if ${COMPOSE} exec -T bytetaper-runtime bash -c \
+    'exec 3<>/dev/tcp/127.0.0.1/18081 && printf "GET /readyz HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n" >&3 && read -r line <&3 && echo "$line" | grep -q 200'; then
+    break
+  fi
+  sleep 2
+done
+curl -fsS http://127.0.0.1:18083/readyz   # host-mapped metrics port
+
+# 4. LKG: data path still serves without CP restart
+curl -fsS http://localhost:10000/api/v1/small | jq .
+
+# 5. Re-converge: committed generation unchanged; fleet converged
+curl -fsS http://localhost:19090/admin/control-plane/fleet/status | jq '.fleet.converged, .committed, .runtimes'
+GEN_AFTER="$(curl -fsS http://localhost:19090/admin/control-plane/policy/current | jq -r '.generation')"
+test "${GEN_AFTER}" = "${GEN}" && echo "PASS: generation ${GEN} unchanged after runtime restart"
+```
+
+Expected:
+
+- Envoy returns `200` on `/api/v1/small` immediately after runtime restart (LKG snapshot).
+- `policy/current` `generation` and `policy_id` match pre-restart values.
+- `fleet.converged` is `true` and per-runtime `convergence_status` is `Converged`.
+
+### Control Plane + runtime restart check
+
+Optional combined restart (matches compose smoke and demo script):
+
+```bash
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.control-plane.yml"
+GEN="$(curl -fsS http://localhost:19090/admin/control-plane/policy/current | jq -r '.generation')"
+
+${COMPOSE} restart bytetaper-control-plane bytetaper-runtime
+
+# CP health
+curl -fsS http://127.0.0.1:19091/healthz
+
+# Runtime ready + data path (same probes as runtime-only restart above)
+curl -fsS http://127.0.0.1:18083/readyz
+curl -fsS http://localhost:10000/api/v1/small | jq .
+
+# Committed state and fleet unchanged
+curl -fsS http://localhost:19090/admin/control-plane/policy/current | jq .
+curl -fsS http://localhost:19090/admin/control-plane/fleet/status | jq '.fleet.converged, .committed.generation'
+```
+
+Expected: RocksDB committed state survives CP restart; runtime LKG + pull restore convergence without generation regression.
 
 ## Testing
 
@@ -87,7 +180,7 @@ curl -fsS http://localhost:10000/api/v1/small | jq .
 |------|---------|
 | Unit | `make test-control-plane-unit` or `./scripts/test/control-plane-unit.sh` |
 | Integration | `make test-control-plane-integration` |
-| Compose smoke | `make test-control-plane-compose` or `./scripts/test/control-plane-compose.sh` |
+| Compose smoke | `make test-control-plane-compose` or `./scripts/test/control-plane-compose.sh` (cleans volumes, waits for `bytetaper-build-server` with bounded timeout, then starts CP/runtime/Envoy; prints diagnostics on failure) |
 | Field-allowlist E2E only | `docker compose -f docker-compose.yml -f docker-compose.control-plane.yml run --rm bytetaper-control-plane-compose-test` |
 
 Regression mapping: [test-matrix.md](test-matrix.md).
@@ -102,7 +195,11 @@ Scripts and compose tests call `down -v` on exit to avoid stale RocksDB / mirror
 
 ## Failure smoke (manual)
 
-1. Stop control plane: `docker compose ... stop bytetaper-control-plane`
-2. Verify runtime continues serving last-known-good policy via Envoy.
-3. Start control plane again; runtime should reconnect and report status.
-4. Tamper the runtime mirror by restoring a self-consistent **stale** generation (`G-1`) from `GET /admin/control-plane/policy/version`, including the matching `versions/…` file referenced by `versionedPolicyFile`. Assert runtime starts, fleet reports stale/divergent before pull reconverges, and CP does not promote the stale mirror to a new committed generation.
+Run after [Restart durability](#restart-durability) succeeds. Record `GEN`, `policy_id`, and `canonical_hash` from `policy/current` before step 1.
+
+1. **Control Plane stop:** `docker compose -f docker-compose.yml -f docker-compose.control-plane.yml stop bytetaper-control-plane`
+2. **LKG while CP down:** Verify runtime continues serving last-known-good policy via Envoy (`curl http://localhost:10000/api/v1/small`).
+3. **Control Plane start:** `docker compose ... start bytetaper-control-plane` — wait for CP health; runtime should reconnect, report status, and fleet should reconverge (`fleet.converged: true`, committed generation still `GEN`).
+4. **Mirror tamper:** Restore a self-consistent **stale** generation (`GEN - 1`) from `GET /admin/control-plane/policy/version?resource_key=policy/default/runtime&generation=<G-1>` into the runtime mirror (`versions/…` + metadata). Restart runtime (`docker compose ... restart bytetaper-runtime`), wait for ready, poll fleet until converged. Assert CP committed pointer is still `GEN` (no auto-promotion of stale mirror). See [versioned-policy-history.md](versioned-policy-history.md).
+
+Automated coverage: `control-plane-compose.sh` failure flow after the restart-durability block.
