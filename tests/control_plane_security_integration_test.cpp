@@ -49,7 +49,15 @@ void destroy_db(const std::string& path) {
 }
 
 std::string extproc_server_binary_path() {
+    if (const char* env = std::getenv("BYTETAPER_EXTPROC_SERVER_BINARY");
+        env != nullptr && env[0] != '\0') {
+        if (fs::exists(env)) {
+            return env;
+        }
+    }
     const fs::path candidates[] = {
+        fs::path("build/control-plane-integration/bytetaper-extproc-server"),
+        fs::path("/workspace/build/control-plane-integration/bytetaper-extproc-server"),
         fs::path("build/bytetaper-extproc-server"),
         fs::path("/workspace/build/bytetaper-extproc-server"),
     };

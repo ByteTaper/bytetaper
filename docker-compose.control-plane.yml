@@ -2,9 +2,31 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.control-plane.yml up -d --build
 
 services:
+  # Dedicated incremental server build (separate from unit/integration CMake trees).
+  bytetaper-build-server:
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -eu
+        cmake -S . -B build/control-plane-compose -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBYTETAPER_ENABLE_GTEST_TESTS=OFF \
+          -DBYTETAPER_ENABLE_INTEGRATION_TESTS=ON \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        cmake --build build/control-plane-compose --target bytetaper-extproc-server
+
   # Avoid host port 18080/18081 clash if monolithic extproc is started alongside the profile.
   bytetaper-extproc:
     ports: !reset []
+    depends_on:
+      mock-api:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -lc
+      - sleep infinity
 
   bytetaper-control-plane:
     image: bytetaper-dev:latest
@@ -30,7 +52,7 @@ services:
       - |
         set -eu
         mkdir -p /var/lib/bytetaper/policy-state-db
-        exec ./build/bytetaper-extproc-server \
+        exec ./build/control-plane-compose/bytetaper-extproc-server \
           --metrics-address 0.0.0.0 \
           --metrics-port 18081 \
           --policy-state-db /var/lib/bytetaper/policy-state-db
@@ -74,7 +96,7 @@ services:
       - |
         set -eu
         mkdir -p /var/lib/bytetaper/policies /tmp/bytetaper-cache-cp-demo
-        exec ./build/bytetaper-extproc-server \
+        exec ./build/control-plane-compose/bytetaper-extproc-server \
           --listen-address 0.0.0.0:18080 \
           --policy-file examples/policies/bootstrap-policy.yaml \
           --l2-cache-path /tmp/bytetaper-cache-cp-demo \

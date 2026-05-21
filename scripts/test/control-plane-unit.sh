@@ -6,27 +6,30 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-if docker compose version >/dev/null 2>&1; then
-  COMPOSE=(docker compose)
-elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE=(docker-compose)
-else
-  echo "docker compose or docker-compose is required" >&2
-  exit 1
-fi
+# shellcheck source=scripts/test/_control_plane_compose_lib.sh
+source "${ROOT}/scripts/test/_control_plane_compose_lib.sh"
+bytetaper_resolve_compose_cmd
 
 export LOCAL_UID="${LOCAL_UID:-$(id -u)}"
 export LOCAL_GID="${LOCAL_GID:-$(id -g)}"
 
-echo "==> Control Plane unit tests (ctest -L control_plane_unit)"
-"${COMPOSE[@]}" run --rm bytetaper-unit-test bash -lc '
+BUILD_DIR="${BYTETAPER_CP_UNIT_BUILD_DIR:-build/control-plane-unit}"
+UNIT_JOBS="${BYTETAPER_CP_UNIT_TEST_JOBS:-}"
+
+echo "==> Control Plane unit tests (ctest -L control_plane_unit, build dir: ${BUILD_DIR})"
+"${BYTETAPER_COMPOSE_CMD[@]}" -f docker-compose.yml run --rm bytetaper-unit-test bash -lc "
   set -eu
-  cmake -S . -B build -G Ninja \
-    -DBYTETAPER_ENABLE_GTEST_TESTS=ON \
-    -DBYTETAPER_ENABLE_INTEGRATION_TESTS=OFF \
-    -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+  BUILD_DIR='${BUILD_DIR}'
+  JOBS='${UNIT_JOBS}'
+  if [[ -z \"\${JOBS}\" ]]; then
+    JOBS=\$(nproc)
+  fi
+  cmake -S . -B \"\${BUILD_DIR}\" -G Ninja \\
+    -DBYTETAPER_ENABLE_GTEST_TESTS=ON \\
+    -DBYTETAPER_ENABLE_INTEGRATION_TESTS=OFF \\
+    -DCMAKE_C_COMPILER_LAUNCHER=ccache \\
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-  cmake --build build --target bytetaper_control_plane_unit_tests
-  ctest --test-dir build -L control_plane_unit --output-on-failure
-'
+  cmake --build \"\${BUILD_DIR}\" --target bytetaper_control_plane_unit_tests
+  ctest --test-dir \"\${BUILD_DIR}\" -L control_plane_unit --output-on-failure --parallel \"\${JOBS}\"
+"
 echo "PASS: control-plane unit tests"

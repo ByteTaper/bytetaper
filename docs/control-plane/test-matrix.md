@@ -9,7 +9,33 @@ This document maps requirements to existing tests and runner tiers.
 | Unit | `make test-control-plane-unit` or `./scripts/test/control-plane-unit.sh` | Fast GTest: store, queue, guardrails, transactions |
 | Integration | `make test-control-plane-integration` | Multi-component GTest with RocksDB, workers, pull loop |
 | Compose | `make test-control-plane-compose` | Docker profile smoke + failure flows (heavy) |
+| Demo | `./scripts/demo/control-plane-demo.sh` | Compose profile apply + fleet + restart (reuses warm profile when possible) |
 | Full suite | `make test` | All project unit tests (includes CP) |
+
+### Dedicated CMake build trees
+
+Each tier uses its own `-B` directory under the shared `bt-build` volume so warm re-runs do not reconfigure CMake with conflicting flags:
+
+| Tier | Default build dir | `INTEGRATION_TESTS` |
+|------|-------------------|---------------------|
+| Unit | `build/control-plane-unit` | OFF |
+| Integration | `build/control-plane-integration` | ON |
+| Compose/demo server | `build/control-plane-compose` | ON (server only; GTest OFF) |
+
+Override with `BYTETAPER_CP_UNIT_BUILD_DIR`, `BYTETAPER_CP_INTEGRATION_BUILD_DIR`, or `BYTETAPER_CP_COMPOSE_BUILD_DIR`.
+
+### Runner tuning (optional env)
+
+| Variable | Default | Used by |
+|----------|---------|---------|
+| `DOCKER_COMPOSE` | `docker compose` (fallback: `docker-compose`) | All CP scripts |
+| `BYTETAPER_CP_UNIT_TEST_JOBS` | host `nproc` | Unit `ctest --parallel` |
+| `BYTETAPER_CP_INTEGRATION_TEST_JOBS` | `2` | Integration `ctest --parallel` |
+| `BYTETAPER_EXTPROC_SERVER_BINARY` | set by integration script | `control_plane_security_integration_test` |
+| `BYTETAPER_CP_COMPOSE_CLEAN` | `1` (compose smoke), `0` (demo) | `cp_start_profile` |
+| `BYTETAPER_CP_COMPOSE_REUSE_READY` | `0` (compose smoke), `1` (demo) | Skip clean/build/startup when profile is healthy |
+
+Warm workflow: run `make test-control-plane-compose` once, then `./scripts/demo/control-plane-demo.sh` reuses the running profile without `down -v` or a rebuild.
 
 Reset persistent Compose state:
 
