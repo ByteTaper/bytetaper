@@ -1,6 +1,6 @@
 # Hash Hardening & Shard Selection Policy
 
-This document defines the architecture, rationale, configuration, and developer guidelines for the centralized hash hardening mechanism implemented in ByteTaper (Phase **BT-037R**).
+This document defines the architecture, rationale, configuration, and developer guidelines for the centralized hash hardening mechanism implemented in ByteTaper.
 
 ---
 

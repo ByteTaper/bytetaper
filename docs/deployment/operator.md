@@ -1,6 +1,6 @@
 # ByteTaper Operator Deployment Runbook
 
-This runbook guides platform engineers through deploying and managing ByteTaper via the official Kubernetes Operator (`BT-DIST-004`).
+This runbook guides platform engineers through deploying and managing ByteTaper via the official Kubernetes Operator.
 
 ## 1. When to Use Operator vs Helm
 

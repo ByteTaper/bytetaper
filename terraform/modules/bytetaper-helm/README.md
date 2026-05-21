@@ -1,6 +1,6 @@
 # ByteTaper Helm Terraform Module
 
-This Terraform module provides an official, declarative wrapper around the ByteTaper API Performance Gateway Helm chart (`BT-DIST-003`).
+This Terraform module provides an official, declarative wrapper around the ByteTaper API Performance Gateway Helm chart.
 
 ## Features
 * **Declarative Helm Values**: Fully typed HCL representation of image pinning, policy modes, persistent cache PVCs, compute resources, and observability endpoints.

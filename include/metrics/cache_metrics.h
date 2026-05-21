@@ -51,18 +51,18 @@ enum class CacheMetricEvent : std::uint8_t {
     RouteEpochBumpSuccess,
     RouteEpochBumpFailed,
 
-    // L1 exact remove (BT-CINV-002)
+    // L1 exact remove
     L1RemoveHit,
     L1RemoveMiss,
     L1RemoveFailed,
 
-    // L2 async worker (BT-CINV-006)
+    // L2 async worker
     L2RemoveEnqueued,
     L2RemoveSuccess,
     L2RemoveMiss,
     L2RemoveFailed,
 
-    // Variant cache (BT-CINV-007)
+    // Variant cache
     VariantInvalidatedByRouteEpoch,
     VariantExactRemoveAttempt,
     VariantExactRemoveSuccess,

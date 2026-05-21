@@ -3219,7 +3219,7 @@ if(BUILD_TESTING)
     DEPENDS ${_bytetaper_control_plane_integration_tests}
   )
 
-  # Concurrency and Race Harness tests (BT-RACE-001)
+  # Concurrency and Race Harness tests
   add_executable(inflight_registry_generation_concurrency_test
     tests/concurrency/inflight_registry_generation_concurrency_test.cpp
   )
